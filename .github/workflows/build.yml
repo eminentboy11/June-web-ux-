@@ -27,7 +27,7 @@ jobs:
       - name: Checkout Repo B
         uses: actions/checkout@v4
         with:
-          repository: eminentboy11/Test
+          repository: supreme-Lord2/xjx
           token: ${{ secrets.REPO_B_TOKEN }}
           path: repo-b
 
