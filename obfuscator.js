@@ -7,7 +7,15 @@ const OUTPUT = path.join(__dirname, "June x on");
 
 // Anything in this set is skipped entirely (not obfuscated, not copied)
 const EXCLUDE = new Set([
+.git",
+  ".github",
+  "node_modules",
+  "June x on",
   "obfuscator.js",
+  "package.json",
+  "package-lock.json",
+  ".gitignore",
+  ".env",
   "README.md"
 ]);
 
