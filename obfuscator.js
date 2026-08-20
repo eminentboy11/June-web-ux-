@@ -13,7 +13,6 @@ const EXCLUDE_NAMES = new Set([
   "node_modules",
   "June x on",
   "obfuscator.js",
-  "package.json",
   "package-lock.json",
   ".gitignore",
   ".env",
