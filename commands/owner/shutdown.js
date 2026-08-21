@@ -1,21 +1,21 @@
 module.exports = {
   name: 'shutdown',
   aliases: ['stop', 'off', 'kill'],
-  description: 'Shuts down both the bot and the supervisor script.',
+  description: 'Forces the bot and server to stay offline.',
   async execute(sock, msg, args, { from, reply }) {
-    console.log('[ BOT ] Shutdown command received. Signaling supervisor...');
+    console.log('[ BOT ] Shutdown command received. Triggering Nuclear Shutdown...');
     
     try {
-      // Send feedback using the provided reply helper
-      await reply('🛑 *Shutdown initiated.* The bot and supervisor are stopping now.');
+      await reply('☢️ *Nuclear Shutdown Engaged.* Forcing server offline...');
       
-      // Give the message 2 seconds to actually leave the server
+      // Wait 2 seconds so the message finishes sending
       await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (e) {
       console.error('Error sending shutdown feedback:', e);
     }
 
-    // Signal supervisor
-    process.kill(process.ppid, 'SIGINT');
+    // 🚀 NEW LOGIC: Exit with code 44
+    // This tells the supervisor in index.js to activate the "Pterodactyl Trap"
+    process.exit(44);
   }
 };
