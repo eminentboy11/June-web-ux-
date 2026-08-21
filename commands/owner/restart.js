@@ -3,11 +3,11 @@ module.exports = {
   aliases: ['update', 'reboot'],
   description: 'Restarts the bot process via the supervisor.',
   async execute(sock, msg, args, { from, reply }) {
-    console.log('[ BOT ] Restart command received. Exiting with code 42...');
+    global.log('[ BOT ] Restart command received...');
 
     try {
       // Send feedback using the provided reply helper
-      await reply('🔄 *Restarting...* Please wait a moment for the bot to reconnect.');
+      await reply('🔄 *Restarting...* Please wait a moment for the bot to reconnect.\n Bot Runtime preserved ');
       
       // Give the message 2 seconds to actually leave the server
       await new Promise(resolve => setTimeout(resolve, 2000));
