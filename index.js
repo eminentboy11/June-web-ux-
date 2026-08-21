@@ -20,6 +20,15 @@ process.on('warning', (warning) => {
 // --- Environment Setup ---
 require('dotenv').config();
 
+// ─── Uptime Synchronization ──────────────────────────────────────────────────
+// If JUNE_START_TIME is set (passed by the supervisor), monkey-patch 
+// process.uptime() to reflect the total system uptime instead of just 
+// the current process uptime.
+if (process.env.JUNE_START_TIME) {
+    const startTime = parseInt(process.env.JUNE_START_TIME);
+    process.uptime = () => (Date.now() - startTime) / 1000;
+}
+
 /*************************************
  * Raw Output Suppression
  *
@@ -398,7 +407,11 @@ global._conflictSummaryTimer = null // Timer for summary message
 global._reconnectTimer = null
 global._shutdownRequested = false
 global.startupReportPrinted = false
-global.startupStartedAt = Date.now()
+
+// Use supervisor start time if available for continuous uptime tracking
+global.startupStartedAt = process.env.JUNE_START_TIME 
+    ? parseInt(process.env.JUNE_START_TIME) 
+    : Date.now()
 
 // Track active intervals so we can clear them on reconnect
 global._activeIntervals = []
