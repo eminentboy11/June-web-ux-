@@ -1,159 +1,85 @@
-'use strict';
-
 /**
- * Owner-only source updater.
+ * .update — pulls the latest bot source and restarts.
  *
- * The downloaded repository is overlaid onto the current project, but runtime
- * state is deliberately excluded. This keeps SQLite settings, auth/session
- * files, secrets, dependencies, and Replit/Heroku process configuration intact.
+ * How it works:
+ *   1. This command replies to confirm, then exits the current process
+ *      with a special code (42) instead of just process.exit(0).
+ *   2. bot.js (the supervisor) sees exit code 42 and knows this was an
+ *      intentional restart — not a crash — so it respawns loader.js
+ *      immediately, skipping the restart delay and crash-loop counter.
+ *   3. loader.js runs its normal flow: back up database/session/data,
+ *      wipe the cache, download the latest source from REPO_URL,
+ *      extract, restore the backed-up folders, then launch index.js.
+ *
+ * Requires bot.js to be the process supervisor (not `node index.js`
+ * directly, and not `node loader.js` directly) — otherwise there is no
+ * parent process listening for exit code 42 to respawn the loader, and
+ * calling this command will just kill the bot with nothing bringing it
+ * back up.
+ *
+ * ⚠️ ASSUMPTION: command signature and reply/sender helpers below are
+ * guessed from commandLoader.js alone (I don't have handler.js or an
+ * existing command file to copy the exact shape from). Adjust the
+ * `execute(context)` parameters and the `reply(...)` / sender-JID lines
+ * to match however your other commands actually receive the socket,
+ * message, and args.
  */
 
-const fs = require('fs');
-const fsp = fs.promises;
-const os = require('os');
-const path = require('path');
-const config = require('../../config');
-const database = require('../../database');
+const OWNER_JIDS = (process.env.OWNER_NUMBERS || '')
+  .split(',')
+  .map(n => n.trim())
+  .filter(Boolean);
 
-const DEFAULT_UPDATE_URL = 'https://github.com/supreme-Lord2/xjx/archive/refs/heads/main.zip';
-const MAX_ARCHIVE_BYTES = 80 * 1024 * 1024;
-
-const PROTECTED_ROOTS = new Set([
-  '.env',
-  '.env.local',
-  '.git',
-  '.replit',
-  'replit.nix',
-  'Procfile',
-  'app.json',
-  'node_modules',
-  'database',
-  'session',
-  'data',
-  'tmp',
-  'temp',
-  'attached_assets',
-]);
-
-function updateUrl() {
-  return String(config.updateZipUrl || DEFAULT_UPDATE_URL).trim() || DEFAULT_UPDATE_URL;
-}
-
-function isProtected(relativePath) {
-  const normalized = relativePath.split(path.sep).filter(Boolean);
-  return normalized.length > 0 && PROTECTED_ROOTS.has(normalized[0]);
-}
-
-function safeArchivePath(root, entryName) {
-  const normalizedName = String(entryName || '').replace(/\\/g, '/');
-  if (!normalizedName || normalizedName.endsWith('/')) return null;
-  if (normalizedName.includes('\0') || normalizedName.startsWith('/')) {
-    throw new Error(`Unsafe archive path: ${normalizedName}`);
+function isOwner(senderJid) {
+  if (!senderJid) return false;
+  if (!OWNER_JIDS.length) {
+    console.warn('[ UPDATE ] OWNER_NUMBERS is not set — .update is unrestricted. Set it in .env.');
+    return true;
   }
-  const destination = path.resolve(root, normalizedName);
-  const relative = path.relative(root, destination);
-  if (!relative || relative.startsWith(`..${path.sep}`) || relative === '..') {
-    throw new Error(`Unsafe archive path: ${normalizedName}`);
-  }
-  return destination;
-}
-
-async function downloadArchive(url, target) {
-  const response = await fetch(url, { redirect: 'follow' });
-  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
-  const contentLength = Number(response.headers.get('content-length') || 0);
-  if (contentLength > MAX_ARCHIVE_BYTES) throw new Error('Update archive is too large');
-
-  const data = Buffer.from(await response.arrayBuffer());
-  if (data.length > MAX_ARCHIVE_BYTES) throw new Error('Update archive is too large');
-  await fsp.writeFile(target, data);
-}
-
-async function extractArchive(archivePath, extractRoot) {
-  const AdmZip = require('adm-zip');
-  const zip = new AdmZip(archivePath);
-  const entries = zip.getEntries();
-  if (!entries.length) throw new Error('Update archive is empty');
-
-  for (const entry of entries) {
-    const destination = safeArchivePath(extractRoot, entry.entryName);
-    if (!destination) continue;
-    const relative = path.relative(extractRoot, destination);
-    if (isProtected(relative)) continue;
-    await fsp.mkdir(path.dirname(destination), { recursive: true });
-    await fsp.writeFile(destination, entry.getData());
-  }
-
-  // GitHub source archives contain one top-level directory (for example
-  // xjx-main). Return that directory rather than copying the wrapper itself.
-  const topLevel = (await fsp.readdir(extractRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory());
-  if (topLevel.length === 1) return path.join(extractRoot, topLevel[0].name);
-  return extractRoot;
-}
-
-async function overlaySource(sourceRoot, projectRoot) {
-  const entries = await fsp.readdir(sourceRoot, { withFileTypes: true });
-  let copied = 0;
-
-  for (const entry of entries) {
-    const relative = entry.name;
-    if (isProtected(relative)) continue;
-    const source = path.join(sourceRoot, entry.name);
-    const destination = path.join(projectRoot, entry.name);
-    await fsp.cp(source, destination, {
-      recursive: true,
-      force: true,
-      errorOnExist: false,
-      filter: (candidate) => {
-        const candidateRelative = path.relative(sourceRoot, candidate);
-        return !isProtected(candidateRelative);
-      },
-    });
-    copied += 1;
-  }
-  return copied;
+  const senderNumber = senderJid.split('@')[0];
+  return OWNER_JIDS.includes(senderNumber);
 }
 
 module.exports = {
   name: 'update',
-  aliases: ['upgrade', 'updatebot'],
+  aliases: ['reload'],
+  description: 'Pulls the latest bot code from GitHub and restarts the bot.',
   category: 'owner',
-  description: 'Download and apply the latest bot code without deleting settings or session',
-  usage: '.update',
-  ownerOnly: true,
 
-  async execute(sock, msg, args, extra) {
-    const workRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'june-update-'));
-    const archivePath = path.join(workRoot, 'update.zip');
-    const extractRoot = path.join(workRoot, 'source');
+  // ⚠️ Adjust this signature to match your other commands' actual shape.
+  execute: async (context) => {
+    const { sock, message, reply } = context || {};
 
-    try {
-      await extra.reply('⏳ Downloading the latest update from GitHub…');
-      await downloadArchive(updateUrl(), archivePath);
-      await fsp.mkdir(extractRoot, { recursive: true });
-      const sourceRoot = await extractArchive(archivePath, extractRoot);
-      const copied = await overlaySource(sourceRoot, path.resolve(__dirname, '../..'));
+    const senderJid =
+      message?.key?.participant ||   // group message
+      message?.key?.remoteJid;       // direct message
 
-      // Ensure settings and the current auth state are durable before the
-      // process manager restarts the bot with the updated source.
-      await database.flushBackup?.();
-      await database.flushRemoteAuthMirror?.('update');
-
-      await extra.reply(
-        `✅ Update installed successfully.\n` +
-        `📦 Updated ${copied} top-level project entries.\n` +
-        `🗄️ Database and settings preserved.\n` +
-        `🔐 WhatsApp session preserved.\n\n` +
-        `🔁 Restarting now…`
-      );
-
-      setTimeout(() => process.exit(1), 800);
-    } catch (error) {
-      console.error('[UPDATE] Failed:', error);
-      await extra.reply(`❌ Update failed: ${error.message}`);
-    } finally {
-      await fsp.rm(workRoot, { recursive: true, force: true }).catch(() => {});
+    if (!isOwner(senderJid)) {
+      if (typeof reply === 'function') {
+        await reply('❌ Only the bot owner can run .update.');
+      }
+      return;
     }
-  },
+
+    const send =
+      typeof reply === 'function'
+        ? reply
+        : async (text) => {
+            if (sock && message?.key?.remoteJid) {
+              await sock.sendMessage(message.key.remoteJid, { text });
+            } else {
+              console.log('[ UPDATE ]', text);
+            }
+          };
+
+    await send('🔄 Update started — pulling the latest code and restarting. This may take a moment.');
+
+    console.log('[ UPDATE ] .update triggered by', senderJid || 'unknown sender');
+
+    // Give the outgoing message a moment to actually flush over the
+    // socket before this process exits.
+    setTimeout(() => {
+      process.exit(42); // matches INTENTIONAL_RESTART_CODE in bot.js
+    }, 1500);
+  }
 };
