@@ -29,7 +29,7 @@ module.exports = {
     // 3. Default: Show Buttons
     try {
       await sendButtons(sock, from, {
-        text: '*RESTART MANAGER*\n\nChoose your restart method below:',
+        text: '*RESTART MANAGER*\n*1️⃣ Quick Restart*:runtime preserved\n*2️⃣ Full Reboot*:runtime not preserved\n\nChoose your restart method below:',
         footer: 'June-X Ultra System',
         buttons: [
           {
