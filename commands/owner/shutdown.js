@@ -2,19 +2,20 @@ module.exports = {
   name: 'shutdown',
   aliases: ['stop', 'off', 'kill'],
   description: 'Shuts down both the bot and the supervisor script.',
-  async execute(client, message, args) {
-    try {
-      if (message && typeof message.reply === 'function') {
-        await message.reply('🛑 **Shutdown initiated.** Killing supervisor and bot...');
-      }
-    } catch (e) {
-      console.error('Failed to send shutdown message:', e);
-    }
-
+  async execute(sock, msg, args, { from, reply }) {
     console.log('[ BOT ] Shutdown command received. Signaling supervisor...');
     
-    // Sending SIGINT to the parent process (the supervisor) 
-    // tells the supervisor to stop everything.
+    try {
+      // Send feedback using the provided reply helper
+      await reply('🛑 *Shutdown initiated.* The bot and supervisor are stopping now.');
+      
+      // Give the message 2 seconds to actually leave the server
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (e) {
+      console.error('Error sending shutdown feedback:', e);
+    }
+
+    // Signal supervisor
     process.kill(process.ppid, 'SIGINT');
   }
 };
