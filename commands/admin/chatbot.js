@@ -24,11 +24,12 @@
  */
 
 'use strict';
-
+const { getOpenRouterApiKey } = require('../../utils/juneDb/orap.js');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const { normalizeMessageContent, jidNormalizedUser, downloadMediaMessage } = require('@whiskeysockets/baileys');
+
 const database = require('../../database');
 const config = require('../../config');
 const APIs = require('../../utils/api');
@@ -267,7 +268,7 @@ const OPENROUTER_VISION_MODELS = [
 ];
 
 async function askOpenRouterVision(prompt, imageBuffer) {
-  const apiKey = APIs.getOpenRouterApiKey;
+  const apiKey = getOpenRouterApiKey();
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
   const imageUrl = 'data:image/jpeg;base64,' + Buffer.from(imageBuffer).toString('base64');
   let lastError;
