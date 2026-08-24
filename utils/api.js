@@ -20,15 +20,6 @@ const DOWNLOAD_HEADERS = {
 };
 
 
-function getOpenRouterApiKey() {
-  const key ='';
-  if (!key) {
-    throw new Error('OPENROUTER_API_KEY is not set.');
-  }
-  return key;
-}
-
-
 
 // ─── NVIDIA NIM (build.nvidia.com) config ───────────────────────
 const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
@@ -475,5 +466,4 @@ const APIs = {
 APIs.NVIDIA_DEFAULT_MODEL = NVIDIA_DEFAULT_MODEL;
 APIs.NVIDIA_BASE_URL = NVIDIA_BASE_URL;
 APIs.getNvidiaApiKey = getNvidiaApiKey;
-APIs.getOpenRouterApiKey = getOpenRouterApiKey;
 module.exports = APIs;
