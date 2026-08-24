@@ -21,7 +21,7 @@ const DOWNLOAD_HEADERS = {
 
 
 function getOpenRouterApiKey() {
-  const key ='REDACTED-OPENROUTER-KEY';
+  const key ='';
   if (!key) {
     throw new Error('OPENROUTER_API_KEY is not set.');
   }
