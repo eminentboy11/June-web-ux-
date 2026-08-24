@@ -134,6 +134,7 @@ const {
     atomicWriteFile,
     createDiskManager,
 } = require('./utils/juneDb/runtimeProtection')
+const { orap} =require('./utils/juneDb/orap')
 const juneDatabase = require('./database')
 const pgAdapter = require('./utils/juneDb/pgAdapter')
 const mongoAdapter = require('./utils/juneDb/mongoAdapter')
