@@ -1,7 +1,6 @@
 /**
  * JuneX Ultra Chatbot — fresh build.
- *
- * Ported from the W.O.L.F chatbot architecture (public-facing AI assistant for
+ * architecture (public-facing AI assistant for
  * groups + DMs) and adapted to the June X Ultra runtime (CommonJS, Baileys,
  * SQLite-backed database, June X api.js / helpers.js).
  *
@@ -41,7 +40,7 @@ const { loadProfile, saveProfile, learnFromMessage, buildProfileContext, getPers
 const getjid = require('../owner/getjid');
 const resolveJid = getjid.resolveJid || getjid;
 
-// ── Bot identity (rebranded to June X Ultra) ──────────────────────────────
+// ── Bot identity (June X Ultra) ──────────────────────────────
 const EMOTE = '🤖';
 function defaultBotName() {
   return config.botName || 'JuneX';
@@ -268,7 +267,7 @@ const OPENROUTER_VISION_MODELS = [
 ];
 
 async function askOpenRouterVision(prompt, imageBuffer) {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+  const apiKey = APIs.getOpenRouterApiKey;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
   const imageUrl = 'data:image/jpeg;base64,' + Buffer.from(imageBuffer).toString('base64');
   let lastError;
@@ -1432,7 +1431,7 @@ async function execute(sock, m, args, extra) {
       : sock.sendMessage(jid, { text: card }, { quoted: m });
   }
 
-  // ── Rename the chatbot ─────────────────────────────────────────────────
+  // ──chatbot ─────────────────────────────────────────────────
   if (subCommand === 'name') {
     const newName = args.slice(1).join(' ').trim();
     if (!newName) {
@@ -1447,7 +1446,7 @@ async function execute(sock, m, args, extra) {
     return sock.sendMessage(jid, { text: `✅ Chatbot name set to: *${newName}*` }, { quoted: m });
   }
 
-  // ── Rename the tech/creator name ───────────────────────────────────────
+  // ── tech/creator name ───────────────────────────────────────
   if (subCommand === 'techname') {
     const newTech = args.slice(1).join(' ').trim();
     if (!newTech) {
@@ -1628,9 +1627,9 @@ async function handleAutoReply(sock, msg, { from, isGroup, commands }) {
 
 module.exports = {
   name: 'chatbot',
-  description: 'JuneX Ultra AI assistant — Wolf-style chatbot | intelligent replies, image/audio/video intents, per-user memory',
+  description: 'JuneX Ultra AI chatbot | intelligent replies, image/audio/video intents, per-user memory',
   category: 'ai',
-  aliases: ['aichat', 'ai-chat', 'junex', 'juneai', 'wolf', 'wolfbot'],
+  aliases: ['aichat', 'ai-chat', 'junex', 'juneai'],
   usage: 'chatbot <on|off|groups|dms|both|model>',
   ownerOnly: true,
   execute,
