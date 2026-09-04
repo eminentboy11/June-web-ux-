@@ -62,7 +62,7 @@ module.exports = {
   aliases: ['menustyle', 'menuset'],
   category: 'owner',
   description: 'Set menu style and display details',
-  usage: '.setmenu <1-6> | .setmenu <memory|uptime|plugins|progress> <on|off>',
+  usage: '.setmenu <1-6> | .setmenu <memory|uptime|plugins|progress> [on|off] | .setmenu all <on|off>',
   ownerOnly: true,
   adminOnly: false,
   groupOnly: false,
@@ -84,7 +84,9 @@ module.exports = {
         lines.push(
           '',
           `💡 Style: *${prefix}setmenu <1-6>*`,
-          `💡 Details: *${prefix}setmenu memory on*`,
+          `💡 Details: *${prefix}setmenu memory on|off*`,
+          `💡 Flip one: *${prefix}setmenu memory*`,
+          `💡 Flip all: *${prefix}setmenu all off*`,
           `   Options: memory, uptime, plugins (commands), progress`
         );
         return extra.reply(box(lines));
@@ -101,20 +103,49 @@ module.exports = {
         ]));
       }
 
+      // `.setmenu all on|off` — flip every display detail at once.
+      if (first === 'all') {
+        if (!['on', 'off'].includes(second)) {
+          return extra.reply(box([
+            '⚠️ Choose *on* or *off*.',
+            '',
+            `Example: *${prefix}setmenu all off*`,
+          ]));
+        }
+        const enabled = second === 'on';
+        const patch = {};
+        for (const o of Object.values(DISPLAY_OPTIONS)) patch[o.key] = enabled;
+        database.updateMenuSettings(patch);
+        return extra.reply(box([
+          `✅ *All menu details* are now ${flag(enabled)}.`,
+          ...settingsLines(database.getMenuSettings()).slice(2),
+          '',
+          `Send *${prefix}menu* to preview the change.`,
+        ]));
+      }
+
       const option = DISPLAY_OPTIONS[first];
       if (option) {
-        if (!['on', 'off'].includes(second)) {
+        let enabled;
+        if (second === 'on' || second === 'off') {
+          enabled = second === 'on';
+        } else if (!second || second === 'toggle') {
+          // Bare `.setmenu memory` flips whatever it is now, so you do not
+          // have to check the current state before changing it.
+          enabled = !database.getMenuSettings()[option.key];
+        } else {
           return extra.reply(box([
             `⚠️ Choose *on* or *off* for ${option.label}.`,
             '',
             `Example: *${prefix}setmenu ${first} on*`,
+            `Or just *${prefix}setmenu ${first}* to flip it.`,
           ]));
         }
 
-        const enabled = second === 'on';
         database.updateMenuSettings({ [option.key]: enabled });
         return extra.reply(box([
           `✅ *${option.label}* is now ${flag(enabled)}.`,
+          ...settingsLines(database.getMenuSettings()).slice(2),
           '',
           `Send *${prefix}menu* to preview the change.`,
         ]));
@@ -124,7 +155,7 @@ module.exports = {
         '❌ *Invalid menu setting!*',
         '',
         `Choose a style from *1* to *6*, or use one of:`,
-        '*memory*, *uptime*, *plugins* (or *commands*), *progress*',
+        '*memory*, *uptime*, *plugins* (or *commands*), *progress*, *all*',
       ]));
     } catch (error) {
       console.error('SetMenu command error:', error);
