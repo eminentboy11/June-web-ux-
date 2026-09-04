@@ -73,7 +73,7 @@ async function downloadStatusMedia(quotedMsg) {
 
 module.exports = {
     name: 'reshare',
-    aliases: ['rs', 'repost', 'status'],
+    aliases: ['rs', 'repost'],
     category: 'general',
     description: 'Re-share a WhatsApp status you replied to as your own status',
     usage: '.reshare [custom text] — reply to a status to re-share it',

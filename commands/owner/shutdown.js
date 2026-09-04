@@ -1,6 +1,7 @@
 module.exports = {
   name: 'shutdown',
   aliases: ['stop', 'off', 'kill'],
+  category: 'owner',
   description: 'Forces the bot and server to stay offline.',
   async execute(sock, msg, args, { from, reply }) {
     console.log('[ BOT ] Shutdown command received. Triggering Nuclear Shutdown...');

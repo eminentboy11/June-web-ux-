@@ -38,7 +38,7 @@ const resolveMedia = (message) => {
 
 module.exports = {
   name: 'sticker',
-  aliases: ['s', 'stiker', 'take'],
+  aliases: ['s', 'stiker'],
   description: 'Convert image/video/gif to a perfect square sticker (animated for videos)',
   usage: '.sticker (reply to image/video/gif) [packname|author]',
   category: 'general',

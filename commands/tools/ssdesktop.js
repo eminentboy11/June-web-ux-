@@ -11,7 +11,7 @@ const VIEWPORTS = ['desktop', 'mobile'];
 
 module.exports = {
     name: 'ssdsktp',
-    aliases: ['screenshot', 'capture', 'ssdesktop'],
+    aliases: ['capture', 'ssdesktop'],
     category: 'tools',
     description: 'Take a screenshot of a website',
     usage: '.ss <url> [desktop | mobile]',

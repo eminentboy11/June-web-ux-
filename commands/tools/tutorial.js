@@ -3,7 +3,7 @@ const config = require('../../config');
 
 module.exports = {
     name: 'tutorial',
-    aliases: ['deploy', 'host', 'tut'],
+    aliases: ['deploy', 'tut'],
     category: 'tools',
     description: 'Get deployment tutorial links for various hosting platforms',
     usage: '.tutorial',

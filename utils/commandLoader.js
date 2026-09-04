@@ -76,9 +76,38 @@ function loadCommands() {
           const cmds = Array.isArray(exported) ? exported : [exported];
           cmds.forEach(command => {
             if (command && command.name) {
+              // The containing folder is the single source of truth for the
+              // category. Trusting a hand-written `category:` field let files
+              // drift into the wrong menu section (e.g. general/antibug.js
+              // declaring `owner`), and a *missing* field produced the
+              // "UNDEFINED-CMD" section in .menu.
+              command.category = category;
+
+              // Registration is last-write-wins, so a duplicate name silently
+              // replaces an earlier command. Surface it instead of hiding it.
+              const prior = commands.get(command.name);
+              if (prior && prior.name === command.name) {
+                console.warn(
+                  `[ COMMANDS ] Duplicate name "${command.name}": ` +
+                  `${category}/${file} overrides ${prior.__source || 'earlier command'}`
+                );
+              }
+              command.__source = `${category}/${file}`;
               commands.set(command.name, command);
+
               if (command.aliases) {
                 command.aliases.forEach(alias => {
+                  const clash = commands.get(alias);
+                  // A command listing its own name in `aliases` is harmless
+                  // (it just re-points the same key at the same object).
+                  if (clash === command) return;
+                  if (clash && clash.name === alias) {
+                    console.warn(
+                      `[ COMMANDS ] Alias "${alias}" of ${category}/${file} ` +
+                      `shadows the real command "${alias}" (${clash.__source}) — alias skipped`
+                    );
+                    return; // never let an alias bury a first-class command
+                  }
                   commands.set(alias, command);
                 });
               }

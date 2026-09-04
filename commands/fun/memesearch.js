@@ -6,14 +6,14 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
+const ffmpegPath = require('../../utils/ffmpegPath');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
 
 const BASE = 'https://api.shizo.top/tools/meme-search';
 
 module.exports = {
   name: 'memesearch',
-  aliases: ['memes', 'sm', 'smeme', 'gifsearch', 'gif'],
+  aliases: ['sm', 'smeme', 'gifsearch', 'gif'],
   category: 'fun',
   desc: 'Search and get memes',
   usage: 'memesearch <query>',

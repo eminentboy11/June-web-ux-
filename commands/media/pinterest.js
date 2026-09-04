@@ -10,7 +10,7 @@ const processedMessages = new Set();
 
 module.exports = {
   name: 'pinterest',
-  aliases: ['pin', 'pindl', 'pinterestdl'],
+  aliases: ['pindl', 'pinterestdl'],
   category: 'media',
   description: 'Download images/videos from Pinterest',
   usage: '.pinterest <Pinterest URL>',

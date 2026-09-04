@@ -127,8 +127,8 @@ function buildMenuText(categories, extra, totalCount, speed) {
   menu += `┃ ꜱᴘᴇᴇᴅ: ${ping} ms\n`;
   menu += `┃ ᴜᴘᴛɪᴍᴇ: ${uptimeFormatted}\n`;
   menu += `┃ Vᴇʀꜱɪᴏɴ: v${config.version}\n`;
-  menu += `┃ ᴜꜱᴀɢᴇ: ${formatMemory(botUsedMemory)} of ${formatMemory(totalMemory)}\n`;
-  menu += `┃ ʀᴀᴍ: ${progressBar(systemUsedMemory, totalMemory)}\n`;
+  menu += `┃ ᴜꜱᴀɢᴇ: ${formatMemory(botUsedMemory)} (bot) of ${formatMemory(totalMemory)}\n`;
+  menu += `┃ ʀᴀᴍ: ${progressBar(systemUsedMemory, totalMemory)} (host)\n`;
   menu += `┃ Cᴏᴍᴍᴀɴᴅꜱ: ${totalCount}\n`;
   menu += `┗❐◈\n${readmore}\n`;
 
@@ -144,7 +144,13 @@ function buildMenuText(categories, extra, totalCount, speed) {
     if (!cmds || cmds.length === 0) continue;
     const label = (CATEGORY_LABELS[key] || `${key.toUpperCase()}-CMD`);
     menu += `┏━━❐◈  \`${label}\` ◈\n`;
-    for (const cmd of cmds) {
+    // Sort alphabetically. Without this the order is whatever fs.readdirSync
+    // returned (roughly upload order), so later-added files landed at the
+    // bottom and single-file categories listed in hand-written array order.
+    const sortedCmds = [...cmds].sort((a, b) =>
+      String(a.name).localeCompare(String(b.name), 'en', { sensitivity: 'base' })
+    );
+    for (const cmd of sortedCmds) {
       menu += `┃◈${cmd.name}\n`;
     }
     menu += `┗❐◈\n`;

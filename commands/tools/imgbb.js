@@ -79,7 +79,7 @@ async function extractMedia(messageContent) {
 // === Command Export ===
 module.exports = {
     name: 'imgbb',
-    aliases: ['url', 'imgbb', 'tolink'],
+    aliases: ['url', 'tolink'],
     category: 'tools',
     description: 'Upload media to get a direct URL (uses ImgBB only)',
     usage: '.tourl (reply to media)',

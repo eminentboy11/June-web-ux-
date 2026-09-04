@@ -34,7 +34,7 @@ const formatUptime = (ms) => {
 
 module.exports = {
     name: 'alive',
-    aliases: ['botcheck', 'status'],
+    aliases: ['botcheck'],
     category: 'general',
     description: 'Check if the bot is alive and running',
     usage: '.alive',

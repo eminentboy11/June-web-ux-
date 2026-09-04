@@ -51,7 +51,7 @@ function getResponseSender(msg) {
 
 module.exports = {
     name: 'botstatus',
-    aliases: ['status', 'stats', 'run'],
+    aliases: ['status', 'run'],
     category: 'general',
     description: 'View bot status, uptime, and system info',
     usage: '.botstatus',

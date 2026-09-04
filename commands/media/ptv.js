@@ -27,7 +27,7 @@ function probeDuration(filePath) {
 
 module.exports = {
   name: 'ptv',
-  aliases: ['videonote', 'vn', 'tovn', 'tovideonote', 'circlevid'],
+  aliases: ['videonote', 'vn', 'tovideonote', 'circlevid'],
   category: 'media',
   description: 'Convert a video to a WhatsApp video note (round/PTV)',
   usage: '.ptv  (reply to a video, gif, or sticker)',

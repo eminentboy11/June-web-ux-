@@ -9,7 +9,7 @@ const tiktokPattern = /https?:\/\/(?:(?:www|vm|vt|m)\.)?tiktok\.com\/\S+/i;
 
 module.exports = {
     name: 'tt',
-    aliases: ['tik', 'ttdl2', 'tiktokdl2'],
+    aliases: ['tik'],
     category: 'media',
     description: 'Download TikTok videos without watermark',
     usage: '.tiktok <TikTok URL>',
