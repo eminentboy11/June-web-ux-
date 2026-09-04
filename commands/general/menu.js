@@ -50,6 +50,15 @@ const detectPlatform = () => {
 };
 
 function getMenuStyle() {
+  // SQLite is the source of truth — .setmenu writes there via database.js.
+  // The runtime store and data/menuSettings.json are legacy fallbacks kept
+  // so existing deployments do not lose their style on upgrade.
+  try {
+    const db = require('../../database');
+    const stored = db.getMenuSettings ? db.getMenuSettings() : null;
+    if (stored && stored.menuStyle) return String(stored.menuStyle);
+  } catch { /* fall through to the legacy sources below */ }
+
   try {
     const runtimeSettings = require('../../utils/settings');
     const fromStore = runtimeSettings.get('menuStyle');
@@ -119,17 +128,32 @@ function buildMenuText(categories, extra, totalCount, speed) {
   const readmore = String.fromCharCode(8206).repeat(4001);
   const ping = Number.isInteger(speed) ? `${speed}` : speed.toFixed(2);
 
+  // Header display toggles, set with:
+  //   .setmenu <memory|uptime|plugins|progress> <on|off>
+  // Stored in SQLite by database.js. If the lookup fails for any reason we
+  // fall back to showing everything, which is the previous behaviour.
+  let show = {
+    showUptime: true,
+    showMemory: true,
+    showProgressBar: true,
+    showPluginCount: true,
+  };
+  try {
+    const db = require('../../database');
+    if (db.getMenuSettings) show = { ...show, ...db.getMenuSettings() };
+  } catch { /* keep defaults */ }
+
   let menu =  `┏━━❐◈  ${bot} ◈\n`;
   menu += `┃ ᴘʀᴇꜰɪx: [ ${prefix} ]\n`;
   menu += `┃ ᴏᴡɴᴇʀ: ${ownerName}\n`;
   menu += `┃ ᴍᴏᴅᴇ: ${currentMode}\n`;
   menu += `┃ ᴘʟᴀᴛꜰᴏʀᴍ: ${hostName}\n`;
   menu += `┃ ꜱᴘᴇᴇᴅ: ${ping} ms\n`;
-  menu += `┃ ᴜᴘᴛɪᴍᴇ: ${uptimeFormatted}\n`;
+  if (show.showUptime) menu += `┃ ᴜᴘᴛɪᴍᴇ: ${uptimeFormatted}\n`;
   menu += `┃ Vᴇʀꜱɪᴏɴ: v${config.version}\n`;
-  menu += `┃ ᴜꜱᴀɢᴇ: ${formatMemory(botUsedMemory)} of ${formatMemory(totalMemory)}\n`;
-  menu += `┃ ʀᴀᴍ: ${progressBar(systemUsedMemory, totalMemory)}\n`;
-  menu += `┃ Cᴏᴍᴍᴀɴᴅꜱ: ${totalCount}\n`;
+  if (show.showMemory) menu += `┃ ᴜꜱᴀɢᴇ: ${formatMemory(botUsedMemory)} of ${formatMemory(totalMemory)}\n`;
+  if (show.showProgressBar) menu += `┃ ʀᴀᴍ: ${progressBar(systemUsedMemory, totalMemory)}\n`;
+  if (show.showPluginCount) menu += `┃ Cᴏᴍᴍᴀɴᴅꜱ: ${totalCount}\n`;
   menu += `┗❐◈\n${readmore}\n`;
 
   const allCategoryKeys = Object.keys(categories).filter(k => categories[k]?.length > 0);

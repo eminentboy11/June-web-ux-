@@ -24,6 +24,18 @@ const DISPLAY_OPTIONS = {
   progress: { key: 'showProgressBar', label: 'RAM progress bar' },
 };
 
+// .getsettings labels these menumemory / menuuptime / menucommands /
+// menuprogress, which did not match the keys accepted here. Accept both
+// spellings so whatever a user reads in settings also works as a command.
+Object.assign(DISPLAY_OPTIONS, {
+  menumemory:   DISPLAY_OPTIONS.memory,
+  menuuptime:   DISPLAY_OPTIONS.uptime,
+  menucommands: DISPLAY_OPTIONS.plugins,
+  commands:     DISPLAY_OPTIONS.plugins,
+  menuprogress: DISPLAY_OPTIONS.progress,
+  ram:          DISPLAY_OPTIONS.progress,
+});
+
 const flag = (enabled) => enabled ? '✅ ON' : '❌ OFF';
 
 function box(lines) {
@@ -73,7 +85,7 @@ module.exports = {
           '',
           `💡 Style: *${prefix}setmenu <1-6>*`,
           `💡 Details: *${prefix}setmenu memory on*`,
-          `   Options: memory, uptime, plugins, progress`
+          `   Options: memory, uptime, plugins (commands), progress`
         );
         return extra.reply(box(lines));
       }
@@ -112,7 +124,7 @@ module.exports = {
         '❌ *Invalid menu setting!*',
         '',
         `Choose a style from *1* to *6*, or use one of:`,
-        '*memory*, *uptime*, *plugins*, *progress*',
+        '*memory*, *uptime*, *plugins* (or *commands*), *progress*',
       ]));
     } catch (error) {
       console.error('SetMenu command error:', error);
