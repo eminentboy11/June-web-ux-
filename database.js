@@ -189,6 +189,13 @@ cleanStaleBackupArtifacts();
 
 let db;
 let stmts = {};
+
+// Write-through cache for bot_settings. Declared here rather than beside the
+// settings helpers because openDatabase() can call restoreFromLocalBackup()
+// synchronously during module load, which clears the cache — a `const`
+// declared further down would still be in its temporal dead zone.
+const botSettingsCache = new Map();
+const clearBotSettingsCache = () => { botSettingsCache.clear(); };
 let backupTimer = null;
 let backupInterval = null;
 let backupPromise = null;
@@ -635,6 +642,7 @@ function restoreFromLocalBackup() {
     }
 
     fs.copyFileSync(DB_BACKUP_FILE, DB_FILE);
+    clearBotSettingsCache(); // the file underneath us has been replaced
     console.warn(`[DB] ✅ Restored from backup`);
     return true;
   } catch (error) {
@@ -1321,6 +1329,12 @@ function serial(value) {
 
 // ── Group Settings ────────────────────────────────────────────────────────
 const BOT_SETTINGS_DEFAULTS = {
+  // Empty by design. A fresh install has no owner: whoever pairs the bot is
+  // recognised through msg.key.fromMe and can claim it with .setownernumber.
+  // Nothing is hardcoded here, so no deployment ships with someone else's
+  // number holding owner rights.
+  owners: [],
+
   botName: 'June-X Ultra',
   prefix: '.',
   autoRead: true,
@@ -1441,8 +1455,38 @@ const isUserMuted = (groupId, userId) => !!stmts.isUserMuted.get(groupId, userId
 const getMutedUsers = (groupId) => stmts.getMutedUsers.all(groupId).map(row => row.user_id);
 
 // ── Bot Settings ──────────────────────────────────────────────────────────
-const getBotSetting = (key) => { const row = stmts.getBotSetting.get(key); return row ? parse(row.value) : BOT_SETTINGS_DEFAULTS[key]; };
-const setBotSetting = (key, value) => { stmts.setBotSetting.run(key, serial(value)); requestBackup('bot-setting'); mirrorRemote('mirrorBotSetting', key, value); return true; };
+//
+// Settings are read far more often than they are written. `isOwner()` alone
+// resolves the owner list on every permission check, so an uncached read puts
+// a SQLite query on the per-message path. The cache below is write-through:
+// setBotSetting updates the Map in the same call that writes the row, so a
+// read immediately after a write cannot observe a stale value.
+//
+// Two rules keep it honest:
+//   1. Never cache before the database is ready. `stmts` is populated
+//      asynchronously by initializeDatabase(), so a very early read would
+//      otherwise store a default permanently. It also stops that early read
+//      from throwing, which it does today.
+//   2. Anything that replaces the database file wholesale must clear the
+//      cache — see clearBotSettingsCache() and its callers in the restore
+//      paths.
+const getBotSetting = (key) => {
+  if (botSettingsCache.has(key)) return botSettingsCache.get(key);
+  // Database not ready yet: serve the default but do NOT memoise it.
+  if (!db || !stmts.getBotSetting) return BOT_SETTINGS_DEFAULTS[key];
+  const row = stmts.getBotSetting.get(key);
+  const value = row ? parse(row.value) : BOT_SETTINGS_DEFAULTS[key];
+  botSettingsCache.set(key, value);
+  return value;
+};
+
+const setBotSetting = (key, value) => {
+  stmts.setBotSetting.run(key, serial(value));
+  botSettingsCache.set(key, value); // write-through
+  requestBackup('bot-setting');
+  mirrorRemote('mirrorBotSetting', key, value);
+  return true;
+};
 const getStoredBotSettings = () => {
   const result = {};
   for (const row of stmts.getAllBotSettings.all()) result[row.key] = parse(row.value);
@@ -1450,6 +1494,32 @@ const getStoredBotSettings = () => {
 };
 const getAllBotSettings = () => ({ ...BOT_SETTINGS_DEFAULTS, ...getStoredBotSettings() });
 const updateBotSettings = (updates) => { for (const [key, value] of Object.entries(updates)) setBotSetting(key, value); return true; };
+
+// ── Owners ────────────────────────────────────────────────────────────────
+//
+// The owner list lives in SQLite rather than config.js. config.js is
+// re-extracted from the published build on every boot by the public loader,
+// so anything written there is lost; the database directory is preserved.
+//
+// Numbers are stored digits-only so that a JID, a "+" prefix or spaces all
+// compare equal.
+const normaliseOwner = (value) => String(value || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+
+const getOwners = () => {
+  const stored = getBotSetting('owners');
+  if (!Array.isArray(stored)) return [];
+  return stored.map(normaliseOwner).filter(Boolean);
+};
+
+// Replaces the whole list. .setownernumber previously rewrote only slot [0]
+// of a three-entry array, which silently left the other two in place.
+const setOwners = (owners) => {
+  const list = (Array.isArray(owners) ? owners : [owners])
+    .map(normaliseOwner)
+    .filter(Boolean);
+  setBotSetting('owners', [...new Set(list)]);
+  return true;
+};
 // User-facing bot modes. Older SQLite rows may still store silent/groups/dms.
 const VALID_BOT_MODES = ['public', 'private', 'group', 'pm'];
 const BOT_MODE_ALIASES = Object.freeze({
@@ -2157,12 +2227,16 @@ function markDatabaseDirty(reason = 'manual-mark') {
 
 async function restoreFromPostgres() {
   const result = await pgAdapter.restoreIntoSQLite(db);
+  // Rows are written directly into SQLite here, bypassing setBotSetting, so
+  // any cached value may now be stale.
+  clearBotSettingsCache();
   if (result?.restored > 0) requestBackup('postgres-restore');
   return result;
 }
 
 async function restoreFromMongo() {
   const result = await mongoAdapter.restoreIntoSQLite(db);
+  clearBotSettingsCache();
   if (result?.restored > 0) requestBackup('mongo-restore');
   return result;
 }
@@ -2233,6 +2307,8 @@ module.exports = {
   getModerators, addModerator, removeModerator, isModerator,
   muteUser, unmuteUser, isUserMuted, getMutedUsers,
   getBotSetting, setBotSetting, getStoredBotSettings, getAllBotSettings, updateBotSettings, BOT_SETTINGS_DEFAULTS,
+  clearBotSettingsCache,
+  getOwners, setOwners,
   getBotMode, setBotMode, VALID_BOT_MODES,
   getStoredLoginMethod, setStoredLoginMethod, clearStoredLoginMethod, LOGIN_METHOD_VALUES,
   getMenuSettings, updateMenuSettings, MENU_STYLE_VALUES, MENU_SETTINGS_DEFAULTS,

@@ -250,18 +250,31 @@ const getGroupMetadata = getCachedGroupMetadata;
 const isOwner = (sender) => {
   if (!sender) return false;
 
+  // Resolve the owner list once. It was previously read twice — once per
+  // matching strategy below — and with the list now coming from SQLite that
+  // doubled the query count on a path that runs many times per message.
+  //
+  // SQLite is the source of truth. config.ownerNumber is consulted only while
+  // the config migration is in progress and a deployment has not yet stored
+  // an owner; it will be dropped once config.js is gone.
+  let owners = database.getOwners();
+  if (!owners.length && Array.isArray(config.ownerNumber)) {
+    owners = config.ownerNumber;
+  }
+  if (!owners.length) return false;
+
   // Extract the raw phone/user number from sender (strips :device and @server)
   const rawNum = sender.split('@')[0].split(':')[0];
 
   // Fast path: direct number match (catches normal and device-scoped JIDs)
-  if (config.ownerNumber.some(o => o.replace(/\D/g, '') === rawNum)) return true;
+  if (owners.some(o => String(o).replace(/\D/g, '') === rawNum)) return true;
 
   // LID-aware path: resolve LID JIDs to phone numbers via session mapping files
   try {
     const normalizedSender = normalizeJidWithLid(sender);
     const senderNumber = normalizeJid(normalizedSender);
-    if (senderNumber && config.ownerNumber.some(owner => {
-      const normalizedOwner = normalizeJidWithLid(owner.includes('@') ? owner : `${owner}@s.whatsapp.net`);
+    if (senderNumber && owners.some(owner => {
+      const normalizedOwner = normalizeJidWithLid(String(owner).includes('@') ? String(owner) : `${owner}@s.whatsapp.net`);
       const ownerNumber = normalizeJid(normalizedOwner);
       return ownerNumber === senderNumber;
     })) return true;
