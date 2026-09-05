@@ -1366,6 +1366,12 @@ const DEFAULT_GROUP_SETTINGS = {
   "antigroupstatus": false,
   "antigroupstatusAction": "delete",
   "welcome": false,
+  "stickerActions": {},
+  "antitagadmins": false,
+  "antitagadminsAction": "warn",
+  "antiall": false,
+  "antiforward": false,
+  "antiforwardLimit": 3,
   "welcomeMessage": " 𝚆𝙴𝙻𝙲𝙾𝙼𝙴: @user 👋\n Member count: #memberCount\n 𝚃𝙸𝙼𝙴: time⏰\n\n\n*@user* Welcome to *@group*! 🎉\n*Group 𝙳𝙴𝚂𝙲𝚁𝙸𝙿𝚃𝙸𝙾𝙽*\ngroupDesc\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ botName*",
   "welcomeNoPP": false,
   "goodbye": false,
@@ -1476,6 +1482,33 @@ const BOT_SETTINGS_DEFAULTS = {
   // assets remain ordinary read-only application defaults.
   menuImageCustom: false,
   menuImageData: null,
+
+  // ── previously undeclared ──────────────────────────────────────────
+  // These were read via getBotSetting() but had no entry here, so they
+  // returned undefined and every call site carried its own inline fallback.
+  // The values below are exactly those fallbacks, so behaviour is unchanged —
+  // they are now declared in one place instead of duplicated across files.
+  alwaysOnline: false,
+  fontStyle: 'normal',
+  readReceipts: 'off',
+  autoReadMode: 'off',
+
+  antibug: false,
+  antibugAction: 'delete',
+
+  autoStatusView: false,
+  autoStatusReact: false,
+  autoStatusEmoji: '💙',
+  autoStatusEmojiPool: [],
+  autoStatusRandomEmoji: false,
+
+  // normaliseAutoDownloadStatusSettings() turns {} into the full shape
+  autoDownloadStatus: {},
+
+  autoReactSource: 'bot',          // MODES: bot | all
+  autoReactTarget: 'both',         // TARGETS: dms | groups | both
+  autoReactFixedEmoji: '💙',
+  autoReactRandomMode: false,
 
   // ── anticall ───────────────────────────────────────────────────────
   // These live in DEFAULT_GROUP_SETTINGS in config.js but are not group
@@ -1629,14 +1662,20 @@ const getMutedUsers = (groupId) => stmts.getMutedUsers.all(groupId).map(row => r
 //   2. Anything that replaces the database file wholesale must clear the
 //      cache — see clearBotSettingsCache() and its callers in the restore
 //      paths.
+// Some defaults are objects or arrays. Handing out the shared instance would
+// let a caller mutate the template for every future read, so those are copied
+// on the way out. Primitives are returned as-is.
+const cloneIfMutable = (v) =>
+  (v !== null && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+
 const getBotSetting = (key) => {
-  if (botSettingsCache.has(key)) return botSettingsCache.get(key);
+  if (botSettingsCache.has(key)) return cloneIfMutable(botSettingsCache.get(key));
   // Database not ready yet: serve the default but do NOT memoise it.
-  if (!db || !stmts.getBotSetting) return BOT_SETTINGS_DEFAULTS[key];
+  if (!db || !stmts.getBotSetting) return cloneIfMutable(BOT_SETTINGS_DEFAULTS[key]);
   const row = stmts.getBotSetting.get(key);
   const value = row ? parse(row.value) : BOT_SETTINGS_DEFAULTS[key];
   botSettingsCache.set(key, value);
-  return value;
+  return cloneIfMutable(value);
 };
 
 const setBotSetting = (key, value) => {
@@ -1677,7 +1716,10 @@ const setOwnerNames = (value) => {
 // the owner commands while the value itself is stored in bot_settings.
 const ANTICALL_KEYS = ['anticall', 'anticallAction', 'anticallMessage', 'anticallNotify'];
 const getDefaultGroupSettings = () => {
-  const merged = { ...DEFAULT_GROUP_SETTINGS };
+  // Deep copy: callers such as commands/admin/setsticker.js mutate nested
+  // values (delete stickerActions[x], stickerActions[y] = ...). A shallow
+  // spread would share those objects with the template.
+  const merged = JSON.parse(JSON.stringify(DEFAULT_GROUP_SETTINGS));
   for (const key of ANTICALL_KEYS) merged[key] = getBotSetting(key);
   return merged;
 };
