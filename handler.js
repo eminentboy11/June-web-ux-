@@ -2276,9 +2276,9 @@ const initializeAntiCall = (sock) => {
   // Anti-call feature — decline/block incoming calls
   sock.ev.on('call', async (calls) => {
     try {
-      // Reload config to get fresh settings
-      delete require.cache[require.resolve('./config')];
-
+      // Settings are read straight from SQLite below, so there is no module
+      // cache to bust. This previously did require.resolve('./config'), which
+      // throws MODULE_NOT_FOUND now that config.js is gone.
       if (!database.getDefaultGroupSettings().anticall) return;
 
       const action = database.getDefaultGroupSettings().anticallAction || 'block';

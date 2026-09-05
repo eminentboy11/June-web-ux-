@@ -1,8 +1,5 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const configPath = path.join(__dirname, '../../config.js');
 
 module.exports = {
   name: 'anticallmsg',
@@ -33,19 +30,19 @@ module.exports = {
 
     switch (subcommand) {
       case 'set':
-        return handleSet(sock, msg, args, extra, config);
+        return handleSet(sock, msg, args, extra);
       case 'view':
-        return handleView(sock, msg, extra, config);
+        return handleView(sock, msg, extra);
       case 'reset':
         return handleReset(sock, msg, extra);
       case 'off':
         return handleOff(sock, msg, extra);
       case 'presets':
-        return handlePresets(sock, msg, extra, config);
+        return handlePresets(sock, msg, extra);
       case 'preset':
         return handlePreset(sock, msg, args, extra);
       case 'test':
-        return handleTest(sock, msg, extra, config);
+        return handleTest(sock, msg, extra);
       default:
         return extra.reply('❌ Unknown subcommand. Use `.anticallmsg` for help.');
     }
@@ -53,7 +50,7 @@ module.exports = {
 };
 
 // Handle: .anticallmsg set <text>
-async function handleSet(sock, msg, args, extra, config) {
+async function handleSet(sock, msg, args, extra) {
   const customMessage = args.slice(1).join(' ').trim();
 
   if (!customMessage) {
@@ -77,7 +74,7 @@ async function handleSet(sock, msg, args, extra, config) {
 }
 
 // Handle: .anticallmsg view
-async function handleView(sock, msg, extra, config) {
+async function handleView(sock, msg, extra) {
   const currentMessage = database.getDefaultGroupSettings().anticallMessage;
   const isNotifyEnabled = database.getDefaultGroupSettings().anticallNotify;
 
@@ -130,7 +127,7 @@ async function handleOff(sock, msg, extra) {
 }
 
 // Handle: .anticallmsg presets
-async function handlePresets(sock, msg, extra, config) {
+async function handlePresets(sock, msg, extra) {
   const presets = database.ANTICALL_PRESETS;
 
   let presetList = '📋 *Available Presets:*\n\n';
@@ -170,7 +167,7 @@ async function handlePreset(sock, msg, args, extra) {
 }
 
 // Handle: .anticallmsg test
-async function handleTest(sock, msg, extra, config) {
+async function handleTest(sock, msg, extra) {
   const currentMessage = database.getDefaultGroupSettings().anticallMessage;
   const isNotifyEnabled = database.getDefaultGroupSettings().anticallNotify;
 

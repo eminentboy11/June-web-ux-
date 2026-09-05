@@ -3,8 +3,6 @@
  * Set or change the newsletter JID for menu forwarding
  */
 
-const fs = require('fs');
-const path = require('path');
 const database = require('../../database');
 
 module.exports = {
@@ -77,8 +75,6 @@ module.exports = {
         return extra.reply('❌ Invalid newsletter JID format!\n\nNewsletter JID must end with `@newsletter`\nExample: `120363161513685998@newsletter`');
       }
       
-      // Update config.js
-      const configPath = path.join(__dirname, '../../config.js');
       // Persisted below through the config setter, which writes to SQLite.
 
       // Update in-memory config

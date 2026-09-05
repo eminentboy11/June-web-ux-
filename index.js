@@ -434,13 +434,10 @@ async function applyPersistedRuntimeSettings() {
     try {
         await juneDatabase.ready;
         const db = juneDatabase;
-        const all = db.getAllBotSettings();
-        // Apply ALL stored settings that directly match a config key.
-        for (const [key, value] of Object.entries(all)) {
-            if (key in config && value !== null && value !== undefined) {
-                config[key] = value;
-            }
-        }
+        // Nothing to hydrate any more: config.js is gone and every caller reads
+        // database.getBotSetting() directly, so stored values are already live.
+        // Only the presence flags below still need mirroring, because they are
+        // owned by utils/presenceSettings rather than bot_settings.
         // Restore presence flags so .botstatus/.getsettings reflect the correct state
         try {
           const _m = require('./utils/presenceSettings').getModes();

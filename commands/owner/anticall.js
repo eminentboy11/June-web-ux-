@@ -1,8 +1,5 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const configPath = path.join(__dirname, '../../config.js');
 
 module.exports = {
   name: 'anticall',
