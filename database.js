@@ -1455,6 +1455,11 @@ const BOT_SETTINGS_DEFAULTS = {
   // Nothing is hardcoded here, so no deployment ships with someone else's
   // number holding owner rights.
   owners: [],
+  // How the owner list came to be: 'auto' when claimed from the paired
+  // account at connection.open, 'command' when set with .setownernumber.
+  // An auto-claimed owner may be refreshed on re-pair; a command-set one
+  // must never be replaced silently.
+  ownerSource: null,
 
   botName: 'June-X Ultra',
   prefix: '.',
@@ -1697,14 +1702,31 @@ const updateBotSettings = (updates) => { for (const [key, value] of Object.entri
 // codebase use `Array.isArray(x) ? x[0] : (x || 'N/A')`, which puts the
 // fallback on the wrong branch — an empty array takes the array path and
 // renders `undefined`. Resolving here covers every one of them.
+// Display name of the paired WhatsApp account, supplied by index.js at
+// connection.open. Deliberately NOT persisted: storing it would make it
+// indistinguishable from a name set with .setownername, and it would freeze
+// at whatever the account was called on the day it was written.
+let runtimeOwnerName = null;
+const setRuntimeOwnerName = (name) => {
+  const v = typeof name === 'string' ? name.trim() : '';
+  runtimeOwnerName = v || null;
+  return runtimeOwnerName;
+};
+
+// Resolution order:
+//   .setownername  ->  paired account's name  ->  owner number  ->  'Bot Owner'
+// Never returns an empty list, so display sites cannot render undefined.
 const getOwnerNames = () => {
   const stored = getBotSetting('ownerName');
   const list = (Array.isArray(stored) ? stored : [stored])
     .filter(v => v !== null && v !== undefined && String(v).trim() !== '');
   if (list.length) return list;
+  if (runtimeOwnerName) return [runtimeOwnerName];
   const owners = getOwners();
   return owners.length ? owners : ['Bot Owner'];
 };
+
+const getOwnerSource = () => getBotSetting('ownerSource');
 
 const setOwnerNames = (value) => {
   setBotSetting('ownerName', Array.isArray(value) ? value : [value]);
@@ -1742,11 +1764,14 @@ const getOwners = () => {
 
 // Replaces the whole list. .setownernumber previously rewrote only slot [0]
 // of a three-entry array, which silently left the other two in place.
-const setOwners = (owners) => {
+// `source` records how the list was established. Defaults to 'command'
+// because every caller other than the startup claim is a deliberate change.
+const setOwners = (owners, source = 'command') => {
   const list = (Array.isArray(owners) ? owners : [owners])
     .map(normaliseOwner)
     .filter(Boolean);
   setBotSetting('owners', [...new Set(list)]);
+  setBotSetting('ownerSource', source === 'auto' ? 'auto' : 'command');
   return true;
 };
 // User-facing bot modes. Older SQLite rows may still store silent/groups/dms.
@@ -2546,7 +2571,7 @@ module.exports = {
   muteUser, unmuteUser, isUserMuted, getMutedUsers,
   getBotSetting, setBotSetting, getStoredBotSettings, getAllBotSettings, updateBotSettings, BOT_SETTINGS_DEFAULTS,
   clearBotSettingsCache,
-  getOwners, setOwners, getOwnerNames, setOwnerNames, SESSION_NAME,
+  getOwners, setOwners, getOwnerNames, setOwnerNames, getOwnerSource, setRuntimeOwnerName, SESSION_NAME,
   getStoredGroupSettings,
   // static application constants — never stored in bot_settings
   MESSAGES, DEFAULT_GROUP_SETTINGS, getDefaultGroupSettings, ANTICALL_PRESETS, SOCIAL, API_KEYS,

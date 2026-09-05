@@ -1503,6 +1503,38 @@ async function startJunexBot() {
             replayDrain.markConnectionOpen()
             global.phoneNumber = null  // Clear so reconnects don't re-request pairing code
             const botNum = sock.user?.id?.split(':')[0] || 'unknown'
+
+            // ── Owner identity ────────────────────────────────────────────
+            // The paired account is the owner by definition, so derive it here
+            // rather than making the user run a setup command.
+            //
+            //  - Claim only when no owner exists. A deliberate owner, or one
+            //    kept from a previous pairing, is never overwritten silently.
+            //  - The account's display name is handed to database.js as a
+            //    runtime value, not stored, so .setownername still wins and a
+            //    renamed WhatsApp account is picked up on the next boot.
+            try {
+                const pairedPn = String(sock.user?.id || '').split(':')[0].split('@')[0].replace(/\D/g, '')
+                juneDatabase.setRuntimeOwnerName(sock.user?.name || sock.user?.verifiedName || '')
+
+                if (pairedPn) {
+                    const owners = juneDatabase.getOwners()
+                    if (!owners.length) {
+                        juneDatabase.setOwners([pairedPn], 'auto')
+                        log(`[ OWNER ] Claimed ${pairedPn} from the paired account.`, 'green')
+                    } else if (!owners.includes(pairedPn)) {
+                        // Re-paired to a different account. Left alone on
+                        // purpose, but silence here would hide the fact that
+                        // the previous number still holds owner rights.
+                        log(`[ OWNER ] Paired as ${pairedPn} but owner is ${owners.join(', ')} `
+                          + `(set: ${juneDatabase.getOwnerSource() || 'unknown'}). Not changing — `
+                          + `run .setownernumber ${pairedPn} to update.`, 'yellow')
+                    }
+                }
+            } catch (ownerErr) {
+                log(`[ OWNER ] Could not resolve owner from the session: ${ownerErr.message}`, 'yellow')
+            }
+
             await tryMigrateFileAuth('connection-open')
             // Auto-export the session to .env so restarts never need re-login
             autoExportSessionToEnv(true).catch(() => {})
