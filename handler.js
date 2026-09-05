@@ -250,17 +250,19 @@ const getGroupMetadata = getCachedGroupMetadata;
 const isOwner = (sender) => {
   if (!sender) return false;
 
-  // Resolve the owner list once. It was previously read twice — once per
-  // matching strategy below — and with the list now coming from SQLite that
-  // doubled the query count on a path that runs many times per message.
+  // SQLite is the only source of truth for ownership.
   //
-  // SQLite is the source of truth. config.ownerNumber is consulted only while
-  // the config migration is in progress and a deployment has not yet stored
-  // an owner; it will be dropped once config.js is gone.
-  let owners = database.getOwners();
-  if (!owners.length && Array.isArray(config.ownerNumber)) {
-    owners = config.ownerNumber;
-  }
+  // There is deliberately no fallback to config.ownerNumber. Users cannot
+  // edit config.js — the public loader re-extracts it from the published
+  // build on every boot — so that field always holds the numbers shipped by
+  // the June team. Falling back to it would hand those numbers owner rights
+  // on every deployment, which is precisely what moving owners into the
+  // database is meant to stop.
+  //
+  // A fresh install therefore has no owner at all. That is safe: the account
+  // the bot is paired to is recognised through msg.key.fromMe at the command
+  // gate, so it can always claim ownership with .setownernumber.
+  const owners = database.getOwners();
   if (!owners.length) return false;
 
   // Extract the raw phone/user number from sender (strips :device and @server)
