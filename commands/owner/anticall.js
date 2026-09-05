@@ -1,4 +1,5 @@
 'use strict';
+const database = require('../../database');
 
 
 module.exports = {
@@ -37,7 +38,6 @@ module.exports = {
     try {
       // Stored in SQLite. This used to rewrite config.js on disk, which the
       // public loader overwrites from the published build on every boot.
-      const database = require('../../database');
       database.setBotSetting('anticall', enabled);
       database.setBotSetting('anticallAction', action);
 

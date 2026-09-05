@@ -5,6 +5,7 @@ const { applyFont } = require('../../utils/fontConverter');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const db = require('../../database');
 
 const MENU_SETTINGS_FILE = path.join(__dirname, '../../data/menuSettings.json');
 
