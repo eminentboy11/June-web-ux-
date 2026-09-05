@@ -30,27 +30,10 @@ module.exports = {
         return extra.reply('❌ Owner name must be 50 characters or less!');
       }
 
-      if (Array.isArray(config.ownerName)) {
-        config.ownerName[0] = newName;
-      } else {
-        config.ownerName = newName;
-      }
-
-      const configPath = path.join(__dirname, '../../config.js');
-      let configContent = fs.readFileSync(configPath, 'utf-8');
-      configContent = configContent.replace(
-        /ownerName:\s*\[([^\]]*)\]/,
-        (match, inner) => {
-          const parts = inner.split(',').map(s => s.trim());
-          if (parts.length > 0) {
-            parts[0] = `'${newName.replace(/'/g, "\\'")}'`;
-          }
-          return `ownerName: [${parts.join(', ')}]`;
-        }
-      );
-      fs.writeFileSync(configPath, configContent, 'utf-8');
-
-      delete require.cache[require.resolve('../../config')];
+      // Assign, do not mutate. config.ownerName is a getter that builds a
+      // fresh array from SQLite, so `config.ownerName[0] = x` would change a
+      // throwaway copy. Assigning goes through the setter and persists.
+      config.ownerName = [newName];
 
       await extra.reply(`✅ Owner name changed to: *${newName}*`);
     } catch (error) {

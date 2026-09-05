@@ -10,7 +10,6 @@ const path     = require('path');
 const fs       = require('fs');
 const { spawnSync } = require('child_process');
 const crypto   = require('crypto');
-const config   = require('./config');
 const pgAdapter = require('./utils/juneDb/pgAdapter');
 const mongoAdapter = require('./utils/juneDb/mongoAdapter');
 
@@ -1328,6 +1327,119 @@ function serial(value) {
 }
 
 // ── Group Settings ────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// Static application constants (Stage 4)
+//
+// These are NOT settings. They ship with the release and users never change
+// them, so they must never be written into bot_settings — a stored row would
+// shadow the shipped value and freeze it at whatever it was on install day.
+// Never call setBotSetting() with any of these keys.
+//
+// telegramToken and apiKeys are shared credentials June provides for users,
+// not per-install secrets, so they live here rather than in the environment.
+// ══════════════════════════════════════════════════════════════════════════
+const MESSAGES = {
+  "wait": "⏳ Please wait...",
+  "success": "✅ Success!",
+  "error": "❌ Error occurred!",
+  "ownerOnly": "👑 This command is only for bot owner!",
+  "adminOnly": "🛡️ This command is only for group admins!",
+  "groupOnly": "👥 This command can only be used in groups!",
+  "privateOnly": "💬 This command can only be used in private chat!",
+  "botAdminNeeded": "🚫 Bot needs to be admin to execute this command!",
+  "invalidCommand": "❓ Invalid command! Type .menu for help"
+};
+
+const DEFAULT_GROUP_SETTINGS = {
+  "antilink": false,
+  "antilinkAction": "delete",
+  "antitag": false,
+  "antitagAction": "delete",
+  "antiviewonce": false,
+  "antibot": false,
+  "anticall": false,
+  "anticallAction": "decline",
+  "anticallMessage": null,
+  "anticallNotify": true,
+  "antigroupmention": false,
+  "antigroupmentionAction": "delete",
+  "antigroupstatus": false,
+  "antigroupstatusAction": "delete",
+  "welcome": false,
+  "welcomeMessage": " 𝚆𝙴𝙻𝙲𝙾𝙼𝙴: @user 👋\n Member count: #memberCount\n 𝚃𝙸𝙼𝙴: time⏰\n\n\n*@user* Welcome to *@group*! 🎉\n*Group 𝙳𝙴𝚂𝙲𝚁𝙸𝙿𝚃𝙸𝙾𝙽*\ngroupDesc\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ botName*",
+  "welcomeNoPP": false,
+  "goodbye": false,
+  "goodbyeMessage": "Goodbye @user 👋 We will never miss you!",
+  "antiSpam": false,
+  "antiSpamLimit": 5,
+  "antiSpamWindow": 5,
+  "antiSpamAction": "delete",
+  "nsfw": false,
+  "detect": false,
+  "chatbot": false,
+  "autosticker": false,
+  "antiimage": false,
+  "antiimageAction": "delete",
+  "antisticker": false,
+  "antistickerAction": "delete",
+  "antiaudio": false,
+  "antiaudioAction": "delete",
+  "antibadword": false,
+  "antibadwordAction": "warn",
+  "badwords": [],
+  "anticontact": false,
+  "anticontactAction": "delete",
+  "antigif": false,
+  "antigifAction": "delete"
+};
+
+const ANTICALL_PRESETS = [
+  {
+    "id": 1,
+    "emoji": "📵",
+    "message": "Sorry, I don't accept WhatsApp calls. Please send a message."
+  },
+  {
+    "id": 2,
+    "emoji": "💬",
+    "message": "I'm currently unavailable. Kindly text me instead."
+  },
+  {
+    "id": 3,
+    "emoji": "🚫",
+    "message": "Calls are disabled. Please chat with me here."
+  },
+  {
+    "id": 4,
+    "emoji": "🤖",
+    "message": "This account doesn't accept calls. Send a message to continue."
+  },
+  {
+    "id": 5,
+    "emoji": "🌙",
+    "message": "Do Not Disturb. I'll reply when available."
+  }
+];
+
+const SOCIAL = {
+  "github": "https://github.com/Vinpink2/June-Ultra",
+  "instagram": "https://instagram.com/activator_negative",
+  "youtube": "http://youtube.com/@suprem_e_lord"
+};
+
+const API_KEYS = {
+  "openai": "",
+  "deepai": "",
+  "remove_bg": ""
+};
+
+const TELEGRAM_TOKEN = "8316875590:AAGXXYbt2OIn_hORS0s9RlW5n3e5W5-0YPQ";
+const JUNE_API_URL = "https://june-ultra-ai-test-model.onrender.com";
+const JUNE_BOT_ID = "june-ultra-main";
+const UPDATE_ZIP_URL = "https://github.com/supreme-Lord2/xjx/archive/refs/heads/main.zip";
+// single source of truth — config.js said 2.9.0 while package.json said 2.8.8
+const VERSION = require('./package.json').version;
+
 const BOT_SETTINGS_DEFAULTS = {
   // Empty by design. A fresh install has no owner: whoever pairs the bot is
   // recognised through msg.key.fromMe and can claim it with .setownernumber.
@@ -1361,6 +1473,36 @@ const BOT_SETTINGS_DEFAULTS = {
   // assets remain ordinary read-only application defaults.
   menuImageCustom: false,
   menuImageData: null,
+
+  // ── anticall ───────────────────────────────────────────────────────
+  // These live in DEFAULT_GROUP_SETTINGS in config.js but are not group
+  // defaults at all: handler.js reads them per incoming call, and .anticall /
+  // .anticallmsg change them at runtime. They are global bot settings, so
+  // they belong here. getDefaultGroupSettings() merges them back over the
+  // static template, which keeps every existing read site working.
+  anticall: false,
+  anticallAction: 'decline',
+  anticallMessage: null,
+  anticallNotify: true,
+
+  // ── migrated from config.js (Stage 3) ──────────────────────────────
+  // Empty for the same reason as `owners`: a shipped default would make every
+  // deployment display the June team's name. menu.js falls back to
+  // "Bot Owner" when this is empty. Set with .setownername.
+  ownerName: [],
+  timezone: "Africa/Nairobi",
+  maxWarnings: 3,
+  packname: "June-X Ultra",
+  author: "June-X Ultra",
+  stickerAuthor: "June-X Ultra",
+  selfMode: false,
+  autoBio: false,
+  autoSticker: false,
+  autoTyping: false,
+  autoRecording: false,
+  autoRecordType: false,
+  autoReactMode: "bot",
+  newsletterJid: "",
 };
 
 const getGroupSettings = (groupId) => {
@@ -1494,6 +1636,16 @@ const getStoredBotSettings = () => {
 };
 const getAllBotSettings = () => ({ ...BOT_SETTINGS_DEFAULTS, ...getStoredBotSettings() });
 const updateBotSettings = (updates) => { for (const [key, value] of Object.entries(updates)) setBotSetting(key, value); return true; };
+
+// Static group template with the live anticall settings merged over it, so
+// `config.defaultGroupSettings.anticall` keeps resolving for handler.js and
+// the owner commands while the value itself is stored in bot_settings.
+const ANTICALL_KEYS = ['anticall', 'anticallAction', 'anticallMessage', 'anticallNotify'];
+const getDefaultGroupSettings = () => {
+  const merged = { ...DEFAULT_GROUP_SETTINGS };
+  for (const key of ANTICALL_KEYS) merged[key] = getBotSetting(key);
+  return merged;
+};
 
 // ── Owners ────────────────────────────────────────────────────────────────
 //
@@ -2309,6 +2461,9 @@ module.exports = {
   getBotSetting, setBotSetting, getStoredBotSettings, getAllBotSettings, updateBotSettings, BOT_SETTINGS_DEFAULTS,
   clearBotSettingsCache,
   getOwners, setOwners,
+  // static application constants — never stored in bot_settings
+  MESSAGES, DEFAULT_GROUP_SETTINGS, getDefaultGroupSettings, ANTICALL_PRESETS, SOCIAL, API_KEYS,
+  TELEGRAM_TOKEN, JUNE_API_URL, JUNE_BOT_ID, UPDATE_ZIP_URL, VERSION,
   getBotMode, setBotMode, VALID_BOT_MODES,
   getStoredLoginMethod, setStoredLoginMethod, clearStoredLoginMethod, LOGIN_METHOD_VALUES,
   getMenuSettings, updateMenuSettings, MENU_STYLE_VALUES, MENU_SETTINGS_DEFAULTS,

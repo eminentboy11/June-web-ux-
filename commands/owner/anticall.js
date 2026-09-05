@@ -39,29 +39,11 @@ module.exports = {
     const action = option === 'decline' ? 'decline' : 'block';
 
     try {
-      let configFile = fs.readFileSync(configPath, 'utf8');
-
-      // Update anticall enabled/disabled
-      configFile = configFile.replace(
-        /anticall:\s*(true|false)/,
-        `anticall: ${enabled}`
-      );
-
-      // Update action type
-      if (configFile.includes('anticallAction')) {
-        configFile = configFile.replace(
-          /anticallAction:\s*['"]([^'"]+)['"]/,
-          `anticallAction: '${action}'`
-        );
-      } else {
-        configFile = configFile.replace(
-          /anticall:\s*(true|false)/,
-          `anticall: ${enabled},\n      anticallAction: '${action}'`
-        );
-      }
-
-      fs.writeFileSync(configPath, configFile);
-      delete require.cache[require.resolve('../../config')];
+      // Stored in SQLite. This used to rewrite config.js on disk, which the
+      // public loader overwrites from the published build on every boot.
+      const database = require('../../database');
+      database.setBotSetting('anticall', enabled);
+      database.setBotSetting('anticallAction', action);
 
       const replies = {
         off: {

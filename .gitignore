@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Runtime state — created by the bot at run time, never part of the source.
+# database/ holds the SQLite file, its WAL/SHM sidecars, backups and the
+# native-driver probe cache. The public loader preserves this directory
+# across re-extraction (SKIP_DIRS), which is exactly why settings live there
+# and why it must never be committed.
+database/
+data/
+session/
+
+# Build output
+"June x on"/
+.obfuscate-cache.json
+
+# Environment
+.env
+.env.*
+
+# Logs and editor noise
+*.log
+npm-debug.log*
+.DS_Store

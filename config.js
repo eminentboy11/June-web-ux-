@@ -1,127 +1,112 @@
-module.exports = {
-    ownerNumber: ['254798570132','254792021944','2348072642047'],
-    ownerName: ['supreme', 'Odofin', 'ˢᵘᵖʳᵉᵐᵉ ᴸᵒʳᵈ'],
-    
-    botName: 'JuneX-Ultra',
-    prefix: '.',
-    version: '2.9.0',
-    sessionName: '',
-    sessionID: process.env.SESSION_ID || '',
-    newsletterJid: '',
-    JUNE_API_URL: 'https://june-ultra-ai-test-model.onrender.com',
-    JUNE_BOT_ID:  'june-ultra-main',
-    updateZipUrl: 'https://github.com/supreme-Lord2/xjx/archive/refs/heads/main.zip',
-    
-    packname: '',
-    telegramToken: '8316875590:AAGXXYbt2OIn_hORS0s9RlW5n3e5W5-0YPQ',
-    
-    selfMode: false,
-    autoRead: false,
-    autoTyping: false,
-    autoBio: false,
-    autoSticker: false,
-    autoReact: false,
-    autoReactMode: 'bot',
-    autoRecording: false,
-    autoRecordType: false,
-    
-    // Anti-call message presets
-    anticallPresets: [
-      {
-        id: 1,
-        emoji: '📵',
-        message: 'Sorry, I don\'t accept WhatsApp calls. Please send a message.'
-      },
-      {
-        id: 2,
-        emoji: '💬',
-        message: 'I\'m currently unavailable. Kindly text me instead.'
-      },
-      {
-        id: 3,
-        emoji: '🚫',
-        message: 'Calls are disabled. Please chat with me here.'
-      },
-      {
-        id: 4,
-        emoji: '🤖',
-        message: 'This account doesn\'t accept calls. Send a message to continue.'
-      },
-      {
-        id: 5,
-        emoji: '🌙',
-        message: 'Do Not Disturb. I\'ll reply when available.'
-      }
-    ],
-    
-    defaultGroupSettings: {
-      antilink: false,
-      antilinkAction: 'delete',
-      antitag: false,
-      antitagAction: 'delete',
-      antiviewonce: false,
-      antibot: false,
-      anticall: false,
-      anticallAction: 'decline',
-      anticallMessage: null,  // null = use default preset 1, string = custom message
-      anticallNotify: true,   // whether to send message when declining/blocking calls
-      antigroupmention: false,
-      antigroupmentionAction: 'delete',
-      antigroupstatus: false,
-      antigroupstatusAction: 'delete',
-      welcome: false,
-      welcomeMessage: ' 𝚆𝙴𝙻𝙲𝙾𝙼𝙴: @user 👋\n Member count: #memberCount\n 𝚃𝙸𝙼𝙴: time⏰\n\n\n*@user* Welcome to *@group*! 🎉\n*Group 𝙳𝙴𝚂𝙲𝚁𝙸𝙿𝚃𝙸𝙾𝙽*\ngroupDesc\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ botName*',
-      welcomeNoPP: false,
-      goodbye: false,
-      goodbyeMessage: 'Goodbye @user 👋 We will never miss you!',
-      antiSpam: false,
-      antiSpamLimit: 5,
-      antiSpamWindow: 5,
-      antiSpamAction: 'delete',
-      nsfw: false,
-      detect: false,
-      chatbot: false,
-      autosticker: false,
-      antiimage: false,
-      antiimageAction: 'delete',
-      antisticker: false,
-      antistickerAction: 'delete',
-      antiaudio: false,
-      antiaudioAction: 'delete',
-      antibadword: false,
-      antibadwordAction: 'warn',
-      badwords: [],
-      anticontact: false,
-      anticontactAction: 'delete',
-      antigif: false,
-      antigifAction: 'delete',
-    },
-    
-    apiKeys: {
-      openai: '',
-      deepai: '',
-      remove_bg: ''
-    },
-    
-    messages: {
-      wait: '⏳ Please wait...',
-      success: '✅ Success!',
-      error: '❌ Error occurred!',
-      ownerOnly: '👑 This command is only for bot owner!',
-      adminOnly: '🛡️ This command is only for group admins!',
-      groupOnly: '👥 This command can only be used in groups!',
-      privateOnly: '💬 This command can only be used in private chat!',
-      botAdminNeeded: '🚫 Bot needs to be admin to execute this command!',
-      invalidCommand: '❓ Invalid command! Type .menu for help'
-    },
-    
-    timezone: 'Africa/Nairobi',
-    
-    maxWarnings: 3,
-    
-    social: {
-      github: 'https://github.com/Vinpink2/June-Ultra',
-      instagram: 'https://instagram.com/activator_negative',
-      youtube: 'http://youtube.com/@suprem_e_lord'
-    }
-};
+/**
+ * config.js — a live view over the database, not a storage file.
+ *
+ * Nothing here is a stored value any more. Every property either reads from
+ * SQLite (user-changeable settings) or from the static constants in
+ * database.js (fixed application values).
+ *
+ * Why it still exists: 138 files do `require('../../config')` across roughly
+ * 436 call sites. Keeping the module means none of them had to change, while
+ * the values behind them moved to storage that actually survives.
+ *
+ * Why the values moved: the public loader re-extracts the application
+ * directory from the published build on every boot, so anything written into
+ * this file is overwritten. `./database/` is in the loader's SKIP_DIRS and is
+ * preserved, which makes SQLite the only durable store.
+ *
+ * Setters are provided as well as getters. Code that already did
+ * `config.prefix = 'j'` keeps working unchanged and now persists, which fixes
+ * settings silently reverting on restart.
+ *
+ * Reads are cheap: database.js keeps a write-through cache, so a property
+ * access is a Map lookup rather than a query.
+ */
+
+// Lazy so this module can be required from anywhere without caring about load
+// order. database.js no longer requires config.js, so there is no cycle.
+let _db = null;
+const db = () => (_db || (_db = require('./database')));
+
+const setting = (key) => ({
+  get() { return db().getBotSetting(key); },
+  set(value) { db().setBotSetting(key, value); },
+  enumerable: true,
+  configurable: true,
+});
+
+const constant = (key) => ({
+  get() { return db()[key]; },
+  enumerable: true,
+  configurable: true,
+});
+
+const config = {};
+
+Object.defineProperties(config, {
+  // ── Identity ────────────────────────────────────────────────────────────
+  // Owners are a dedicated list rather than a plain setting so the values are
+  // normalised to digits and de-duplicated on write.
+  ownerNumber: {
+    get() { return db().getOwners(); },
+    set(value) { db().setOwners(Array.isArray(value) ? value : [value]); },
+    enumerable: true,
+    configurable: true,
+  },
+  ownerName: setting('ownerName'),
+  botName:   setting('botName'),
+
+  // ── Behaviour ───────────────────────────────────────────────────────────
+  prefix:      setting('prefix'),
+  selfMode:    setting('selfMode'),
+  timezone:    setting('timezone'),
+  maxWarnings: setting('maxWarnings'),
+
+  // ── Auto-features ───────────────────────────────────────────────────────
+  autoRead:       setting('autoRead'),
+  autoReact:      setting('autoReact'),
+  autoReactMode:  setting('autoReactMode'),
+  autoBio:        setting('autoBio'),
+  autoSticker:    setting('autoSticker'),
+  autoTyping:     setting('autoTyping'),
+  autoRecording:  setting('autoRecording'),
+  autoRecordType: setting('autoRecordType'),
+
+  // ── Stickers ────────────────────────────────────────────────────────────
+  // config.author and config.stickerAuthor were read by four files but never
+  // defined here, so they evaluated to undefined at runtime. They now have
+  // real defaults in BOT_SETTINGS_DEFAULTS.
+  packname:      setting('packname'),
+  author:        setting('author'),
+  stickerAuthor: setting('stickerAuthor'),
+
+  // ── Channel ─────────────────────────────────────────────────────────────
+  newsletterJid: setting('newsletterJid'),
+
+  // ── Static application constants (never stored) ─────────────────────────
+  messages:             constant('MESSAGES'),
+  // static template with the live anticall settings merged over it
+  defaultGroupSettings: {
+    get() { return db().getDefaultGroupSettings(); },
+    enumerable: true,
+    configurable: true,
+  },
+  anticallPresets:      constant('ANTICALL_PRESETS'),
+  social:               constant('SOCIAL'),
+  apiKeys:              constant('API_KEYS'),
+  telegramToken:        constant('TELEGRAM_TOKEN'),
+  JUNE_API_URL:         constant('JUNE_API_URL'),
+  JUNE_BOT_ID:          constant('JUNE_BOT_ID'),
+  updateZipUrl:         constant('UPDATE_ZIP_URL'),
+  version:              constant('VERSION'),
+});
+
+// ── Plain values ──────────────────────────────────────────────────────────
+// Read from the environment at module load, before the database is open.
+config.sessionID = process.env.SESSION_ID || '';
+
+// Deliberately not a database getter: index.js and utils/cleanup.js read this
+// at module load to build the session directory path, which happens before
+// SQLite is ready.
+config.sessionName = '';
+
+module.exports = config;
