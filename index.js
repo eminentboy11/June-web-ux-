@@ -949,7 +949,7 @@ async function sendWelcomeMessage(sock) {
         const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net'
         const prefix = config.prefix === '' ? 'none' : (config.prefix || '.')
         const platform = detectPlatform()
-        const ownerName = Array.isArray(config.ownerName) ? config.ownerName[0] : config.ownerName
+        const ownerName = (Array.isArray(config.ownerName) ? config.ownerName[0] : config.ownerName) || 'Bot Owner'
 
         const welcomeText = applyFont(
 `┏━━━━━━✧ CONNECTED ✧━━━━━━━

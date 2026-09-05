@@ -25,7 +25,7 @@ module.exports = {
 
             const ownerNums   = [].concat(config.ownerNumber || []).map(n => String(n).replace(/\D/g, '')).filter(Boolean);
             const ownerDigits = ownerNums[0] || '';
-            const ownerName   = Array.isArray(config.ownerName) ? config.ownerName[0] : (config.ownerName || 'N/A');
+            const ownerName   = (Array.isArray(config.ownerName) ? config.ownerName[0] : config.ownerName) || ownerDigits || 'N/A';
 
             const buttons = [
                 {

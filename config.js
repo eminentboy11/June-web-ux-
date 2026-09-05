@@ -52,7 +52,26 @@ Object.defineProperties(config, {
     enumerable: true,
     configurable: true,
   },
-  ownerName: setting('ownerName'),
+  // Never returns an empty list. Display sites across the codebase do
+  // `Array.isArray(config.ownerName) ? config.ownerName[0] : (… || 'N/A')`,
+  // which puts the fallback on the wrong branch — an empty array takes the
+  // array path and renders `undefined`. Falling back here fixes every one of
+  // those sites at once: stored name, else the owner number, else a label.
+  ownerName: {
+    get() {
+      const stored = db().getBotSetting('ownerName');
+      const list = (Array.isArray(stored) ? stored : [stored])
+        .filter(v => v !== null && v !== undefined && String(v).trim() !== '');
+      if (list.length) return list;
+      const owners = db().getOwners();
+      return owners.length ? owners : ['Bot Owner'];
+    },
+    set(value) {
+      db().setBotSetting('ownerName', Array.isArray(value) ? value : [value]);
+    },
+    enumerable: true,
+    configurable: true,
+  },
   botName:   setting('botName'),
 
   // ── Behaviour ───────────────────────────────────────────────────────────
