@@ -1508,16 +1508,30 @@ const BOT_SETTINGS_DEFAULTS = {
   newsletterJid: "",
 };
 
-const getGroupSettings = (groupId) => {
+// Raw stored document for a group — only the keys someone explicitly changed.
+// The write path uses this so defaults are never persisted; if they were, a
+// shipped change to DEFAULT_GROUP_SETTINGS would stop reaching that group.
+const getStoredGroupSettings = (groupId) => {
   const row = stmts.getGroupSettings.get(groupId);
   return row ? parse(row.settings, {}) : {};
 };
+
+// Read path: defaults with the group's own changes layered on top.
+//
+// This previously returned the stored document alone, so anything a group had
+// not explicitly set came back undefined. `.welcome on` writes only
+// { welcome: true }, which left welcomeMessage undefined and made handler.js
+// send the profile picture with an empty caption — an image and no text.
+const getGroupSettings = (groupId) => ({
+  ...getDefaultGroupSettings(),
+  ...getStoredGroupSettings(groupId),
+});
 
 const updateGroupSettings = (groupId, updates = {}) => {
   // Group commands normally submit a small patch (for example
   // `{ antilink: true }`). Merge it with the existing SQLite document so one
   // feature command cannot erase another feature's persisted settings.
-  const current = getGroupSettings(groupId);
+  const current = getStoredGroupSettings(groupId);
   const patch = updates && typeof updates === 'object' && !Array.isArray(updates)
     ? updates
     : {};
@@ -2482,6 +2496,7 @@ module.exports = {
   getBotSetting, setBotSetting, getStoredBotSettings, getAllBotSettings, updateBotSettings, BOT_SETTINGS_DEFAULTS,
   clearBotSettingsCache,
   getOwners, setOwners, getOwnerNames, setOwnerNames, SESSION_NAME,
+  getStoredGroupSettings,
   // static application constants — never stored in bot_settings
   MESSAGES, DEFAULT_GROUP_SETTINGS, getDefaultGroupSettings, ANTICALL_PRESETS, SOCIAL, API_KEYS,
   TELEGRAM_TOKEN, JUNE_API_URL, JUNE_BOT_ID, UPDATE_ZIP_URL, VERSION,
