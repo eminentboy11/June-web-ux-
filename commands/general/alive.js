@@ -1,5 +1,4 @@
 const os = require('os');
-const config = require('../../config');
 
 const botStartTime = Date.now() - Math.floor(process.uptime() * 1000);
 

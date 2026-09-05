@@ -68,9 +68,8 @@ function save(updates = {}) {
   });
 
   try {
-    const config = require('../config');
-    config.autoReact = next.enabled;
-    config.autoReactMode = next.mode;
+    db.setBotSetting('autoReact', next.enabled);
+    db.setBotSetting('autoReactMode', next.mode);
   } catch (_) {}
   try { global.invalidateSettingsCache?.(); } catch (_) {}
 

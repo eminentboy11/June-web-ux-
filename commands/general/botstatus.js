@@ -1,5 +1,4 @@
 const os = require('os');
-const config = require('../../config');
 const database = require('../../database');
 const { sendButtons }  = require('gifted-btns');
 const { applyFont }    = require('../../utils/fontConverter');
@@ -59,7 +58,7 @@ module.exports = {
     async execute(sock, msg, args, extra) {
         try {
             const chatId         = extra.from;
-            const prefix         = config.prefix === '' ? 'none' : (config.prefix || '.');
+            const prefix         = database.getBotSetting('prefix') === '' ? 'none' : (database.getBotSetting('prefix') || '.');
             const originalSender = msg.key?.participant || msg.key?.remoteJid;
             const dateNow        = Date.now();
 
@@ -73,7 +72,7 @@ module.exports = {
             const cpuCount   = cpus.length;
             const platform   = detectPlatform();
             const nodeVer    = process.version;
-            const ownerName  = (Array.isArray(config.ownerName) ? config.ownerName[0] : config.ownerName) || 'Bot Owner';
+            const ownerName  = (Array.isArray(database.getOwnerNames()) ? database.getOwnerNames()[0] : database.getOwnerNames()) || 'Bot Owner';
             const cmdCount   = extra.getCommandCount ? extra.getCommandCount() : 'N/A';
             const speedMs    = Date.now() - (msg.messageTimestamp * 1000);
             const autoDownloadStatus = database.getAutoDownloadStatusSettings();
@@ -82,7 +81,7 @@ module.exports = {
             const text = applyFont(
                 `┏━━『 BOT STATUS 』━━\n\n` +
 
-                `➥ Bot Name  ➜ ${config.botName}\n` +
+                `➥ Bot Name  ➜ ${database.getBotSetting('botName')}\n` +
                 `➥ Prefix    ➜ [ ${prefix} ]\n` +
                 `➥ Owner     ➜ ${ownerName}\n` +
                 `➥ Commands  ➜ ${cmdCount}\n` +
@@ -96,15 +95,15 @@ module.exports = {
                 `➥ RAM       ➜ ${usedMem}/${totalMem} MB (${memPercent}%)\n` +
                 `➥ CPU       ➜ ${cpuModel}\n` +
                 `➥ Cores     ➜ ${cpuCount}\n` +
-                `➥ Timezone  ➜ ${config.timezone || 'UTC'}\n\n` +
+                `➥ Timezone  ➜ ${database.getBotSetting('timezone') || 'UTC'}\n\n` +
 
                 `┃ Behavior\n` +
 
                 `➥ Mode          ➜ ${getModeLabel()}\n` +
-                `➥ Auto Read     ➜ ${config.autoRead      ? '✅' : '❌'}\n` +
-                `➥ Auto Typing   ➜ ${config.autoTyping    ? '✅' : '❌'}\n` +
-                `➥ Auto React    ➜ ${config.autoReact     ? '✅' : '❌'} (${config.autoReactMode || 'bot'})\n` +
-                `➥ Auto Sticker  ➜ ${config.autoSticker   ? '✅' : '❌'}\n` +
+                `➥ Auto Read     ➜ ${database.getBotSetting('autoRead')      ? '✅' : '❌'}\n` +
+                `➥ Auto Typing   ➜ ${database.getBotSetting('autoTyping')    ? '✅' : '❌'}\n` +
+                `➥ Auto React    ➜ ${database.getBotSetting('autoReact')     ? '✅' : '❌'} (${database.getBotSetting('autoReactMode') || 'bot'})\n` +
+                `➥ Auto Sticker  ➜ ${database.getBotSetting('autoSticker')   ? '✅' : '❌'}\n` +
                 `➥ Auto Download ➜ ${autoDownloadStatus.enabled ? `✅ (${autoDownloadStatus.mode})` : '❌'}\n\n` +
 
                 `┗━━━━━━━━━━━━━━━━`
@@ -113,7 +112,7 @@ module.exports = {
             await sendButtons(sock, chatId, {
                 title:  '',
                 text,
-                footer: `> Powered by ${config.botName}`,
+                footer: `> Powered by ${database.getBotSetting('botName')}`,
                 buttons: [
                     { id: `${prefix}ping_${dateNow}`,    text: '🏓 Ping'    },
                     { id: `${prefix}uptime_${dateNow}`,  text: '⏱️ Uptime'  },

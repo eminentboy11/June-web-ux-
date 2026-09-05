@@ -30,7 +30,6 @@ module.exports = {
       );
     }
 
-    const config = require('../../config');
 
     switch (subcommand) {
       case 'set':
@@ -79,8 +78,8 @@ async function handleSet(sock, msg, args, extra, config) {
 
 // Handle: .anticallmsg view
 async function handleView(sock, msg, extra, config) {
-  const currentMessage = config.defaultGroupSettings.anticallMessage;
-  const isNotifyEnabled = config.defaultGroupSettings.anticallNotify;
+  const currentMessage = database.getDefaultGroupSettings().anticallMessage;
+  const isNotifyEnabled = database.getDefaultGroupSettings().anticallNotify;
 
   if (!isNotifyEnabled) {
     return extra.reply('📵 *Message sending is disabled.*\n\nUse `.anticallmsg reset` to enable.');
@@ -90,7 +89,7 @@ async function handleView(sock, msg, extra, config) {
     return extra.reply(`📝 *Current Custom Message:*\n\n"${currentMessage}"`);
   }
 
-  const defaultPreset = config.anticallPresets[0];
+  const defaultPreset = database.ANTICALL_PRESETS[0];
   return extra.reply(
     `📝 *Current Message (Default Preset):*\n\n` +
     `${defaultPreset.emoji} "${defaultPreset.message}"`
@@ -132,7 +131,7 @@ async function handleOff(sock, msg, extra) {
 
 // Handle: .anticallmsg presets
 async function handlePresets(sock, msg, extra, config) {
-  const presets = config.anticallPresets;
+  const presets = database.ANTICALL_PRESETS;
 
   let presetList = '📋 *Available Presets:*\n\n';
   presets.forEach((preset) => {
@@ -147,8 +146,7 @@ async function handlePresets(sock, msg, extra, config) {
 // Handle: .anticallmsg preset <id>
 async function handlePreset(sock, msg, args, extra) {
   const presetId = parseInt(args[1]);
-  const config = require('../../config');
-  const presets = config.anticallPresets;
+  const presets = database.ANTICALL_PRESETS;
 
   if (!presetId || presetId < 1 || presetId > presets.length) {
     return extra.reply(`❌ Invalid preset ID. Choose 1-${presets.length}.`);
@@ -173,8 +171,8 @@ async function handlePreset(sock, msg, args, extra) {
 
 // Handle: .anticallmsg test
 async function handleTest(sock, msg, extra, config) {
-  const currentMessage = config.defaultGroupSettings.anticallMessage;
-  const isNotifyEnabled = config.defaultGroupSettings.anticallNotify;
+  const currentMessage = database.getDefaultGroupSettings().anticallMessage;
+  const isNotifyEnabled = database.getDefaultGroupSettings().anticallNotify;
 
   if (!isNotifyEnabled) {
     return extra.reply(
@@ -183,7 +181,7 @@ async function handleTest(sock, msg, extra, config) {
     );
   }
 
-  const testMessage = currentMessage || config.anticallPresets[0].message;
+  const testMessage = currentMessage || database.ANTICALL_PRESETS[0].message;
 
   try {
     await sock.sendMessage(msg.key.remoteJid, {

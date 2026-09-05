@@ -1,8 +1,8 @@
+const database = require('../../database');
 /**
  * Owner Command - Sends bot owner's contact card (vCard)
  */
 
-const config = require('../../config');
 
 module.exports = {
     name: 'owner',
@@ -17,8 +17,8 @@ module.exports = {
             const chatId = extra.from;
 
             // Owner numbers array -> convert each to a vCard
-            const ownerNames = Array.isArray(config.ownerName) ? config.ownerName : [config.ownerName];
-            const vCards = config.ownerNumber.map((num, index) => {
+            const ownerNames = Array.isArray(database.getOwnerNames()) ? database.getOwnerNames() : [database.getOwnerNames()];
+            const vCards = database.getOwners().map((num, index) => {
                 const name = ownerNames[index] || ownerNames[0] || 'Bot Owner';
                 return {
                     vcard: `
@@ -31,7 +31,7 @@ END:VCARD
                 };
             });
 
-            const displayName = ownerNames[0] || config.ownerName || 'Bot Owner';
+            const displayName = ownerNames[0] || database.getOwnerNames() || 'Bot Owner';
 
             await sock.sendMessage(chatId, {
                 contacts: {

@@ -1,7 +1,6 @@
 /**
  * Set Timezone — persists via database/bot-settings.json
  */
-const config = require('../../config');
 const db = require('../../database');
 
 const COMMON_TIMEZONES = [
@@ -24,10 +23,10 @@ module.exports = {
   async execute(sock, msg, args, extra) {
     try {
       if (!args.length || args[0].toLowerCase() === 'list') {
-        let text = `🌍 *Set Timezone*\n\nCurrent: *${config.timezone}*\n\n`;
+        let text = `🌍 *Set Timezone*\n\nCurrent: *${db.getBotSetting('timezone')}*\n\n`;
         text += `*Common Timezones:*\n`;
         COMMON_TIMEZONES.forEach(tz => {
-          const marker = tz === config.timezone ? ' ✅' : '';
+          const marker = tz === db.getBotSetting('timezone') ? ' ✅' : '';
           try {
             const time = new Date().toLocaleString('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: true });
             text += `• ${tz} — ${time}${marker}\n`;
@@ -35,7 +34,7 @@ module.exports = {
             text += `• ${tz}${marker}\n`;
           }
         });
-        text += `\nUsage: *${config.prefix}settimezone Asia/Kolkata*`;
+        text += `\nUsage: *${db.getBotSetting('prefix')}settimezone Asia/Kolkata*`;
         return extra.reply(text);
       }
 
@@ -44,12 +43,12 @@ module.exports = {
       try {
         new Date().toLocaleString('en-US', { timeZone: newTz });
       } catch {
-        return extra.reply(`❌ Invalid timezone: *${newTz}*\n\nUse *${config.prefix}settimezone list* to see valid options.`);
+        return extra.reply(`❌ Invalid timezone: *${newTz}*\n\nUse *${db.getBotSetting('prefix')}settimezone list* to see valid options.`);
       }
 
       // Persist to database and update runtime config
       db.setBotSetting('timezone', newTz);
-      config.timezone = newTz;
+      db.setBotSetting('timezone', newTz);
 
       const now = new Date().toLocaleString('en-US', { timeZone: newTz, dateStyle: 'full', timeStyle: 'long' });
       await extra.reply(`✅ Timezone set to: *${newTz}*\n\n🕐 Current time: ${now}`);

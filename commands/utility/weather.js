@@ -4,7 +4,7 @@
 
 const axios = require('axios');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'weather',
@@ -66,7 +66,7 @@ module.exports = {
 
       await sendButtons(sock, extra.from, {
         text,
-        footer: `> Powered by ${config.botName}`,
+        footer: `> Powered by ${database.getBotSetting('botName')}`,
         buttons: [
           {
             name: 'cta_url',

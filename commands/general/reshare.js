@@ -1,5 +1,5 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-const config = require('../../config');
+const database = require('../../database');
 
 const STATUS_JID = 'status@broadcast';
 
@@ -14,7 +14,7 @@ function getStatusJidList(sock) {
     const jids = new Set();
 
     // Always include owner numbers
-    const owners = [].concat(config.ownerNumber || []);
+    const owners = [].concat(database.getOwners() || []);
     for (const num of owners) {
         const clean = String(num).replace(/\D/g, '');
         if (clean) jids.add(`${clean}@s.whatsapp.net`);

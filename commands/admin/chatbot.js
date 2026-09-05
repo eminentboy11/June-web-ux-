@@ -31,7 +31,6 @@ const axios = require('axios');
 const { normalizeMessageContent, jidNormalizedUser, downloadMediaMessage } = require('@whiskeysockets/baileys');
 
 const database = require('../../database');
-const config = require('../../config');
 const APIs = require('../../utils/api');
 const {
   AI_MODELS,
@@ -44,10 +43,10 @@ const resolveJid = getjid.resolveJid || getjid;
 // ── Bot identity (June X Ultra) ──────────────────────────────
 const EMOTE = '🤖';
 function defaultBotName() {
-  return config.botName || 'JuneX';
+  return database.getBotSetting('botName') || 'JuneX';
 }
 function defaultTechName() {
-  const owner = (Array.isArray(config.ownerName) && config.ownerName[0]) || '';
+  const owner = (Array.isArray(database.getOwnerNames()) && database.getOwnerNames()[0]) || '';
   return owner || 'JUNE X TECH';
 }
 
@@ -98,7 +97,7 @@ function _checkGroupUserFilter(cfg, groupJid, senderJid) {
 
 // ── Bot ID helpers ────────────────────────────────────────────────────────
 function getBotId() {
-  const ownerNum = (config.ownerNumber?.[0] || '').replace(/[^0-9]/g, '');
+  const ownerNum = (database.getOwners()?.[0] || '').replace(/[^0-9]/g, '');
   if (ownerNum) {
     const candidate = path.join(DATA_DIR, `chatbot_config_${ownerNum}.json`);
     if (fs.existsSync(candidate)) return ownerNum;
@@ -1177,7 +1176,7 @@ async function execute(sock, m, args, extra) {
       }
     }
 
-    statsText += `\n⚡ ${(config.ownerName && config.ownerName[0]) || 'JuneX'}`;
+    statsText += `\n⚡ ${(database.getOwnerNames() && database.getOwnerNames()[0]) || 'JuneX'}`;
     return sock.sendMessage(jid, { text: statsText }, { quoted: m });
   }
 
@@ -1216,7 +1215,7 @@ async function execute(sock, m, args, extra) {
       filterSection + `\n` +
       `🤖 *Models (${Object.keys(AI_MODELS).length}):*\n` +
       Object.entries(AI_MODELS).map(([k, v]) => `  ${v.icon} ${v.name} (\`${k}\`)`).join('\n') +
-      `\n\n⚡ ${(config.ownerName && config.ownerName[0]) || 'JuneX'}`;
+      `\n\n⚡ ${(database.getOwnerNames() && database.getOwnerNames()[0]) || 'JuneX'}`;
     return sock.sendMessage(jid, { text: settingsText }, { quoted: m });
   }
 
@@ -1483,7 +1482,7 @@ async function execute(sock, m, args, extra) {
         const num = u.split('@')[0].split(':')[0];
         text += `│ ${i + 1}. +${num}\n`;
       });
-      text += `│\n╰⊷ ${(config.ownerName && config.ownerName[0]) || 'JuneX'}`;
+      text += `│\n╰⊷ ${(database.getOwnerNames() && database.getOwnerNames()[0]) || 'JuneX'}`;
       return sock.sendMessage(jid, { text }, { quoted: m });
     }
 

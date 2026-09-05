@@ -125,7 +125,7 @@ module.exports = {
 
                 await sendButtons(sock, extra.from, {
                     text: responseText,
-                    footer: `> Powered by ${require('../../config').botName}`,
+                    footer: `> Powered by ${require('../../database').getBotSetting('botName')}`,
                     buttons: [
                         {
                             name: 'cta_url',

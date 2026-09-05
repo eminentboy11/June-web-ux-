@@ -1,5 +1,5 @@
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
     name: 'tutorial',
@@ -15,7 +15,7 @@ module.exports = {
             const text =
                 `┏━━『 *DEPLOYMENT TUTORIALS* 』━━\n\n` +
                 `✬ Choose a platform below to get the\n` +
-                `  full deployment tutorial for *${config.botName}*\n\n` +
+                `  full deployment tutorial for *${database.getBotSetting('botName')}*\n\n` +
                 `┃ *Available Platforms*\n` +
                 `☁️  Heroku\n` +
                 `🖥️  Panels (Pterodactyl)\n` +
@@ -28,7 +28,7 @@ module.exports = {
             await sendButtons(sock, chatId, {
                 title: '📚 BOT TUTORIALS',
                 text,
-                footer: `Powered by ${config.botName}`,
+                footer: `Powered by ${database.getBotSetting('botName')}`,
                 buttons: [
                     {
                         name: 'cta_url',

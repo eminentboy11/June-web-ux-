@@ -1439,6 +1439,9 @@ const JUNE_BOT_ID = "june-ultra-main";
 const UPDATE_ZIP_URL = "https://github.com/supreme-Lord2/xjx/archive/refs/heads/main.zip";
 // single source of truth — config.js said 2.9.0 while package.json said 2.8.8
 const VERSION = require('./package.json').version;
+// Session directory name. index.js and utils/cleanup.js read this at module
+// load to build a path, before SQLite is open, so it must be a plain constant.
+const SESSION_NAME = '';
 
 const BOT_SETTINGS_DEFAULTS = {
   // Empty by design. A fresh install has no owner: whoever pairs the bot is
@@ -1636,6 +1639,24 @@ const getStoredBotSettings = () => {
 };
 const getAllBotSettings = () => ({ ...BOT_SETTINGS_DEFAULTS, ...getStoredBotSettings() });
 const updateBotSettings = (updates) => { for (const [key, value] of Object.entries(updates)) setBotSetting(key, value); return true; };
+
+// Owner display names. Never returns an empty list: display sites across the
+// codebase use `Array.isArray(x) ? x[0] : (x || 'N/A')`, which puts the
+// fallback on the wrong branch — an empty array takes the array path and
+// renders `undefined`. Resolving here covers every one of them.
+const getOwnerNames = () => {
+  const stored = getBotSetting('ownerName');
+  const list = (Array.isArray(stored) ? stored : [stored])
+    .filter(v => v !== null && v !== undefined && String(v).trim() !== '');
+  if (list.length) return list;
+  const owners = getOwners();
+  return owners.length ? owners : ['Bot Owner'];
+};
+
+const setOwnerNames = (value) => {
+  setBotSetting('ownerName', Array.isArray(value) ? value : [value]);
+  return true;
+};
 
 // Static group template with the live anticall settings merged over it, so
 // `config.defaultGroupSettings.anticall` keeps resolving for handler.js and
@@ -2460,7 +2481,7 @@ module.exports = {
   muteUser, unmuteUser, isUserMuted, getMutedUsers,
   getBotSetting, setBotSetting, getStoredBotSettings, getAllBotSettings, updateBotSettings, BOT_SETTINGS_DEFAULTS,
   clearBotSettingsCache,
-  getOwners, setOwners,
+  getOwners, setOwners, getOwnerNames, setOwnerNames, SESSION_NAME,
   // static application constants — never stored in bot_settings
   MESSAGES, DEFAULT_GROUP_SETTINGS, getDefaultGroupSettings, ANTICALL_PRESETS, SOCIAL, API_KEYS,
   TELEGRAM_TOKEN, JUNE_API_URL, JUNE_BOT_ID, UPDATE_ZIP_URL, VERSION,

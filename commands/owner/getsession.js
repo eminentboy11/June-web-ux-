@@ -6,7 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'getsession',
@@ -21,7 +21,7 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     try {
-      const sessionFolder = config.sessionName || 'session';
+      const sessionFolder = database.SESSION_NAME || 'session';
       const credsPath = path.join(__dirname, '../../', sessionFolder, 'creds.json');
 
       if (!fs.existsSync(credsPath)) {

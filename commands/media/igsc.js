@@ -10,8 +10,8 @@ const fs = require('fs');
 const path = require('path');
 const webp = require('node-webpmux');
 const crypto = require('crypto');
-const config = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
+const database = require('../../database');
 
 // Function to extract unique media URLs (same as .ig command)
 function extractUniqueMedia(mediaData) {
@@ -192,7 +192,7 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
 
     const json = {
       'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-      'sticker-pack-name': config.packname || 'Made by',
+      'sticker-pack-name': database.getBotSetting('packname') || 'Made by',
       'emojis': ['📸']
     };
     const exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
@@ -224,7 +224,7 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
             await img2.load(smallWebp);
             const json2 = {
               'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-              'sticker-pack-name': config.packname || 'Made by',
+              'sticker-pack-name': database.getBotSetting('packname') || 'Made by',
               'emojis': ['📸']
             };
             const exifAttr2 = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
@@ -408,7 +408,7 @@ async function forceMiniSticker(inputBuffer, isVideo, cropSquare) {
             await img.load(smallWebp);
             const json = {
               'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-              'sticker-pack-name': config.packname || 'Made by',
+              'sticker-pack-name': database.getBotSetting('packname') || 'Made by',
               'emojis': ['📸']
             };
             const exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
@@ -552,7 +552,7 @@ async function igsCommand(sock, msg, args, extra, crop = false) {
               await imgUltra.load(ultraWebp);
               const jsonUltra = {
                 'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-                'sticker-pack-name': config.packname || 'Made by',
+                'sticker-pack-name': database.getBotSetting('packname') || 'Made by',
                 'emojis': ['📸']
               };
               const exifAttrUltra = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);

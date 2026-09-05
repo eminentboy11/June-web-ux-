@@ -5,8 +5,8 @@
  * Owner only
  */
 
-const config = require('../../config');
 const { sendButtons } = require('gifted-btns');
+const database = require('../../database');
 
 module.exports = {
     name: 'mygroups',
@@ -22,9 +22,9 @@ module.exports = {
         try {
             // ── Owner guard ───────────────────────────────────────────────
             const sender = msg.key.participant || msg.key.remoteJid;
-            const ownerNumbers = Array.isArray(config.ownerNumber)
-                ? config.ownerNumber
-                : [config.ownerNumber];
+            const ownerNumbers = Array.isArray(database.getOwners())
+                ? database.getOwners()
+                : [database.getOwners()];
 
             // Allow if sender is owner OR if the message is from the bot itself
             if (!ownerNumbers.includes(sender) && !msg.key.fromMe) {
@@ -87,7 +87,7 @@ ${desc}
 
                 await sendButtons(sock, jid, {
                     text: detail,
-                    footer: `> Powered by ${config.botName}`,
+                    footer: `> Powered by ${database.getBotSetting('botName')}`,
                     buttons: [
                         {
                             name: 'cta_copy',

@@ -2,7 +2,6 @@
  * Message Handler - Processes incoming messages and executes commands
  */
 
-const config = require('./config');
 const database = require('./database');
 const { loadCommands, watchCommands } = require('./utils/commandLoader');
 const { addMessage, getActiveUsers, getInactiveUsers } = require('./utils/groupstats');
@@ -252,7 +251,7 @@ const isOwner = (sender) => {
 
   // SQLite is the only source of truth for ownership.
   //
-  // There is deliberately no fallback to config.ownerNumber. Users cannot
+  // There is deliberately no fallback to database.getOwners(). Users cannot
   // edit config.js — the public loader re-extracts it from the published
   // build on every boot — so that field always holds the numbers shipped by
   // the June team. Falling back to it would hand those numbers owner rights
@@ -774,7 +773,7 @@ const handleMessage = async (sock, msg) => {
         isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
         isMod: isMod(sender),
         isSudo: isMod(sender),
-        prefix: config.prefix || '.',
+        prefix: database.getBotSetting('prefix') || '.',
         command: '',
         reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
         react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
@@ -789,12 +788,12 @@ const handleMessage = async (sock, msg) => {
 
       // ── Named menu buttons (non-prefixed IDs) ─────────────────────────────
       } else if (buttonId === 'menu_repo') {
-        const repoUrl = config.social?.github || 'https://github.com/Vinpink2/June-Ultra';
+        const repoUrl = database.SOCIAL?.github || 'https://github.com/Vinpink2/June-Ultra';
         await sock.sendMessage(from, { text: `💻 *Bot Repository*\n${repoUrl}` }, { quoted: msg });
         return;
 
       } else if (buttonId === 'menu_yt') {
-        const ytUrl = config.social?.youtube || 'http://youtube.com/@suprem_e_lord';
+        const ytUrl = database.SOCIAL?.youtube || 'http://youtube.com/@suprem_e_lord';
         await sock.sendMessage(from, { text: `📺 *YouTube Channel*\n${ytUrl}` }, { quoted: msg });
         return;
 
@@ -813,7 +812,7 @@ const handleMessage = async (sock, msg) => {
       }
 
       // ── Generic fallback: buttonId starts with the bot prefix → run as command
-      const cfgPrefix = config.prefix || '.';
+      const cfgPrefix = database.getBotSetting('prefix') || '.';
       let routedId = String(buttonId).replace(/_(\d{8,})$/, '');
       if (routedId && routedId.startsWith(cfgPrefix)) {
         const parts   = routedId.slice(cfgPrefix.length).trim().split(/\s+/);
@@ -828,11 +827,11 @@ const handleMessage = async (sock, msg) => {
           extra.isSudo = extra.isOwner || extra.isSudo;
           extra.isMod = extra.isSudo;
           if (dynCmd.ownerOnly && !extra.isOwner && !extra.isSudo) {
-            await sock.sendMessage(from, { text: config.messages.ownerOnly }, { quoted: msg });
+            await sock.sendMessage(from, { text: database.MESSAGES.ownerOnly }, { quoted: msg });
             return;
           }
           if (dynCmd.adminOnly && !extra.isAdmin && !extra.isOwner) {
-            await sock.sendMessage(from, { text: config.messages.adminOnly }, { quoted: msg });
+            await sock.sendMessage(from, { text: database.MESSAGES.adminOnly }, { quoted: msg });
             return;
           }
           await dynCmd.execute(sock, msg, cmdArgs, extra);
@@ -963,7 +962,7 @@ const handleMessage = async (sock, msg) => {
         // Only process if it's an image or video (not documents)
         if (mediaMessage) {
           // Skip if message has a command prefix (let command handle it)
-          if (!body.startsWith(config.prefix)) {
+          if (!body.startsWith(database.getBotSetting('prefix'))) {
             try {
               // Import sticker command logic
               const stickerCmd = commands.get('sticker');
@@ -1079,7 +1078,7 @@ const handleMessage = async (sock, msg) => {
             from,
             sender,
             command: 'mygroups',
-            prefix: config.prefix,
+            prefix: database.getBotSetting('prefix'),
             reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
             react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
           });
@@ -1168,7 +1167,7 @@ const handleMessage = async (sock, msg) => {
     // but that means "command not found" below is what routes to chatbot instead
     // of the prefix check itself.
     
-      const _prefix = config.prefix ?? '.';
+      const _prefix = database.getBotSetting('prefix') ?? '.';
     const hasPrefix = _prefix === '' || body.startsWith(_prefix);
 
     let args = [];
@@ -1290,7 +1289,7 @@ const handleMessage = async (sock, msg) => {
     const senderIsSudo  = senderIsOwner || isSudo(resolvedSender);
 
     // Self mode — bot only responds to its own messages (self-bot mode)
-    if (config.selfMode && !msg.key.fromMe) return;
+    if (database.getBotSetting('selfMode') && !msg.key.fromMe) return;
 
     // Bot mode check
     {
@@ -1310,7 +1309,7 @@ const handleMessage = async (sock, msg) => {
 
     // Permission checks
     if (command.ownerOnly && !senderIsOwner && !senderIsSudo) {
-      return sock.sendMessage(from, { text: config.messages.ownerOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: database.MESSAGES.ownerOnly }, { quoted: msg });
     }
 
     if (command.modOnly && !senderIsSudo) {
@@ -1318,21 +1317,21 @@ const handleMessage = async (sock, msg) => {
     }
 
     if (command.groupOnly && !isGroup) {
-      return sock.sendMessage(from, { text: config.messages.groupOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: database.MESSAGES.groupOnly }, { quoted: msg });
     }
 
     if (command.privateOnly && isGroup) {
-      return sock.sendMessage(from, { text: config.messages.privateOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: database.MESSAGES.privateOnly }, { quoted: msg });
     }
 
     if (command.adminOnly && !(await isAdmin(sock, sender, from, groupMetadata)) && !senderIsOwner) {
-      return sock.sendMessage(from, { text: config.messages.adminOnly }, { quoted: msg });
+      return sock.sendMessage(from, { text: database.MESSAGES.adminOnly }, { quoted: msg });
     }
 
     if (command.botAdminNeeded) {
       const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
       if (!botIsAdmin) {
-        return sock.sendMessage(from, { text: config.messages.botAdminNeeded }, { quoted: msg });
+        return sock.sendMessage(from, { text: database.MESSAGES.botAdminNeeded }, { quoted: msg });
       }
     }
 
@@ -1379,7 +1378,7 @@ const handleMessage = async (sock, msg) => {
       isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
       isMod: senderIsSudo,
       isSudo: senderIsSudo,
-      prefix: config.prefix,
+      prefix: database.getBotSetting('prefix'),
       command: commandName,
       reply: (text) => sock.sendMessage(from, { text: applyFont(text) }, { quoted: msg }),
       react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
@@ -1398,7 +1397,7 @@ const handleMessage = async (sock, msg) => {
 
     try {
       await sock.sendMessage(msg.key.remoteJid, {
-        text: `${config.messages.error}\n\n${error.message}`
+        text: `${database.MESSAGES.error}\n\n${error.message}`
       }, { quoted: msg });
     } catch (e) {
       // Don't log rate limit errors when sending error messages
@@ -1503,7 +1502,7 @@ const handleGroupUpdate = async (sock, update) => {
           .replace(/groupDesc/g, vars.groupDesc)
           .replace(/time/g, vars.timeString)
           .replace(/#memberCount/g, String(vars.memberCount))
-          .replace(/botName/g, config.botName);
+          .replace(/botName/g, database.getBotSetting('botName'));
       };
 
       // Fetch profile pic as Buffer: tries member first, then group, returns null if both fail
@@ -1871,7 +1870,7 @@ const handleAntilink = async (sock, msg, groupMetadata, fromHint, senderHint) =>
 
     if (action === 'warn') {
       const count = Number(database.addWarning(from, sender, 'Sent a link')) || 0;
-      const maxWarns = config.maxWarnings || 3;
+      const maxWarns = database.getBotSetting('maxWarnings') || 3;
       try { await sock.sendMessage(from, { delete: deleteKey }); } catch (_) {}
 
       if (count >= maxWarns) {
@@ -1981,9 +1980,9 @@ const handleAntibadword = async (sock, msg, groupMetadata) => {
         await sock.sendMessage(from, { delete: msg.key });
         const warnings = database.addWarning(from, sender, `Bad word: ${found}`);
         let text = `⚠️ @${sender.split('@')[0]}, you have been *warned* for using a bad word: _${found}_\n`;
-        text += `Warnings: *${warnings.count}/${config.maxWarnings}*\n`;
+        text += `Warnings: *${warnings.count}/${database.getBotSetting('maxWarnings')}*\n`;
 
-        if (warnings.count >= config.maxWarnings) {
+        if (warnings.count >= database.getBotSetting('maxWarnings')) {
           text += `\n❌ Maximum warnings reached. You have been *removed* from the group!`;
           await sock.sendMessage(from, { text, mentions: [sender] });
           await sock.groupParticipantsUpdate(from, [sender], 'remove');
@@ -2104,7 +2103,7 @@ const handleAntigroupmention = async (sock, msg, groupMetadata) => {
 
     if (action === 'warn') {
       const warnData  = database.addWarning(from, sender, 'Status mention in group');
-      const maxWarns  = config.maxWarnings || 3;
+      const maxWarns  = database.getBotSetting('maxWarnings') || 3;
       try { await sock.sendMessage(from, { delete: msg.key }); } catch (_) {}
 
       if (warnData.count >= maxWarns) {
@@ -2196,7 +2195,7 @@ const handleAntigroupstatus = async (sock, msg, groupMetadata) => {
 
     if (action === 'warn') {
       const warnData = database.addWarning(from, sender, 'Status mention in group');
-      const maxWarns = config.maxWarnings || 3;
+      const maxWarns = database.getBotSetting('maxWarnings') || 3;
       try {
         await sock.sendMessage(from, { delete: msg.key });
       } catch (_) {}
@@ -2279,11 +2278,10 @@ const initializeAntiCall = (sock) => {
     try {
       // Reload config to get fresh settings
       delete require.cache[require.resolve('./config')];
-      const config = require('./config');
 
-      if (!config.defaultGroupSettings.anticall) return;
+      if (!database.getDefaultGroupSettings().anticall) return;
 
-      const action = config.defaultGroupSettings.anticallAction || 'block';
+      const action = database.getDefaultGroupSettings().anticallAction || 'block';
 
       for (const call of calls) {
         if (call.status === 'offer') {
@@ -2395,7 +2393,7 @@ const handleAntiMedia = async (sock, msg, groupMetadata) => {
 
       } else if (check.action === 'warn') {
         const result   = database.addWarning(from, sender, check.label);
-        const maxWarns = config.maxWarnings || 3;
+        const maxWarns = database.getBotSetting('maxWarnings') || 3;
 
         if (result.count >= maxWarns) {
           try {
@@ -2517,7 +2515,7 @@ const handleAntibug = async (sock, msg, groupMetadata, isGroup, sender, from) =>
 
       } else if (action === 'warn') {
         const result   = database.addWarning(from, sender, 'Crash message (AntiBug)');
-        const maxWarns = config.maxWarnings || 3;
+        const maxWarns = database.getBotSetting('maxWarnings') || 3;
         if (result.count >= maxWarns) {
           try {
             await sock.groupParticipantsUpdate(from, [sender], 'remove');

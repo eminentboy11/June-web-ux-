@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'setnewsletter',
@@ -60,11 +60,11 @@ module.exports = {
         newsletterJid = args[0].trim();
       } else {
         // Show current status
-        const currentJid = config.newsletterJid || 'Not set';
+        const currentJid = database.getBotSetting('newsletterJid') || 'Not set';
         return extra.reply(
           `📰 *Newsletter Configuration*\n\n` +
           `Current Newsletter JID: \`${currentJid}\`\n` +
-          `Newsletter Name: ${config.botName}\n\n` +
+          `Newsletter Name: ${database.getBotSetting('botName')}\n\n` +
           `Usage:\n` +
           `  .setnewsletter <newsletter JID>\n` +
           `  Or reply to a newsletter message with .setnewsletter\n\n` +
@@ -82,12 +82,12 @@ module.exports = {
       // Persisted below through the config setter, which writes to SQLite.
 
       // Update in-memory config
-      config.newsletterJid = newsletterJid;
+      database.setBotSetting('newsletterJid', newsletterJid);
       
       await extra.reply(
         `✅ Newsletter JID updated successfully!\n\n` +
         `📰 Newsletter JID: \`${newsletterJid}\`\n` +
-        `📛 Newsletter Name: ${config.botName}\n\n` +
+        `📛 Newsletter Name: ${database.getBotSetting('botName')}\n\n` +
         `The menu will now forward from this newsletter.`
       );
       

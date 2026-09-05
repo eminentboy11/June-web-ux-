@@ -1,4 +1,3 @@
-const config = require('../../config');
 const database = require('../../database');
 
 module.exports = {
@@ -13,7 +12,7 @@ module.exports = {
     try {
       let newNumber = '';
 
-      const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid;
+      const mentioned = msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid;
       if (mentioned && mentioned.length > 0) {
         newNumber = mentioned[0].split('@')[0];
       } else if (args.length > 0) {
@@ -25,7 +24,7 @@ module.exports = {
         const shown = current.length ? current.map(n => `*${n}*`).join(', ') : '_none set_';
         return extra.reply(
           `📱 *Set Owner Number*\n\nCurrent: ${shown}\n\n` +
-          `Usage:\n${config.prefix}setownernumber <number>\n${config.prefix}setownernumber @mention\n\n` +
+          `Usage:\n${database.getBotSetting('prefix')}setownernumber <number>\n${database.getBotSetting('prefix')}setownernumber @mention\n\n` +
           `_This replaces the entire owner list._`
         );
       }

@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getTempDir } = require('./tempManager');
-const config = require('../config');
+const database = require('../database');
 
 // Cleanup interval: 10 minutes
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
@@ -15,7 +15,7 @@ const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 const FILE_AGE_THRESHOLD_MS = 30 * 60 * 1000;
 
 // Session directory name (must NOT be cleaned)
-const SESSION_DIR_NAME = config.sessionName || 'session';
+const SESSION_DIR_NAME = database.SESSION_NAME || 'session';
 
 let cleanupInterval = null;
 

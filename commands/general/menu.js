@@ -1,4 +1,3 @@
-const config = require('../../config');
 const { loadCommands } = require('../../utils/commandLoader');
 const { generateWAMessageFromContent } = require('@whiskeysockets/baileys');
 const { sendButtons } = require('gifted-btns');
@@ -11,7 +10,7 @@ const MENU_SETTINGS_FILE = path.join(__dirname, '../../data/menuSettings.json');
 
 // Create fake contact for enhanced replies
 function createFakeContact(msg) {
-    const botName = config.botName || 'JUNE-X';
+    const botName = db.getBotSetting('botName') || 'JUNE-X';
     const participantId = msg.key.participant || msg.key.remoteJid || '0';
     const cleanId = String(participantId).split(':')[0].split('@')[0] || '0';
 
@@ -115,9 +114,9 @@ const CATEGORY_LABELS = {
 };
 
 function buildMenuText(categories, extra, totalCount, speed) {
-  const prefix = config.prefix;
-  const bot = config.botName || 'JuneX-Ultra';
-  const ownerName = (Array.isArray(config.ownerName) ? config.ownerName[0] : config.ownerName) || 'Bot Owner';
+  const prefix = db.getBotSetting('prefix');
+  const bot = db.getBotSetting('botName') || 'JuneX-Ultra';
+  const ownerName = (Array.isArray(db.getOwnerNames()) ? db.getOwnerNames()[0] : db.getOwnerNames()) || 'Bot Owner';
   const hostName = detectPlatform();
   const uptimeFormatted = formatUptime();
   const { getModeLabel } = require('../../utils/botMode');
@@ -150,7 +149,7 @@ function buildMenuText(categories, extra, totalCount, speed) {
   menu += `┃ ᴘʟᴀᴛꜰᴏʀᴍ: ${hostName}\n`;
   menu += `┃ ꜱᴘᴇᴇᴅ: ${ping} ms\n`;
   if (show.showUptime) menu += `┃ ᴜᴘᴛɪᴍᴇ: ${uptimeFormatted}\n`;
-  menu += `┃ Vᴇʀꜱɪᴏɴ: v${config.version}\n`;
+  menu += `┃ Vᴇʀꜱɪᴏɴ: v${db.VERSION}\n`;
   if (show.showMemory) menu += `┃ ᴜꜱᴀɢᴇ: ${formatMemory(botUsedMemory)} of ${formatMemory(totalMemory)}\n`;
   if (show.showProgressBar) menu += `┃ ʀᴀᴍ: ${progressBar(systemUsedMemory, totalMemory)}\n`;
   if (show.showPluginCount) menu += `┃ Cᴏᴍᴍᴀɴᴅꜱ: ${totalCount}\n`;
@@ -247,7 +246,7 @@ module.exports = {
       }, { quoted: fakeQuoted });
 
       const markDone = () => sock.sendMessage(extra.from, {
-        text: applyFont(`_${config.botName} Loaded.._`),
+        text: applyFont(`_${db.getBotSetting('botName')} Loaded.._`),
         edit: loadingMsg.key
       }).catch(() => {});
 
@@ -258,11 +257,11 @@ module.exports = {
 
       const menulist = buildMenuText(categories, extra, uniqueCount, speedMs);
       const tylorkids = getThumbnail();
-      const botname = config.botName || 'June Ultra';
-      const ownername = (Array.isArray(config.ownerName) ? config.ownerName[0] : config.ownerName) || 'Bot Owner';
-      const plink = config.social?.github || 'https://github.com';
+      const botname = db.getBotSetting('botName') || 'June Ultra';
+      const ownername = (Array.isArray(db.getOwnerNames()) ? db.getOwnerNames()[0] : db.getOwnerNames()) || 'Bot Owner';
+      const plink = db.SOCIAL?.github || 'https://github.com';
       const chatId = extra.from;
-      const fullMenu = applyFont(menulist + `\n> ${config.botName}`);
+      const fullMenu = applyFont(menulist + `\n> ${db.getBotSetting('botName')}`);
       const supreme = `Powered by ${ownername}`;
 
       if (menustyle === '1') {
@@ -298,8 +297,8 @@ module.exports = {
 
       } else if (menustyle === '3') {
         // ── Text + contextInfo + cta_url (Open Repo) + ping button ─────
-        const prefix  = config.prefix || '.';
-        const repoUrl = config.social?.github || 'https://github.com';
+        const prefix  = db.getBotSetting('prefix') || '.';
+        const repoUrl = db.SOCIAL?.github || 'https://github.com';
 
         await sendButtons(sock, chatId, {
           image: tylorkids ? { buffer: tylorkids, mimetype: 'image/jpeg' } : undefined,

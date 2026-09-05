@@ -1,4 +1,3 @@
-const config = require('../../config');
 const db = require('../../database');
 
 const NOTES_NAMESPACE = 'user_notes';
@@ -30,7 +29,7 @@ module.exports = {
 
   async execute(sock, m, args, extra) {
     const jid = m.key.remoteJid;
-    const prefix = config.prefix || '.';
+    const prefix = db.getBotSetting('prefix') || '.';
 
     try {
       const userId = getUserId(m);

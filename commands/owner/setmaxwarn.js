@@ -5,7 +5,7 @@
  *
  * How many warnings a member may collect before the bot removes them.
  * Read in 13 places across handler.js, the anti-* features, warn.js and the
- * sticker triggers, all of which use `config.maxWarnings || 3`.
+ * sticker triggers, all of which use `database.getBotSetting('maxWarnings') || 3`.
  *
  * Stored in SQLite so it survives restarts and the loader re-extracting the
  * application directory.

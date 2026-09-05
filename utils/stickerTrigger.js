@@ -1,5 +1,4 @@
 const database = require('../database');
-const config = require('../config');
 const { findParticipant } = require('./jidHelper');
 
 const SKIP_KEYS = ['messageContextInfo', 'protocolMessage', 'senderKeyDistributionMessage'];
@@ -162,7 +161,7 @@ const handleStickerTrigger = async (sock, msg, groupMetadata) => {
       }
 
       case 'warn': {
-        const maxWarns = config.maxWarnings || 3;
+        const maxWarns = database.getBotSetting('maxWarnings') || 3;
         const warnData = database.addWarning(from, target, 'Sticker trigger warning');
         if (warnData.count >= maxWarns) {
           await sock.sendMessage(from, {

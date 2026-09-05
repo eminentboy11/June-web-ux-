@@ -9,8 +9,8 @@ const crypto = require('crypto');
 const { exec } = require('child_process');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const webp = require('node-webpmux');
-const config = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
+const database = require('../../database');
 
 // Max file size: 50MB
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -172,7 +172,7 @@ module.exports = {
       // Create metadata
       const json = {
         'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-        'sticker-pack-name': config.packname || 'June-X',
+        'sticker-pack-name': database.getBotSetting('packname') || 'June-X',
         'emojis': ['✂️']
       };
 

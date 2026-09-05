@@ -12,7 +12,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('./ffmpegPath');
 const webpmux = require('node-webpmux');
 const { fileTypeFromBuffer } = require('file-type');
-const config = require('../config');
+const database = require('../database');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -132,8 +132,8 @@ const buildSticker = async (media, mode, options = {}) => {
   const { ext, isAnimated } = await detectExt(media);
   const webpBuffer = await toWebp(media, ext, isAnimated, mode);
   return applyExif(webpBuffer, {
-    pack: options.pack || config.packname,
-    author: options.author || config.author,
+    pack: options.pack || database.getBotSetting('packname'),
+    author: options.author || database.getBotSetting('author'),
     categories: options.categories || ['🤖']
   });
 };

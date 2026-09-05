@@ -14,8 +14,7 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     const option = args[0]?.toLowerCase().trim();
-    const config = require('../../config');
-    const current = config.defaultGroupSettings.anticall ? 'enabled' : 'disabled';
+    const current = database.getDefaultGroupSettings().anticall ? 'enabled' : 'disabled';
 
     if (!option) {
       return extra.reply(

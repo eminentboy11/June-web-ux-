@@ -1,4 +1,3 @@
-const config = require('../../config');
 const db = require('../../database');
 
 const NOTES_NAMESPACE = 'user_notes';
@@ -18,7 +17,7 @@ module.exports = {
 
   async execute(sock, m, args, extra) {
     const jid = m.key.remoteJid;
-    const prefix = config.prefix || '.';
+    const prefix = db.getBotSetting('prefix') || '.';
 
     const text = (args || []).join(' ').trim();
     if (!text) {
@@ -28,7 +27,7 @@ module.exports = {
           `➥ Usage      ➜ ${prefix}addnote <your note>\n` +
           `➥ Example    ➜ ${prefix}addnote I will come tomorrow\n` +
           `➥ View       ➜ ${prefix}mynotes\n` +
-          `➥ Powered By ➜ ${config.botName}\n` +
+          `➥ Powered By ➜ ${db.getBotSetting('botName')}\n` +
           `┗━━━━━━━━━━━━━━━━`
       }, { quoted: m });
       return;
@@ -69,7 +68,7 @@ module.exports = {
           `➥ Text       ➜ ${text}\n` +
           `➥ Total Notes ➜ ${notes.length}\n` +
           `➥ View All   ➜ ${prefix}mynotes\n` +
-          `➥ Powered By ➜ ${config.botName}\n` +
+          `➥ Powered By ➜ ${db.getBotSetting('botName')}\n` +
           `┗━━━━━━━━━━━━━━━━`
       }, { quoted: m });
     } catch (err) {

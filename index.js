@@ -261,7 +261,7 @@ function getStartupToggleState() {
         try {
             return Boolean(require('./utils/autoReact').load().enabled)
         } catch (_) {
-            return Boolean(db.getBotSetting?.('autoReact') ?? config.autoReact)
+            return Boolean(db.getBotSetting?.('autoReact') ?? juneDatabase.getBotSetting('autoReact'))
         }
     })()
     // Auto-download status has one source of truth: SQLite bot_settings.
@@ -426,7 +426,6 @@ global.connectedAt = null
 global.__CORE__ = __dirname
 global.__ROOT__ = __dirname
 
-const config = require('./config')
 
 // ─── Apply Persisted Runtime Settings ─────────────────────────────────────────
 // Database access must happen after juneDatabase.ready resolves. Keeping this
@@ -445,9 +444,9 @@ async function applyPersistedRuntimeSettings() {
         // Restore presence flags so .botstatus/.getsettings reflect the correct state
         try {
           const _m = require('./utils/presenceSettings').getModes();
-          config.autoTyping = _m.pm === 'typing' || _m.group === 'typing';
-          config.autoRecording = _m.pm === 'recording' || _m.group === 'recording' || _m.pm === 'recordtype' || _m.group === 'recordtype';
-          config.autoRecordType = _m.pm === 'recordtype' || _m.group === 'recordtype';
+          juneDatabase.setBotSetting('autoTyping', _m.pm === 'typing' || _m.group === 'typing');
+          juneDatabase.setBotSetting('autoRecording', _m.pm === 'recording' || _m.group === 'recording' || _m.pm === 'recordtype' || _m.group === 'recordtype');
+          juneDatabase.setBotSetting('autoRecordType', _m.pm === 'recordtype' || _m.group === 'recordtype');
         } catch (_) {}
 
         // Custom menu images stay in SQLite and are decoded directly by
@@ -463,7 +462,7 @@ async function applyPersistedRuntimeSettings() {
 let handler = null
 const { saveSession, getSession, clearSession } = juneDatabase
 
-const sessionDir = path.join(__dirname, config.sessionName || 'session')
+const sessionDir = path.join(__dirname, juneDatabase.SESSION_NAME || 'session')
 const credsPath = path.join(sessionDir, 'creds.json')
 const envPath = path.join(process.cwd(), '.env')
 // Login metadata and session-ID fingerprints are stored in SQLite metadata.
@@ -947,13 +946,13 @@ async function sendWelcomeMessage(sock) {
         if (!sock.user || global.isBotConnected) return
         global.isBotConnected = true
         const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net'
-        const prefix = config.prefix === '' ? 'none' : (config.prefix || '.')
+        const prefix = juneDatabase.getBotSetting('prefix') === '' ? 'none' : (juneDatabase.getBotSetting('prefix') || '.')
         const platform = detectPlatform()
-        const ownerName = (Array.isArray(config.ownerName) ? config.ownerName[0] : config.ownerName) || 'Bot Owner'
+        const ownerName = (Array.isArray(juneDatabase.getOwnerNames()) ? juneDatabase.getOwnerNames()[0] : juneDatabase.getOwnerNames()) || 'Bot Owner'
 
         const welcomeText = applyFont(
 `┏━━━━━━✧ CONNECTED ✧━━━━━━━
-┃✧ Bot: ${config.botName}
+┃✧ Bot: ${juneDatabase.getBotSetting('botName')}
 ┃✧ Prefix: [ ${prefix} ]
 ┃✧ Owner: ${ownerName}
 ┃✧ Platform: ${platform}
@@ -1571,16 +1570,16 @@ if (groupInvites.length > 0) {
                     const mode = juneDatabase.getBotMode?.() || 'public'
                     const diskReport = diskManager?.getStatus?.() || {}
                     const toggles = getStartupToggleState()
-                    const owner = Array.isArray(config.ownerName)
-                        ? config.ownerName[0]
-                        : (config.ownerName || 'configured')
+                    const owner = Array.isArray(juneDatabase.getOwnerNames())
+                        ? juneDatabase.getOwnerNames()[0]
+                        : (juneDatabase.getOwnerNames() || 'configured')
                     const startupSeconds = ((Date.now() - global.startupStartedAt) / 1000).toFixed(2)
 
                     printStartupReport({
-                        version: config.version,
+                        version: juneDatabase.VERSION,
                         platform: os.platform(),
                         nodeVersion: process.version,
-                        prefix: config.prefix === '' ? 'none' : (config.prefix || '.'),
+                        prefix: juneDatabase.getBotSetting('prefix') === '' ? 'none' : (juneDatabase.getBotSetting('prefix') || '.'),
                         mode,
                         owner,
                         commandCount: cmdCount,
@@ -1819,7 +1818,7 @@ if (groupInvites.length > 0) {
             // ── JUNE-X Style Message Log ────────────────────────────────────────
             if (msg.message) {
                 try {
-                    const tz = config.timezone || 'Africa/Nairobi'
+                    const tz = juneDatabase.getBotSetting('timezone') || 'Africa/Nairobi'
                     const mtype = Object.keys(msg.message)[0] || 'N/A'
                     const pushname = msg.pushName || 'N/A'
                     const body = msg.message?.conversation
@@ -1954,7 +1953,7 @@ async function main() {
     // load on an older VPS. Nothing may read settings/auth/schema before this.
     await juneDatabase.ready
     const configuredBotId = process.env.JUNE_BOT_ID || process.env.BOT_ID ||
-        process.env.OWNER_NUMBER || config.JUNE_BOT_ID || config.ownerNumber?.[0]
+        process.env.OWNER_NUMBER || juneDatabase.JUNE_BOT_ID || juneDatabase.getOwners()?.[0]
     if (!process.env.JUNE_BOT_ID && !process.env.BOT_ID && !process.env.OWNER_NUMBER) {
         pgAdapter.setBotId(configuredBotId)
     }

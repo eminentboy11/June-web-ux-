@@ -5,8 +5,8 @@ const crypto     = require('crypto');
 const { spawn }  = require('child_process');
 const webp       = require('node-webpmux');
 const ffmpegPath = require('../../utils/ffmpegPath');
-const config     = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
+const database = require('../../database');
 
 const PACK_SIZE  = 59;
 const TG_TOKEN   = '8773913673:AAGRx9OBJHP1u1mEOKa741Cmmz6woXgXSNY';
@@ -237,7 +237,7 @@ module.exports = {
             `📊 Sent: *${totalSent}/${total}* across *${totalPacks}* pack${totalPacks > 1 ? 's' : ''}\n` +
             (skipped ? `⏭ Skipped (Lottie): ${skipped}\n` : '') +
             (failed  ? `❌ Failed: ${failed}\n`             : '') +
-            `\n> Powered by ${config.botName || 'JuneX-Ultra'}`
+            `\n> Powered by ${database.getBotSetting('botName') || 'JuneX-Ultra'}`
         );
     }
 };
