@@ -2025,19 +2025,22 @@ const setAntiTagAdminsSettings = (groupId, updates = {}) => {
       : current.action,
   };
 
-  const groupSettings = getGroupSettings(groupId);
-  groupSettings.antitagadmins = next.enabled;
-  groupSettings.antitagadminsAction = next.action;
-  updateGroupSettings(groupId, groupSettings);
+  // Write a patch, never the merged object. getGroupSettings() now layers the
+  // 40-key template underneath the stored values, so writing it back whole
+  // would persist every default into this group's row and freeze it against
+  // future template changes.
+  updateGroupSettings(groupId, {
+    antitagadmins: next.enabled,
+    antitagadminsAction: next.action,
+  });
   return next;
 };
 
 const isAntiAllEnabled = (groupId) => getGroupSettings(groupId).antiall === true;
 const setAntiAllEnabled = (groupId, enabled) => {
-  const groupSettings = getGroupSettings(groupId);
-  groupSettings.antiall = enabled === true;
-  updateGroupSettings(groupId, groupSettings);
-  return groupSettings.antiall;
+  const value = enabled === true;
+  updateGroupSettings(groupId, { antiall: value }); // patch only — see note above
+  return value;
 };
 
 // ── Antiforward ───────────────────────────────────────────────────────────
@@ -2046,10 +2049,10 @@ const getAntiforwardSettings = (groupId) => {
   return { enabled: settings.antiforward || false, warnLimit: settings.antiforwardLimit || 3 };
 };
 const updateAntiforwardSettings = (groupId, enabled, warnLimit) => {
-  const settings = getGroupSettings(groupId);
-  settings.antiforward = !!enabled;
-  settings.antiforwardLimit = Number(warnLimit) || 3;
-  updateGroupSettings(groupId, settings);
+  updateGroupSettings(groupId, {           // patch only — see note above
+    antiforward: !!enabled,
+    antiforwardLimit: Number(warnLimit) || 3,
+  });
   requestBackup('antiforward-settings');
 };
 const addAntiforwardWarning = (groupId, userId) => addWarning(groupId, userId, 'antiforward');
