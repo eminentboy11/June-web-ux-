@@ -2526,6 +2526,12 @@ async function resetDatabase(opts = {}) {
     });
     tx();
   }
+  // The rows are gone, but the write-through settings cache still holds the
+  // old values and would keep serving them until a restart — making .resetbot
+  // look like it did nothing. This is the only path that deletes from
+  // bot_settings without going through setBotSetting().
+  clearBotSettingsCache();
+
   const remote = await clearRemoteData(includeSession);
   try { requestBackup('reset-database'); } catch (_) {}
   try { vacuumDatabase(); } catch (_) {}
