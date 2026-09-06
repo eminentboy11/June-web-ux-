@@ -1535,6 +1535,23 @@ async function startJunexBot() {
                 log(`[ OWNER ] Could not resolve owner from the session: ${ownerErr.message}`, 'yellow')
             }
 
+            // The real number is only knowable once connected. If it disagrees
+            // with what keyed the remote store, every mirrored row is going to
+            // the wrong partition — silent until someone wipes and restores.
+            try {
+                const remoteOn = !!(process.env.DATABASE_URL || process.env.MONGODB_URI || process.env.MONGO_URL)
+                const src = global.__BOT_ID_SOURCE__
+                if (remoteOn && src) {
+                    const pairedPn = String(sock.user?.id || '').split(':')[0].split('@')[0].replace(/\D/g, '')
+                    const configured = String(src).split('@')[0].split(':')[0].replace(/\D/g, '')
+                    if (pairedPn && configured && pairedPn !== configured) {
+                        log(`[ BOT ID ] PN is ${configured} but this session is paired as ${pairedPn}. `
+                          + `Remote data is stored under "${pgAdapter.buildBotId(src)}". `
+                          + `Set PN=${pairedPn} in .env if that is wrong.`, 'yellow')
+                    }
+                }
+            } catch (_) {}
+
             await tryMigrateFileAuth('connection-open')
             // Auto-export the session to .env so restarts never need re-login
             autoExportSessionToEnv(true).catch(() => {})
@@ -1981,12 +1998,26 @@ async function main() {
     // The database uses async sql.js initialization when better-sqlite3 cannot
     // load on an older VPS. Nothing may read settings/auth/schema before this.
     await juneDatabase.ready
-    const configuredBotId = process.env.JUNE_BOT_ID || process.env.BOT_ID ||
-        process.env.OWNER_NUMBER || juneDatabase.JUNE_BOT_ID || juneDatabase.getOwners()?.[0]
-    if (!process.env.JUNE_BOT_ID && !process.env.BOT_ID && !process.env.OWNER_NUMBER) {
-        pgAdapter.setBotId(configuredBotId)
-    }
+    // Remote rows are partitioned by bot_id. The product name alone is shared by
+    // every deployment, so two bots pointed at one database would collide —
+    // including session_auth_state, meaning one could restore the other's
+    // WhatsApp session. PN identifies the deployment; the product name stays as
+    // the prefix so a single database can also host other June products.
+    //
+    // Falls back to the bare product name when nothing is set, which is what
+    // existing deployments already use, so their data stays reachable.
+    const botIdSource = process.env.PN || process.env.JUNE_PN ||
+        process.env.JUNE_BOT_ID || process.env.BOT_ID || process.env.OWNER_NUMBER ||
+        juneDatabase.getOwners()?.[0]
+    const configuredBotId = pgAdapter.buildBotId(botIdSource)
+    global.__BOT_ID_SOURCE__ = botIdSource || null
+    pgAdapter.setBotId(configuredBotId)
     mongoAdapter.setBotId(configuredBotId)
+    if (!botIdSource && (process.env.DATABASE_URL || process.env.MONGODB_URI || process.env.MONGO_URL)) {
+        log('[ BOT ID ] No PN set — remote data is stored under the shared key '
+          + `"${configuredBotId}". If another bot uses this same database they will `
+          + 'overwrite each other. Add PN=<your number> to .env.', 'yellow')
+    }
 
     const [pgStatus, mongoStatus] = await Promise.all([
         pgAdapter.init(),

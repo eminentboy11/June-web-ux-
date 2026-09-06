@@ -31,11 +31,29 @@ function normalizeBotId(value) {
   return normalized || 'june-x-main';
 }
 
-let activeBotId = normalizeBotId(
+// Remote rows are partitioned by bot_id. Without a per-deployment component
+// every bot writing to the same database shares one namespace — including
+// session_auth_state, so a second bot would restore the first one's WhatsApp
+// session. PN is the documented way for a user to identify their deployment.
+//
+// The separator must be '-' or '_': normalizeBotId() splits on ':' and '@' to
+// turn a JID into a bare number, which would silently discard everything after
+// the separator.
+const BOT_ID_PRODUCT = 'june-ultra-main';
+
+function buildBotId(pn, product = BOT_ID_PRODUCT) {
+  // Strip the JID parts before pulling digits, otherwise a device-scoped id
+  // like 2348154853640:12@s.whatsapp.net folds the ":12" into the number.
+  const digits = String(pn || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  return normalizeBotId(digits ? `${product}-${digits}` : product);
+}
+
+let activeBotId = buildBotId(
+  process.env.PN ||
+  process.env.JUNE_PN ||
   process.env.JUNE_BOT_ID ||
   process.env.BOT_ID ||
-  process.env.OWNER_NUMBER ||
-  'june-x-main'
+  process.env.OWNER_NUMBER
 );
 
 let pool = null;
@@ -620,6 +638,7 @@ module.exports = {
   close,
   getBotId,
   setBotId,
+  buildBotId,
   getStatus,
   mirrorBotSetting,
   mirrorGroupSettings,
