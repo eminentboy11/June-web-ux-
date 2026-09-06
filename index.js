@@ -2005,6 +2005,22 @@ async function main() {
         }
     }
 
+    // Pull first, then push. Anything changed while the remote was unreachable
+    // never mirrored, and the retry queue lives in the local database — so a
+    // wiped ./database/ takes the queue with it. This closes that gap on every
+    // successful connect. All mirror writes are upserts, so it is idempotent.
+    if (pgStatus.available || mongoStatus.available) {
+        try {
+            const pushed = juneDatabase.backfillRemote()
+            if (pushed.pushed > 0) {
+                log(`[ SYNC ] Backfilled ${pushed.pushed} local records to the remote mirror `
+                  + `(${pushed.botSettings} settings, ${pushed.groups} groups, ${pushed.moderators} sudo).`, 'cyan')
+            }
+        } catch (e) {
+            log(`[ SYNC ] Backfill skipped: ${e.message}`, 'yellow')
+        }
+    }
+
     // Disaster recovery path: if this host lost its local auth database and
     // has no usable file session, restore the direct remote auth state before
     // normal SESSION_ID/session startup decisions run.

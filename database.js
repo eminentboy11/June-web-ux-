@@ -2482,6 +2482,46 @@ function markDatabaseDirty(reason = 'manual-mark') {
   }
 }
 
+// Push local durable config up to the remote mirror.
+//
+// The per-write mirror only fires when the remote is reachable. Anything
+// changed while it was down never arrives, and although failures queue in
+// remote_sync_queue, that table lives in the local database — so wiping
+// ./database/ loses the queue along with everything else. A deployment can
+// therefore end up with settings locally that the mirror has never seen.
+//
+// Every mirror call is an upsert keyed on (bot_id, key), so re-pushing is
+// harmless and idempotent. Scoped to durable configuration; per-message data
+// like warnings and stats is left to the normal write path.
+function backfillRemote() {
+  if (!db) return { pushed: 0, skipped: 'database-unavailable' };
+  const counts = { botSettings: 0, groups: 0, moderators: 0 };
+
+  try {
+    for (const [key, value] of Object.entries(getStoredBotSettings())) {
+      mirrorRemote('mirrorBotSetting', key, value);
+      counts.botSettings++;
+    }
+  } catch (_) {}
+
+  try {
+    for (const row of db.prepare('SELECT group_id, settings FROM groups').all()) {
+      mirrorRemote('mirrorGroupSettings', row.group_id, parse(row.settings, {}));
+      counts.groups++;
+    }
+  } catch (_) {}
+
+  try {
+    for (const row of stmts.getModerators.all()) {
+      mirrorRemote('mirrorModerator', row.user_id, true);
+      counts.moderators++;
+    }
+  } catch (_) {}
+
+  const pushed = counts.botSettings + counts.groups + counts.moderators;
+  return { pushed, ...counts };
+}
+
 async function restoreFromPostgres() {
   const result = await pgAdapter.restoreIntoSQLite(db);
   // Rows are written directly into SQLite here, bypassing setBotSetting, so
@@ -2626,7 +2666,7 @@ module.exports = {
   processRemoteSyncQueue, getRemoteSyncQueueStats,
   getRemoteAuthMirrorStatus, scheduleRemoteAuthMirror, flushRemoteAuthMirror,
   mirrorRemoteAuthState, restoreRemoteAuthState, clearRemoteAuthState,
-  restoreFromPostgres, restoreFromMongo,
+  restoreFromPostgres, restoreFromMongo, backfillRemote,
   resetDatabase,
   getPostgresStatus: pgAdapter.getStatus, getMongoStatus: mongoAdapter.getStatus,
   getBotId: pgAdapter.getBotId,
