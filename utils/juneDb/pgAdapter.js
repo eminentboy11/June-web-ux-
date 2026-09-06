@@ -87,6 +87,22 @@ function readSchema() {
   }
 }
 
+// Every managed Postgres (Render, Neon, Supabase, Heroku, Railway, Aiven)
+// refuses plaintext connections, and none of them include sslmode=require in
+// the URL they hand you. Requiring that substring meant a pasted Render URL
+// failed with a bare "SSL/TLS required".
+//
+// Default to TLS for anything remote. Local sockets stay plaintext, which is
+// what local development expects, and sslmode=disable remains an explicit
+// opt-out.
+function resolveSsl(connectionString) {
+  const url = String(connectionString || '');
+  if (/sslmode=disable/i.test(url)) return undefined;
+  if (/sslmode=require|sslmode=prefer|ssl=true/i.test(url)) return { rejectUnauthorized: false };
+  const isLocal = /(?:\/\/|@)(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:[/?]|$)/i.test(url);
+  return isLocal ? undefined : { rejectUnauthorized: false };
+}
+
 async function init() {
   if (ready) return getStatus();
   if (initializing) return initializing;
@@ -108,9 +124,7 @@ async function init() {
       max: Number(process.env.JUNE_PG_POOL_MAX) || 5,
       idleTimeoutMillis: Number(process.env.JUNE_PG_IDLE_TIMEOUT_MS) || 30000,
       connectionTimeoutMillis: Number(process.env.JUNE_PG_CONNECTION_TIMEOUT_MS) || 5000,
-      ssl: /sslmode=require/i.test(connectionString)
-        ? { rejectUnauthorized: false }
-        : undefined,
+      ssl: resolveSsl(connectionString),
     });
 
     nextPool.on('error', (error) => {
@@ -129,6 +143,15 @@ async function init() {
     } catch (error) {
       lastError = error.message;
       console.warn(`[PG] Optional PostgreSQL unavailable: ${error.message}`);
+      // The driver's own wording says nothing about what to change.
+      if (/SSL|TLS/i.test(error.message)) {
+        console.warn('[PG] The server requires TLS. Append ?sslmode=require to DATABASE_URL, '
+          + 'or remove ?sslmode=disable if it is set.');
+      } else if (/password|authentication|role .* does not exist/i.test(error.message)) {
+        console.warn('[PG] Check the username and password in DATABASE_URL.');
+      } else if (/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED/i.test(error.message)) {
+        console.warn('[PG] Host unreachable — check the hostname, port, and that the database is awake.');
+      }
       try { await nextPool.end(); } catch (_) {}
     }
 
