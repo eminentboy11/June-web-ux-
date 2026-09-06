@@ -18,6 +18,17 @@ module.exports = {
 
             // Owner numbers array -> convert each to a vCard
             const ownerNames = Array.isArray(database.getOwnerNames()) ? database.getOwnerNames() : [database.getOwnerNames()];
+            // Sending a contacts message with zero vCards makes Baileys throw
+            // "require atleast 1 contact". Can happen before the paired
+            // account is claimed at connection.open.
+            if (!database.getOwners().length) {
+                return extra.reply(
+                    '👑 *No owner is set yet.*\n\n' +
+                    'The paired account is claimed automatically when the bot connects.\n' +
+                    'If this persists, set one with:\n_.setownernumber <number>_'
+                );
+            }
+
             const vCards = database.getOwners().map((num, index) => {
                 const name = ownerNames[index] || ownerNames[0] || 'Bot Owner';
                 return {

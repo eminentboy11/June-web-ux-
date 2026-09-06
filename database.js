@@ -2530,6 +2530,21 @@ async function clearRemoteData(includeSession = false) {
 
 async function resetDatabase(opts = {}) {
   const includeSession = !!opts.includeSession;
+  const includeOwner = !!opts.includeOwner;
+
+  // Owner identity is treated like the login session: a data reset should not
+  // cost you control of your own bot. Captured before the wipe and written
+  // back afterwards unless the caller explicitly asks to clear it.
+  //
+  // ownerName is read from the raw row rather than getBotSetting(), so only a
+  // name deliberately set with .setownername is preserved — the runtime value
+  // derived from the paired account is re-derived on the next connect anyway.
+  const preserved = includeOwner ? null : {
+    owners: getBotSetting('owners'),
+    ownerSource: getBotSetting('ownerSource'),
+    ownerName: getStoredBotSettings().ownerName,
+  };
+
   const tables = [
     'warnings', 'moderators', 'muted_users', 'kv_store',
     'antidelete_messages', 'antidelete_statuses', 'status_downloads',
@@ -2557,10 +2572,18 @@ async function resetDatabase(opts = {}) {
   // bot_settings without going through setBotSetting().
   clearBotSettingsCache();
 
+  if (preserved) {
+    if (Array.isArray(preserved.owners) && preserved.owners.length) {
+      setBotSetting('owners', preserved.owners);
+      setBotSetting('ownerSource', preserved.ownerSource || 'auto');
+    }
+    if (preserved.ownerName !== undefined) setBotSetting('ownerName', preserved.ownerName);
+  }
+
   const remote = await clearRemoteData(includeSession);
   try { requestBackup('reset-database'); } catch (_) {}
   try { vacuumDatabase(); } catch (_) {}
-  return { localCleared, includeSession, remote };
+  return { localCleared, includeSession, includeOwner, ownerPreserved: !!preserved, remote };
 }
 
 module.exports = {
