@@ -1,7 +1,3 @@
-
-
-const { sendButtons } = require('gifted-btns');
-
 module.exports = {
   name: 'restart',
   aliases: ['reboot'],
@@ -26,25 +22,12 @@ module.exports = {
       return;
     }
 
-    // 3. Default: Show Buttons
-    try {
-      await sendButtons(sock, from, {
-        text: '*RESTART MANAGER*\n*1️⃣ Quick Restart*:runtime preserved\n*2️⃣ Full Reboot*:runtime not preserved\n\nChoose your restart method below:',
-        footer: 'June-X Ultra System',
-        buttons: [
-          {
-            id: `${prefix}restart quick`,
-            text: '⚡ QUICK RESTART',
-          },
-          {
-            id: `${prefix}restart full`,
-            text: '🛡️ FULL REBOOT',
-          },
-        ],
-      }, { quoted: msg });
-    } catch (e) {
-      // Fallback if buttons fail
-      await reply(`*RESTART OPTIONS:*\n\n1. *${prefix}restart quick* (Fast, no console box)\n2. *${prefix}restart full* (Full reboot + console box)`);
-    }
+    // 3. Default: Show plain-text menu (reply with 1 or 2)
+    await reply(
+      'RESTART MANAGER\n' +
+      '1️⃣ Quick Restart — advisable for updating bot while runtime preserved\n' +
+      '2️⃣ Full Reboot — also update bot but runtime not preserved\n\n' +
+      'Reply with 1 or 2'
+    );
   }
 };
