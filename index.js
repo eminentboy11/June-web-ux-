@@ -1335,8 +1335,32 @@ async function startJunexBot() {
             // Baileys can report a device conflict as 401 with "conflict".
             // That is recoverable and must not erase the verified session.
             const isConflict401 = statusCode === 401 && disconnectMessage.includes('conflict')
+
+            // 403 is WhatsApp refusing the account outright — almost always a ban.
+            // It was not handled, so it fell through to the generic branch and
+            // reconnected every 5s forever, surviving restarts because the dead
+            // credentials stayed in SQLite. Retrying a banned account is useless
+            // and keeps hammering WhatsApp, so give up after a few attempts and
+            // clear the session so a different number can pair.
+            const isForbidden = statusCode === 403
+            if (isForbidden) {
+                global._forbiddenCount = (global._forbiddenCount || 0) + 1
+                log(`[ BANNED ] WhatsApp refused this account (403) — attempt `
+                  + `${global._forbiddenCount}/3. This usually means the number is banned.`, 'yellow')
+            } else {
+                global._forbiddenCount = 0
+            }
+            const bannedOut = isForbidden && global._forbiddenCount >= 3
+
             const loggedOut = !isConflict401 &&
-                (statusCode === DisconnectReason.loggedOut || statusCode === 401)
+                (statusCode === DisconnectReason.loggedOut || statusCode === 401 || bannedOut)
+
+            if (bannedOut) {
+                log(chalk.white.bgRedBright('☠️  Account refused by WhatsApp (403) three times.'), 'white')
+                log('[ BANNED ] Clearing the stored credentials so another number can pair.', 'yellow')
+                log('[ BANNED ] After pairing a new number, also update PN= in .env and run '
+                  + '.setownernumber, or the bot keeps using the old number\'s data.', 'yellow')
+            }
 
             if (loggedOut) {
                 log(chalk.white.bgRedBright(`💥 Disconnected [${statusCode}] — logged out. Clearing session...`), 'white')
@@ -1481,6 +1505,7 @@ async function startJunexBot() {
         } else if (connection === 'open') {
             global.isReconnecting = false
             global.errorRetryCount = 0
+            global._forbiddenCount = 0   // a good connect clears any 403 streak
             clearPersistedSessionErrorState()
             global._consecutive500Count = 0  // Clear the 500 guard on successful connect
             global._conflictCount = 0
