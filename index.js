@@ -137,6 +137,7 @@ const {
 const juneDatabase = require('./database')
 const pgAdapter = require('./utils/juneDb/pgAdapter')
 const mongoAdapter = require('./utils/juneDb/mongoAdapter')
+const juneApiAdapter = require('./utils/juneDb/juneApiMirror')
 const replayDrain = require('./utils/juneDb/replayDrain')
 const {
     useSQLiteAuthState,
@@ -732,7 +733,7 @@ function quarantineCurrentSessionForReplacement() {
 // ─── Session Format Validator ─────────────────────────────────────────────────
 // Session ID formats: JUNE-MD:~<base64> | Ultra-X:~<base64> | June-Ultra:~<base64>
 
-const VALID_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~']
+const VALID_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~','ultra-x:~']
 
 async function checkAndHandleSessionFormat() {
     const sessionId = process.env.SESSION_ID
@@ -761,6 +762,7 @@ async function downloadSessionData() {
             'June-Ultra:~',
             'JUNE-MD:~',
             'June::~',
+            'ultra-x:~',
         ]
         const matched = prefixMap.find(p => sid.startsWith(p))
         if (!matched) throw new Error(`Unknown session Format: ${prefixMap.join(', ')}`)
@@ -1078,6 +1080,7 @@ setInterval(() => processedMessages.clear(), 5 * 60 * 1000)
 function getExternalDatabaseStatus() {
     const postgres = pgAdapter.getStatus?.() || {}
     const mongo = mongoAdapter.getStatus?.() || {}
+    const juneApi = juneApiAdapter.getStatus?.() || {}
     const databases = [
         {
             name: 'PostgreSQL',
@@ -1090,6 +1093,12 @@ function getExternalDatabaseStatus() {
             configured: Boolean(mongo.configured || String(process.env.MONGODB_URI || process.env.MONGO_URL || '').trim()),
             connected: mongo.available === true,
             error: mongo.lastError ? 'connection unavailable' : null,
+        },
+        {
+            name: 'June API',
+            configured: juneApi.configured === true,
+            connected: juneApi.available === true,
+            error: juneApi.lastError ? 'connection unavailable' : null,
         },
     ]
 
@@ -2038,15 +2047,17 @@ async function main() {
     global.__BOT_ID_SOURCE__ = botIdSource || null
     pgAdapter.setBotId(configuredBotId)
     mongoAdapter.setBotId(configuredBotId)
+    juneApiAdapter.setBotId(configuredBotId)
     if (!botIdSource && (process.env.DATABASE_URL || process.env.MONGODB_URI || process.env.MONGO_URL)) {
         log('[ BOT ID ] No PN set — remote data is stored under the shared key '
           + `"${configuredBotId}". If another bot uses this same database they will `
           + 'overwrite each other. Add PN=<your number> to .env.', 'yellow')
     }
 
-    const [pgStatus, mongoStatus] = await Promise.all([
+    const [pgStatus, mongoStatus, juneApiStatus] = await Promise.all([
         pgAdapter.init(),
         mongoAdapter.init(),
+        juneApiAdapter.init(),
     ])
     if (pgStatus.available) {
         const restored = await juneDatabase.restoreFromPostgres()
@@ -2061,11 +2072,22 @@ async function main() {
         }
     }
 
+    if (juneApiStatus.available) {
+        const restored = await juneApiAdapter.restoreIntoSQLite(juneDatabase._db)
+        juneDatabase.clearBotSettingsCache()
+        if (restored.restored > 0) {
+            juneDatabase.markDatabaseDirty('june-api-restore')
+            log(`[ JUNE API ] Restored ${restored.restored} missing local database records.`, 'green')
+        } else if (restored.error) {
+            log('[ JUNE API ] Restore failed; local data was left unchanged.', 'yellow')
+        }
+    }
+
     // Pull first, then push. Anything changed while the remote was unreachable
     // never mirrored, and the retry queue lives in the local database — so a
     // wiped ./database/ takes the queue with it. This closes that gap on every
     // successful connect. All mirror writes are upserts, so it is idempotent.
-    if (pgStatus.available || mongoStatus.available) {
+    if (pgStatus.available || mongoStatus.available || juneApiStatus.available) {
         try {
             const pushed = juneDatabase.backfillRemote()
             if (pushed.pushed > 0) {

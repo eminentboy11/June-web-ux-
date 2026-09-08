@@ -6,9 +6,10 @@
     "type": "commonjs",
     "scripts": {
         "start": "node index.js",
-     "build": "node obfuscator.js",
+        "build": "node obfuscator.js",
         "dev": "nodemon index.js",
-        "install:no-puppeteer": "PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install"
+        "install:no-puppeteer": "PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install",
+        "test:june-api": "node --test test/june-api.test.js test/automatic-june-api.test.js"
     },
     "keywords": [
         "whatsapp bot",
@@ -20,9 +21,10 @@
     "author": "Agent of Dusk",
     "license": "MIT",
     "engines": {
-        "node": ">=20.x",
-        "npm": ">=10.x"
-    },
+    "node": ">=20.0.0 <21.0.0",
+    "npm": ">=10.x"
+  },
+
     "dependencies": {
         "@bochilteam/scraper": "^5.0.1",
         "@bochilteam/scraper-facebook": "^5.0.0",

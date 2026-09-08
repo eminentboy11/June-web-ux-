@@ -12,6 +12,7 @@ const { spawnSync } = require('child_process');
 const crypto   = require('crypto');
 const pgAdapter = require('./utils/juneDb/pgAdapter');
 const mongoAdapter = require('./utils/juneDb/mongoAdapter');
+const juneApiAdapter = require('./utils/juneDb/juneApiMirror');
 
 const DB_DIR  = path.resolve(process.env.JUNE_DB_DIR || path.join(__dirname, 'database'));
 const DB_FILE = path.resolve(process.env.JUNE_DB_FILE || path.join(DB_DIR, 'june-ultra.db'));
@@ -214,7 +215,7 @@ let lastAuthMirror = null;
 let shuttingDown = false;
 
 // SQLite is always the live source of truth. Remote adapters mirror writes in
-// the background and never block a command when PostgreSQL/MongoDB is offline.
+// the background and never block a command when a remote database is offline.
 const REMOTE_IDENTITY_ARGUMENTS = {
   mirrorBotSetting: [0],
   mirrorGroupSettings: [0],
@@ -237,7 +238,13 @@ const REMOTE_IDENTITY_ARGUMENTS = {
 };
 
 function getRemoteAdapter(name) {
-  return name === 'postgres' ? pgAdapter : name === 'mongo' ? mongoAdapter : null;
+  return name === 'postgres'
+    ? pgAdapter
+    : name === 'mongo'
+      ? mongoAdapter
+      : name === 'june-api'
+        ? juneApiAdapter
+        : null;
 }
 
 function remoteDedupeKey(adapter, method, args) {
@@ -308,6 +315,7 @@ function invokeRemote(adapterName, adapter, method, args) {
 function mirrorRemote(method, ...args) {
   invokeRemote('postgres', pgAdapter, method, args);
   invokeRemote('mongo', mongoAdapter, method, args);
+  invokeRemote('june-api', juneApiAdapter, method, args);
 }
 
 function deleteRemoteKV(namespace, key) {
@@ -457,7 +465,8 @@ function validateRemoteAuthSnapshot(snapshot) {
 }
 
 function hasConfiguredRemoteAuthMirror() {
-  return [pgAdapter, mongoAdapter].some((adapter) => Boolean(adapter?.getStatus?.().configured));
+  return [pgAdapter, mongoAdapter, juneApiAdapter]
+    .some((adapter) => Boolean(adapter?.getStatus?.().configured));
 }
 
 function getRemoteAuthMirrorStatus() {
@@ -536,6 +545,7 @@ async function restoreRemoteAuthState() {
     const candidates = (await Promise.all([
       typeof pgAdapter.fetchAuthState === 'function' ? pgAdapter.fetchAuthState() : null,
       typeof mongoAdapter.fetchAuthState === 'function' ? mongoAdapter.fetchAuthState() : null,
+      typeof juneApiAdapter.fetchAuthState === 'function' ? juneApiAdapter.fetchAuthState() : null,
     ])).filter((candidate) => candidate?.snapshot);
     if (!candidates.length) return { restored: false, skipped: 'no-remote-auth-state' };
 
@@ -2438,7 +2448,8 @@ function getDatabaseHealth() {
       remoteSync: getRemoteSyncQueueStats(),
       authMirror: getRemoteAuthMirrorStatus(),
       postgres: pgAdapter.getStatus(),
-      mongo: mongoAdapter.getStatus(),
+       mongo: mongoAdapter.getStatus(),
+       juneApi: juneApiAdapter.getStatus(),
 
       // Stable diagnostics API consumed by index.js /health/details.
       databaseSizeBytes: stats.size,
@@ -2463,7 +2474,8 @@ function getDatabaseHealth() {
       remoteSync: getRemoteSyncQueueStats(),
       authMirror: getRemoteAuthMirrorStatus(),
       postgres: pgAdapter.getStatus(),
-      mongo: mongoAdapter.getStatus(),
+       mongo: mongoAdapter.getStatus(),
+       juneApi: juneApiAdapter.getStatus(),
       databaseSizeBytes: 0,
       backupSizeBytes,
       backupExists,
@@ -2669,6 +2681,7 @@ module.exports = {
   restoreFromPostgres, restoreFromMongo, backfillRemote,
   resetDatabase,
   getPostgresStatus: pgAdapter.getStatus, getMongoStatus: mongoAdapter.getStatus,
+  getJuneApiStatus: juneApiAdapter.getStatus,
   getBotId: pgAdapter.getBotId,
 };
 
