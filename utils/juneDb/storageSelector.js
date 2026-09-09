@@ -23,6 +23,13 @@ function isKnownEphemeral(env) {
     || hasValue(env, 'KOYEB_APP_ID');                  // Koyeb
 }
 
+// Hosts with durable local disks where June DB usage is unnecessary by default.
+// Not exhaustive and not guaranteed correct for every panel config — that's
+// why JUNE_FORCE_DB exists as an escape hatch below.
+function isKnownStable(env) {
+  return hasValue(env, 'P_SERVER_UUID');   // Pterodactyl panel
+}
+
 function selectStorage(env = process.env) {
   const requested = String(env.JUNE_STORAGE_MODE || 'auto').trim().toLowerCase();
   if (!VALID_MODES.has(requested)) {
@@ -52,13 +59,13 @@ function selectStorage(env = process.env) {
   // ephemeral OR confirm it's persistent, we're just guessing "persistent".
   // Warn loudly so an unrecognized host doesn't silently lose data on restart.
   if (requested === 'auto') {
-   /* console.warn(
+    console.warn(
       '[storage] Could not detect a known ephemeral hosting provider. ' +
       'Defaulting to local SQLite storage. If this host wipes its disk on ' +
       'restart/redeploy, your data WILL be lost. If that\'s the case, set ' +
       'JUNE_STORAGE_MODE=ephemeral (or provide DATABASE_URL) to use persistent ' +
       'June DB storage instead.'
-    );*/
+    );
   }
 
   return { mode: requested, storage: 'sqlite', reason: 'unknown-or-persistent-environment' };
