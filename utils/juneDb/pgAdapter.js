@@ -166,13 +166,15 @@ async function init() {
     }
 
     const connectionString = getUrl();
-    const nextPool = new Pool({
-      connectionString,
-      max: Number(process.env.JUNE_PG_POOL_MAX) || 5,
-      idleTimeoutMillis: Number(process.env.JUNE_PG_IDLE_TIMEOUT_MS) || 30000,
-      connectionTimeoutMillis: Number(process.env.JUNE_PG_CONNECTION_TIMEOUT_MS) || 5000,
-      ssl: resolveSsl(connectionString),
-    });
+const pgConfig = normalizePgConfig(connectionString);
+
+const nextPool = new Pool({
+  connectionString: pgConfig.connectionString,
+  max: Number(process.env.JUNE_PG_POOL_MAX) || 5,
+  idleTimeoutMillis: Number(process.env.JUNE_PG_IDLE_TIMEOUT_MS) || 30000,
+  connectionTimeoutMillis: Number(process.env.JUNE_PG_CONNECTION_TIMEOUT_MS) || 5000,
+  ssl: pgConfig.ssl,
+});
 
     nextPool.on('error', (error) => {
       lastError = error.message;
