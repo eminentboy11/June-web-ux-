@@ -79,14 +79,21 @@ function _computeSelection(env) {
   // Option B: this is the risky fallback — we couldn't confirm the host is
   // ephemeral OR confirm it's persistent, we're just guessing "persistent".
   // Warn loudly so an unrecognized host doesn't silently lose data on restart.
+  // Exception: if we recognize the host as a known-stable platform (e.g.
+  // Pterodactyl), skip the scary warning and log a calm confirmation instead,
+  // since data loss isn't actually a real risk there.
   if (requested === 'auto') {
-    console.warn(
-      '[storage] Could not detect a known ephemeral hosting provider. ' +
-      'Defaulting to local SQLite storage. If this host wipes its disk on ' +
-      'restart/redeploy, your data WILL be lost. If that\'s the case, set ' +
-      'JUNE_STORAGE_MODE=ephemeral (or provide DATABASE_URL) to use persistent ' +
-      'June DB storage instead.'
-    );
+    if (isKnownStable(env)) {
+      console.log('[storage] Pterodactyl server detected — using local SQLite storage.');
+    } else {
+      console.warn(
+        '[storage] Could not detect a known ephemeral hosting provider. ' +
+        'Defaulting to local SQLite storage. If this host wipes its disk on ' +
+        'restart/redeploy, your data WILL be lost. If that\'s the case, set ' +
+        'JUNE_STORAGE_MODE=ephemeral (or provide DATABASE_URL) to use persistent ' +
+        'June DB storage instead.'
+      );
+    }
   }
 
   return { mode: requested, storage: 'sqlite', reason: 'unknown-or-persistent-environment' };
