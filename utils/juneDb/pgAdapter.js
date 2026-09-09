@@ -105,20 +105,49 @@ function readSchema() {
   }
 }
 
-// Every managed Postgres (Render, Neon, Supabase, Heroku, Railway, Aiven)
-// refuses plaintext connections, and none of them include sslmode=require in
-// the URL they hand you. Requiring that substring meant a pasted Render URL
-// failed with a bare "SSL/TLS required".
-//
-// Default to TLS for anything remote. Local sockets stay plaintext, which is
-// what local development expects, and sslmode=disable remains an explicit
-// opt-out.
-function resolveSsl(connectionString) {
-  const url = String(connectionString || '');
-  if (/sslmode=disable/i.test(url)) return undefined;
-  if (/sslmode=require|sslmode=prefer|ssl=true/i.test(url)) return { rejectUnauthorized: false };
-  const isLocal = /(?:\/\/|@)(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:[/?]|$)/i.test(url);
-  return isLocal ? undefined : { rejectUnauthorized: false };
+// Users paste provider URLs as-is (Neon, Render, Supabase, Heroku, Railway).
+// Those often include sslmode=require and channel_binding=require. node-pg
+// warns on sslmode=require and does not implement channel_binding, so strip
+// both from the string and apply TLS ourselves. Local URLs stay plaintext
+// unless sslmode is set; sslmode=disable remains an explicit opt-out.
+function normalizePgConfig(connectionString) {
+  const raw = String(connectionString || '').trim();
+  const fallbackSsl = { rejectUnauthorized: false };
+
+  const stripQueryKeys = (value, keys) => {
+    let next = String(value || '');
+    for (const key of keys) {
+      next = next.replace(new RegExp(`([?&])${key}=[^&]*`, 'gi'), '$1');
+    }
+    return next.replace(/[?&]+$/g, '').replace(/\?&/g, '?').replace(/&&+/g, '&');
+  };
+
+  try {
+    const url = new URL(raw);
+    const sslmode = String(url.searchParams.get('sslmode') || '').toLowerCase();
+    const sslFlag = String(url.searchParams.get('ssl') || '').toLowerCase();
+    url.searchParams.delete('sslmode');
+    url.searchParams.delete('channel_binding');
+    url.searchParams.delete('uselibpqcompat');
+    if (sslFlag === 'true' || sslFlag === '1' || sslFlag === 'require') {
+      url.searchParams.delete('ssl');
+    }
+    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(url.hostname);
+    let ssl;
+    if (sslmode === 'disable' || sslFlag === 'false' || sslFlag === '0') ssl = false;
+    else if (sslmode === 'verify-full') ssl = { rejectUnauthorized: true };
+    else if (sslmode || sslFlag === 'true' || sslFlag === '1' || sslFlag === 'require' || !isLocal) ssl = fallbackSsl;
+    return { connectionString: url.toString(), ssl };
+  } catch {
+    const sslmode = /sslmode=([^&]+)/i.exec(raw)?.[1]?.toLowerCase() || '';
+    if (sslmode === 'disable') {
+      return { connectionString: stripQueryKeys(raw, ['sslmode', 'channel_binding', 'uselibpqcompat']), ssl: false };
+    }
+    return {
+      connectionString: stripQueryKeys(raw, ['sslmode', 'channel_binding', 'uselibpqcompat', 'ssl']),
+      ssl: fallbackSsl,
+    };
+  }
 }
 
 async function init() {
@@ -163,8 +192,7 @@ async function init() {
       console.warn(`[PG] Optional PostgreSQL unavailable: ${error.message}`);
       // The driver's own wording says nothing about what to change.
       if (/SSL|TLS/i.test(error.message)) {
-        console.warn('[PG] The server requires TLS. Append ?sslmode=require to DATABASE_URL, '
-          + 'or remove ?sslmode=disable if it is set.');
+        console.warn('[PG] The server requires TLS. Paste the provider URL as-is; June enables TLS for remote hosts automatically.');
       } else if (/password|authentication|role .* does not exist/i.test(error.message)) {
         console.warn('[PG] Check the username and password in DATABASE_URL.');
       } else if (/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED/i.test(error.message)) {

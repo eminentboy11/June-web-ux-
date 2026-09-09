@@ -8,7 +8,8 @@ process.on('warning', (warning) => {
 
     if (
         warning?.code === 'SECURITY WARNING' ||
-        message.includes('The SSL modes') &&
+        message.includes('SECURITY WARNING') ||
+        message.includes('The SSL modes') ||
         message.includes('pg-connection-string')
     ) {
         return;
