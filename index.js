@@ -2550,6 +2550,7 @@ function startKeepAliveServer() {
                     authMirror: databaseHealth.authMirror,
                     postgres: databaseHealth.postgres,
                     mongo: databaseHealth.mongo,
+                    juneApi: databaseHealth.juneApi,
                 },
                 stability: {
                     replayDrain: replayDrain.getStats(),
