@@ -30,7 +30,7 @@ function isKnownStable(env) {
   return hasValue(env, 'P_SERVER_UUID');   // Pterodactyl panel
 }
 
-function selectStorage(env = process.env) {
+function _computeSelection(env) {
   const requested = String(env.JUNE_STORAGE_MODE || 'auto').trim().toLowerCase();
   if (!VALID_MODES.has(requested)) {
     throw new Error('JUNE_STORAGE_MODE must be one of auto, ephemeral, persistent, or local');
@@ -39,6 +39,13 @@ function selectStorage(env = process.env) {
   // DATABASE_URL always wins. This preserves the existing direct PostgreSQL
   // path even if a host also exposes an ephemeral-provider signal.
   if (hasValue(env, 'DATABASE_URL')) {
+    if (env.DB !== undefined) {
+      console.warn(
+        '[storage] Both DATABASE_URL and DB are set — DATABASE_URL takes ' +
+        'priority, so DB is being ignored and June DB will NOT be used. ' +
+        'Remove DATABASE_URL if you intended to use June DB instead.'
+      );
+    }
     return { mode: requested, storage: 'postgres', reason: 'DATABASE_URL' };
   }
   if (requested === 'local' || requested === 'persistent') {
@@ -48,6 +55,20 @@ function selectStorage(env = process.env) {
   if (env.DB !== undefined) {
     if (['POSTGRESQL_URL','POSTGRES_URL','MONGODB_URI','MONGO_URL'].some(key=>hasValue(env,key))) {
       return { mode: requested, storage: 'sqlite', reason: 'existing-direct-mirror' };
+    }
+    // If we're confident this host has durable local storage, don't let a
+    // stray/copy-pasted DB value occupy June DB unnecessarily. Users who
+    // genuinely need June DB on a "stable" host can force it with
+    // JUNE_FORCE_DB=1 (e.g. a Pterodactyl node whose volume isn't actually
+    // persisted in their specific setup).
+    if (isKnownStable(env) && !hasValue(env, 'JUNE_FORCE_DB')) {
+      console.warn(
+        '[storage] DB is set but this host looks stable/persistent, so ' +
+        'June DB is NOT being used — falling back to local SQLite to avoid ' +
+        'occupying June DB unnecessarily. If this host is actually ephemeral ' +
+        'and you need June DB, set JUNE_FORCE_DB=1.'
+      );
+      return { mode: requested, storage: 'sqlite', reason: 'stable-host-db-ignored' };
     }
     return { mode: requested, storage: 'june-api', reason: 'DB', automatic: true };
   }
@@ -69,6 +90,17 @@ function selectStorage(env = process.env) {
   }
 
   return { mode: requested, storage: 'sqlite', reason: 'unknown-or-persistent-environment' };
+}
+
+// Memoized so repeated calls (accidental or otherwise, e.g. once per
+// message/command instead of once at startup) don't re-run detection or
+// re-log warnings every time. Computed once per process, reused after that.
+let _cachedSelection = null;
+
+function selectStorage(env = process.env) {
+  if (_cachedSelection) return _cachedSelection;
+  _cachedSelection = _computeSelection(env);
+  return _cachedSelection;
 }
 
 function createSelectedStorage({ env = process.env, token, dbId, baseUrl, fetchImpl } = {}) {
@@ -96,6 +128,7 @@ function createSelectedStorage({ env = process.env, token, dbId, baseUrl, fetchI
 module.exports = {
   VALID_MODES,
   isKnownEphemeral,
+  isKnownStable,
   selectStorage,
   createSelectedStorage,
 };
