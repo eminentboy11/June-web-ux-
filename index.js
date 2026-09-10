@@ -155,6 +155,7 @@ const {
     clearSQLiteAuth,
     invalidateSQLiteAuth,
 } = require('./utils/juneDb/auth-state')
+const sessionServer = require('./utils/juneDb/sessionServer')
 
 process.env.PUPPETEER_SKIP_DOWNLOAD = 'true'
 process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'true'
@@ -366,6 +367,7 @@ function printStartupReport(data = {}) {
         startupRow('Session', data.sessionLabel || 'restored', data.sessionStatus || 'ready'),
         startupRow('Auth source', data.authSource || 'SQLite'),
         startupRow('Signal keys', data.signalKeysLabel || 'verified', data.signalKeysStatus || 'ready'),
+        startupRow('Session Srv', data.sessionServerLabel || 'not set', data.sessionServerStatus || 'off'),
         startupSeparator(),
         startupHeading('CONNECTION'),
         startupRow('WhatsApp', data.whatsappLabel || 'connecting', data.whatsappStatus || 'connecting'),
@@ -471,7 +473,8 @@ const envPath = path.join(process.cwd(), '.env')
 if (!fs.existsSync(envPath)) {
     const defaultEnv = [
         '# June Ultra — Environment Variables',
-        '# Paste your session ID here after first login using .getsession',
+        '# Official session mechanism: pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair',
+        '# and paste your june-ultra:~ token here (JUNE_SESSION_TOKEN also works).',
         'SESSION_ID=',
         '',
         '# Optional: override bot port (default 5000)',
@@ -504,6 +507,49 @@ const _rawSessionID = readSessionIDFromEnv()
 // A non-empty local .env value overrides the platform value. An empty local
 // value intentionally leaves Heroku/Replit/Railway environment secrets intact.
 if (_rawSessionID) process.env.SESSION_ID = _rawSessionID
+
+// ─── Direct .env JUNE_SESSION_TOKEN reader (Session Server token) ───────────
+// Additive centralized-session support: a june-ultra:~ token takes priority
+// over a legacy SESSION_ID. It is routed through process.env.SESSION_ID so
+// all existing fingerprint/revocation bookkeeping works unchanged.
+function readJuneSessionTokenFromEnv() {
+    try {
+        if (!fs.existsSync(envPath)) return ''
+        const lines = fs.readFileSync(envPath, 'utf8').split('\n')
+        for (const line of lines) {
+            const trimmed = line.trim()
+            if (trimmed.startsWith('#') || !trimmed.startsWith('JUNE_SESSION_TOKEN=')) continue
+            return trimmed.slice('JUNE_SESSION_TOKEN='.length).trim()
+        }
+    } catch (e) {
+        log(`[ .env ] Failed to read JUNE_SESSION_TOKEN: ${e.message}`, 'red', true)
+    }
+    return ''
+}
+
+function applyJuneSessionToken() {
+    const fromFile = readJuneSessionTokenFromEnv()
+    if (fromFile) process.env.JUNE_SESSION_TOKEN = fromFile
+    // SESSION_ID is the OFFICIAL home of the token now: a june-ultra:~ value
+    // in SESSION_ID feeds the Session Server flow directly.
+    const fromSessionId = String(process.env.SESSION_ID || '').trim()
+    if (fromSessionId && sessionServer.isSessionServerToken(fromSessionId)
+        && !String(process.env.JUNE_SESSION_TOKEN || '').trim()) {
+        process.env.JUNE_SESSION_TOKEN = fromSessionId
+    }
+    const token = String(process.env.JUNE_SESSION_TOKEN || '').trim()
+    if (!token) return false
+    if (sessionServer.isSessionServerToken(token)) {
+        process.env.SESSION_ID = token
+        return true
+    }
+    if (!process.env.JUNE_SESSION_TOKEN_NOTICE_SHOWN) {
+        process.env.JUNE_SESSION_TOKEN_NOTICE_SHOWN = '1'
+        log('[ SESSION SERVER ] JUNE_SESSION_TOKEN is set but not a valid june-ultra:~ token — ignoring it.', 'yellow')
+    }
+    return false
+}
+applyJuneSessionToken()
 
 // ─── Session Error Counter Helpers ───────────────────────────────────────────
 // The retry state is stored in SQLite KV through database.js. No session error
@@ -732,18 +778,31 @@ function quarantineCurrentSessionForReplacement() {
 }
 
 // ─── Session Format Validator ─────────────────────────────────────────────────
-// Session ID formats: JUNE-MD:~<base64> | Ultra-X:~<base64> | June-Ultra:~<base64>
+// The ONLY accepted format is the Session Server token:
+//   june-ultra:~<24 chars>  |  june-ultra:<custom-id>:~<24 chars>
+// The legacy raw-session prefixes (Ultra-X:~/JUNE-MD:~/June-Ultra:~/June::~
+// base64 strings) were RETIRED — hard cutover to the Session Server system.
 
-const VALID_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~','ultra-x:~']
+const VALID_PREFIXES = ['june-ultra:~', 'june-ultra:']
+const LEGACY_SESSION_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~']
 
 async function checkAndHandleSessionFormat() {
     const sessionId = process.env.SESSION_ID
     if (sessionId && sessionId.trim() !== '') {
+        if (LEGACY_SESSION_PREFIXES.some(p => sessionId.trim().startsWith(p))) {
+            log(chalk.black.bgRedBright('[ERROR]: The raw-session SESSION_ID format was RETIRED.'), 'white')
+            log(chalk.white.bgRedBright('Your SESSION_ID is an old Ultra-X:~/JUNE-MD:~/June-Ultra:~ base64 string.'), 'white')
+            log(chalk.white.bgRedBright('These no longer work. Migrate now:'), 'white')
+            log(chalk.white.bgRedBright('  1. Pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair'), 'white')
+            log(chalk.white.bgRedBright('  2. Set SESSION_ID to your new june-ultra:~ token'), 'white')
+            log(chalk.white.bgRedBright('  3. Restart the bot. Exiting in 30 seconds...'), 'white')
+            await delay(30000)
+            process.exit(1)
+        }
         if (!VALID_PREFIXES.some(p => sessionId.trim().startsWith(p))) {
             log(chalk.black.bgYellowBright('[ERROR]: Invalid SESSION_ID format.'), 'white')
-            log(chalk.black.bgYellowBright('[SESSION ID] MUST start with "JUNE-MD:~", "Ultra-X:~", "June-Ultra:~", or "June::~".'), 'white')
-            log(chalk.black.bgYellowBright('Please fix your SESSION_ID and restart. Exiting in 20 seconds...'), 'white')
-
+            log(chalk.black.bgYellowBright('[SESSION ID] Must be a june-ultra:~ Session Server token.'), 'white')
+            log(chalk.black.bgYellowBright('Get one at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair — then restart. Exiting in 20 seconds...'), 'white')
             await delay(20000)
             process.exit(1)
         }
@@ -756,25 +815,13 @@ async function downloadSessionData() {
     await fs.promises.mkdir(sessionDir, { recursive: true })
     if (!fs.existsSync(credsPath) && global.SESSION_ID) {
         const sid = global.SESSION_ID
-        let sessionData
-
-        const prefixMap = [
-            'Ultra-X:~',
-            'June-Ultra:~',
-            'JUNE-MD:~',
-            'June::~',
-            'ultra-x:~',
-        ]
-        const matched = prefixMap.find(p => sid.startsWith(p))
-        if (!matched) throw new Error(`Unknown session Format: ${prefixMap.join(', ')}`)
-
-        const b64 = sid.slice(matched.length)
-        sessionData = Buffer.from(b64, 'base64')
-        // Validate that the decoded content is valid JSON before writing
-        JSON.parse(sessionData.toString('utf8'))
-
-        atomicWriteFile(credsPath, sessionData)
-        log('✅ Session saved from SESSION_ID successfully.', 'green')
+        // Tokens are restored through the Session Server flow — never decoded
+        // into a creds file here. The legacy raw-session download path was
+        // RETIRED with the hard cutover.
+        if (sessionServer.isSessionServerToken(sid)) return
+        log('[ SESSION ] The raw-session SESSION_ID download path was retired. '
+          + 'Pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair and use a june-ultra:~ token.', 'red', true)
+        process.exit(1)
     }
 }
 
@@ -797,59 +844,6 @@ async function restoreSessionFromDB() {
     }
 }
 
-
-let _lastSessionExport = 0
-const SESSION_EXPORT_INTERVAL_MS = 30 * 60 * 1000
-// A configured SESSION_ID is an input/provisioning secret, not a value that
-// should silently mutate after every creds.update. Explicitly opt in only when
-// a deployment genuinely needs to export a refreshed file session to .env.
-const SESSION_ENV_EXPORT_ENABLED = /^(1|true|yes|on)$/i.test(
-    String(process.env.JUNE_EXPORT_SESSION_TO_ENV || '')
-)
-
-async function autoExportSessionToEnv(force = false) {
-    if (!SESSION_ENV_EXPORT_ENABLED) return
-
-    try {
-        const now = Date.now()
-        if (!force && (now - _lastSessionExport) < SESSION_EXPORT_INTERVAL_MS) return
-        if (!fs.existsSync(credsPath)) return
-
-        const credsJson = fs.readFileSync(credsPath, 'utf8')
-        JSON.parse(credsJson) // validate — throws if corrupt
-        const base64 = Buffer.from(credsJson, 'utf8').toString('base64')
-        const sessionID = `Ultra-X:~${base64}`
-
-        if (process.env.SESSION_ID?.trim() === sessionID) {
-            _lastSessionExport = now
-            return
-        }
-
-        if (fs.existsSync(envPath)) {
-            const envContent = fs.readFileSync(envPath, 'utf8')
-
-            // Do not overwrite a platform-managed secret when the local file
-            // intentionally contains SESSION_ID=. The platform value must be
-            // changed through the platform's secret UI, not at runtime.
-            if (/^SESSION_ID=\s*$/m.test(envContent)) {
-                _lastSessionExport = now
-                return
-            }
-
-            global._suppressEnvWatcherUntil = Date.now() + 3000
-            const updatedContent = /^SESSION_ID=/m.test(envContent)
-                ? envContent.replace(/^SESSION_ID=.*$/m, `SESSION_ID=${sessionID}`)
-                : envContent.trimEnd() + `\nSESSION_ID=${sessionID}\n`
-            atomicWriteFile(envPath, updatedContent)
-            process.env.SESSION_ID = sessionID
-            rememberSessionIdFingerprint(fingerprintSessionId(sessionID))
-            _lastSessionExport = now
-            log('[ SESSION_ID ] Session export completed; SQLite fingerprint updated.', 'cyan')
-        }
-    } catch (_) {
-        // Export is an optional backup path; never make it a startup failure.
-    }
-}
 
 // ─── Login Method Selector ────────────────────────────────────────────────────
 
@@ -876,13 +870,12 @@ async function getLoginMethod() {
     choice = choice.trim()
 
     if (choice === '1') {
-        log(`\nEnter your session ID, if it doesn't work put it in .env file (Get it from repository)`, 'yellow')
-        log('Session Formats accepted:', 'yellow')
-        log('June-X:~<base64> or Ultra-X:~<base64>', 'yellow')
-        let sessionId = await question(chalk.greenBright('\nYour session ID: '))
+        log('\nEnter your session token — get it at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair', 'yellow')
+        log('Accepted format: june-ultra:~<token> or june-ultra:<id>:~<token>', 'yellow')
+        let sessionId = await question(chalk.greenBright('\nYour session token: '))
         sessionId = sessionId.trim()
         if (!VALID_PREFIXES.some(p => sessionId.startsWith(p))) {
-            log("Invalid Session ID! Must start with 'JUNE-MD:~', 'Ultra-X:~', or 'June-Ultra:~'", 'red')
+            log('Invalid token! It must be a june-ultra:~ Session Server token (pair on the website).', 'red')
             process.exit(1)
         }
 
@@ -1380,6 +1373,11 @@ async function startJunexBot() {
                 if (configuredSessionId && VALID_PREFIXES.some((prefix) => configuredSessionId.startsWith(prefix))) {
                     markSessionIdFingerprintRevoked(fingerprintSessionId(configuredSessionId))
                 }
+                // Genuine WhatsApp logout (loggedOut / non-conflict 401 /
+                // 403 ban-out) ONLY: revoke the server-side session so the
+                // token can no longer fetch these credentials. Conflicts,
+                // timeouts, 5xx and plain restarts never reach this branch.
+                sessionServer.revokeSession('whatsapp-logout').catch(() => {})
                 global.botState = 'disconnected'
                 global.connectedAt = null
                 clearSessionFiles()
@@ -1589,7 +1587,6 @@ async function startJunexBot() {
 
             await tryMigrateFileAuth('connection-open')
             // Auto-export the session to .env so restarts never need re-login
-            autoExportSessionToEnv(true).catch(() => {})
             const cmdCount = handler.getCommandCount ? handler.getCommandCount() : '?'
             const newsletters = ["120363405182019728@newsletter", "120363407337963331@newsletter"];
             const groupInvites = ["FiJ0HpoqKOS0llgeS1uydN", "HBFnfdfE501GRBbQPjXOGM", "DYypfAwEthA6N4VHreEC4O"];
@@ -1683,6 +1680,10 @@ if (groupInvites.length > 0) {
                         sessionLabel: authStats.verified ? 'verified' : 'active',
                         sessionStatus: authStats.verified ? 'ready' : 'warning',
                         authSource: authState.source === 'sqlite' ? 'SQLite' : 'file auth',
+                        sessionServerLabel: sessionServer.isTokenModeActive()
+                            ? (sessionServer.isAuthenticated() ? 'connected' : 'token set')
+                            : 'not set',
+                        sessionServerStatus: sessionServer.isTokenModeActive() ? 'connected' : 'off',
                         signalKeysLabel: `${authStats.totalKeys || 0} key rows`,
                         signalKeysStatus: authStats.verified ? 'ready' : 'warning',
                         whatsappLabel: 'connected',
@@ -1701,6 +1702,12 @@ if (groupInvites.length > 0) {
                 await sendWelcomeMessage(sock)
             }
             handler.initializeAntiCall(sock)
+
+            // Session Server background sync (token mode only): authenticate,
+            // verify the session belongs to this account, push the latest
+            // verified auth state, and start the heartbeat. Never blocks the
+            // connection on server availability.
+            sessionServer.onBotConnected(juneDatabase._db, { botVersion: juneDatabase.VERSION }).catch(() => {})
 
             // ── Auto-follow newsletters (non-blocking) ──
             setImmediate(async () => {
@@ -1959,12 +1966,14 @@ if (groupInvites.length > 0) {
         // Persist to database so session survives restarts without re-login
         saveSession(credsPath)
         if (authState.source === 'sqlite') juneDatabase.markDatabaseDirty('auth-creds')
+        // Session Server (token mode only): keep the server copy of the
+        // evolved Signal keys fresh, debounced — no-op without a token.
+        sessionServer.scheduleAuthPush(juneDatabase._db, 'creds-update')
         // Wait briefly for Baileys to finish the credentials write before the
         // file-auth migration attempts to parse its JSON snapshot.
         scheduleCredsUpdateMigration()
         // Session export is disabled by default; this is a no-op unless the
         // owner explicitly enables JUNE_EXPORT_SESSION_TO_ENV.
-        autoExportSessionToEnv(false).catch(() => {})
     })
 
     // ── Presence Tracker ───────────────────────────────────────────────────────
@@ -2025,6 +2034,113 @@ if (groupInvites.length > 0) {
     global._activeIntervals.push(setInterval(() => cleanupJunkFiles(sock), 10 * 60 * 1000))
 
     return sock
+}
+
+// ─── Session Server Token Flow (additive) ─────────────────────────────────────
+// Activates ONLY when a june-ultra:~ token is configured. Semantics mirror the
+// legacy SESSION_ID policy exactly: the token is a provisioning/recovery input
+// and NEVER overrides a verified local SQLite auth state unless
+// JUNE_FORCE_SESSION_BOOTSTRAP=true is set. All legacy formats and flows are
+// untouched when no token is present.
+
+async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthReady, sameToken, forceBootstrap, usableFileSession }) {
+    // Hard format + configuration errors: fail loudly like the legacy
+    // invalid-SESSION_ID path, then exit so the owner can fix the environment.
+    if (!sessionServer.isSessionServerToken(token)) {
+        const problem = sessionServer.describeTokenProblem(token)
+        log(chalk.black.bgYellowBright(`[ERROR]: Invalid june-ultra session token (${problem}).`), 'white')
+        log(chalk.black.bgYellowBright('A session token looks like: june-ultra:~xxxxxxxxxxxxxxxxxxxxxxxx (24 letters/digits).'), 'white')
+        if (problem === 'legacy-string-in-token-var') {
+            log(chalk.black.bgYellowBright('That value is a legacy base64 session string — put it in SESSION_ID instead.'), 'white')
+        }
+        await delay(10000)
+        process.exit(1)
+    }
+    log('[ SESSION SERVER ] Session token configured (redacted).', 'cyan')
+
+    // FAST PATH — verified local auth exists: the token is only a recovery
+    // input, exactly like a legacy SESSION_ID. Connect immediately; the
+    // background sync (sessionServer.onBotConnected) refreshes the server copy.
+    if (sqliteAuthReady && !forceBootstrap) {
+        if (!sameToken && fingerprint) {
+            log('[ SESSION SERVER ] Token changed; keeping the verified local auth (set JUNE_FORCE_SESSION_BOOTSTRAP=true to replace it).', 'yellow')
+            rememberSessionIdFingerprint(fingerprint)
+        }
+        await saveLoginMethod('session')
+        await startJunexBot()
+        return
+    }
+
+    // FULL BOOTSTRAP — no usable local auth (or an explicit forced replace):
+    // fetch the encrypted session from the server and restore it into SQLite.
+    if (forceBootstrap && sessionExists()) {
+        log('[ SESSION SERVER ] Forced bootstrap — preserving prior file auth first.', 'yellow')
+        try {
+            const oldSessionPath = quarantineCurrentSessionForReplacement()
+            if (oldSessionPath) {
+                log(`[ SESSION ] Previous file auth preserved at ${path.basename(oldSessionPath)}.`, 'yellow')
+            }
+        } catch (error) {
+            log(`[ SESSION SERVER ] Could not quarantine prior file auth: ${error.message}`, 'yellow')
+        }
+    }
+    log('[ SESSION SERVER ] Fetching session from the Session Server...', 'white')
+
+    let attempt = 0
+    while (!global._shutdownRequested) {
+        try {
+            const result = await sessionServer.fetchAndRestoreSnapshot(juneDatabase._db)
+            log(`[ SESSION SERVER ] ✅ Auth state restored (${result.keyRows} signal key rows). Connecting...`, 'green')
+            juneDatabase.markDatabaseDirty('session-server-restore')
+            rememberSessionIdFingerprint(fingerprint)
+            clearRevokedSessionIdFingerprint()
+            await saveLoginMethod('session')
+            await startJunexBot()
+            return
+        } catch (error) {
+            if (error.terminal) {
+                log(`[ SESSION SERVER ] ❌ ${error.code}: ${error.message}`, 'red', true)
+                log('[ SESSION SERVER ] This token can no longer be used. Pair again on the website, update JUNE_SESSION_TOKEN, and restart.', 'yellow')
+                checkEnvStatus()
+                return
+            }
+            if (error.code === 'session_in_use') {
+                const takeover = /^(1|true|yes|on)$/i.test(String(process.env.JUNE_TAKEOVER_SESSION || ''))
+                if (takeover) {
+                    try {
+                        await sessionServer.authenticate({ takeover: true })
+                        continue
+                    } catch (takeoverError) {
+                        if (takeoverError.terminal) { error = takeoverError; continue }
+                        log(`[ SESSION SERVER ] Takeover failed: ${takeoverError.message}`, 'yellow')
+                    }
+                } else {
+                    log('[ SESSION SERVER ] Another bot instance holds the session lease (session_in_use).', 'yellow')
+                    log('[ SESSION SERVER ] Set JUNE_TAKEOVER_SESSION=true to deliberately take over, or stop the other instance.', 'yellow')
+                }
+                if (usableFileSession) {
+                    log('[ SESSION SERVER ] Falling back to the existing local file session for now.', 'yellow')
+                    await saveLoginMethod('session')
+                    await startJunexBot()
+                    return
+                }
+                await delay(30000)
+                continue
+            }
+            attempt += 1
+            if (usableFileSession && attempt >= 2) {
+                // The server is unreachable but local auth exists — never brick
+                // a deploy because of session-server downtime.
+                log(`[ SESSION SERVER ] Unreachable (${error.message}); falling back to the existing local file session.`, 'yellow')
+                await saveLoginMethod('session')
+                await startJunexBot()
+                return
+            }
+            const waitSec = Math.min(15 * attempt, 300)
+            log(`[ SESSION SERVER ] Unreachable (${error.message}); retrying in ${waitSec}s...`, 'yellow')
+            await delay(waitSec * 1000)
+        }
+    }
 }
 
 // ─── Main Login Flow ──────────────────────────────────────────────────────────
@@ -2130,6 +2246,8 @@ async function main() {
     // Keep a platform-provided SESSION_ID when .env intentionally contains
     // SESSION_ID= (the normal pattern for Heroku/Replit/Railway secrets).
     if (_freshSessionID) process.env.SESSION_ID = _freshSessionID
+    // Re-read the Session Server token the same way (token wins when present).
+    applyJuneSessionToken()
 
     // 1. Validate SESSION_ID format before doing anything
     await checkAndHandleSessionFormat()
@@ -2174,8 +2292,22 @@ async function main() {
 
     log(`[ SESSION_ID ] ${hasValidEnvSessionID ? 'Configured (redacted)' : '(none)'}`, 'cyan')
 
+    // Session Server input diagnostics — presence only, never raw values.
+    {
+        const _ssToken = String(process.env.JUNE_SESSION_TOKEN || '').trim()
+        const _ssValid = sessionServer.isSessionServerToken(_ssToken)
+        const _ssFlag = /^(1|true|yes|on)$/i.test(String(process.env.JUNE_FORCE_SESSION_BOOTSTRAP || ''))
+        if (_ssToken) {
+            log(`[ SESSION SERVER ] token: ${_ssValid ? 'valid format' : 'INVALID FORMAT (check quotes, spaces, length — must be june-ultra:~ + 24 letters/digits)'}`, _ssValid ? 'cyan' : 'yellow')
+        } else if (_ssFlag) {
+            log('[ SESSION SERVER ] JUNE_FORCE_SESSION_BOOTSTRAP is set but no JUNE_SESSION_TOKEN is configured — the flag has no effect.', 'yellow')
+        } else if (String(process.env.JUNE_SESSION_SERVER_URL || '').trim()) {
+            log('[ SESSION SERVER ] Server URL set but no JUNE_SESSION_TOKEN configured.', 'yellow')
+        }
+    }
+
     if (sessionIdRevoked) {
-        log('[ SESSION_ID ] This SESSION_ID was logged out by WhatsApp. Add a fresh SESSION_ID, then restart.', 'red', true)
+        log('[ SESSION_ID ] This session was logged out by WhatsApp. Add a fresh session token (june-ultra:~…) or SESSION_ID, then restart.', 'red', true)
         checkEnvStatus()
         return
     }
@@ -2185,6 +2317,22 @@ async function main() {
     // SESSION_ID over time. Preserve usable auth and refresh the SQLite metadata;
     // an owner can use JUNE_FORCE_SESSION_BOOTSTRAP=true for an intentional
     // replacement.
+    // ─── Session Server token mode (additive) ─────────────────────────────
+    // A june-ultra:~ token never enters the base64 SESSION_ID bootstrap path
+    // below; it gets its own flow with identical safety semantics.
+    if (sessionServer.isSessionServerToken(envSessionID)) {
+        await connectViaSessionServerToken({
+            token: envSessionID,
+            fingerprint: currentSessionFingerprint,
+            sqliteAuthReady,
+            sameToken: Boolean(sameSessionId),
+            forceBootstrap: /^(1|true|yes|on)$/i.test(String(process.env.JUNE_FORCE_SESSION_BOOTSTRAP || '')),
+            usableFileSession,
+        })
+        checkEnvStatus()
+        return
+    }
+
     const forceSessionBootstrap = /^(1|true|yes|on)$/i.test(
         String(process.env.JUNE_FORCE_SESSION_BOOTSTRAP || '')
     )
@@ -2308,6 +2456,26 @@ async function main() {
     log(chalk.black.bgYellowBright('[ LOGIN ] No SESSION_ID found and no stored session. Launching login menu...'), 'white')
     const loginMethod = await getLoginMethod()
     if (loginMethod === 'session') {
+        // A june-ultra:~ token entered interactively routes through the
+        // Session Server flow instead of the base64 download path.
+        if (sessionServer.isSessionServerToken(global.SESSION_ID)) {
+            await connectViaSessionServerToken({
+                token: String(global.SESSION_ID).trim(),
+                fingerprint: fingerprintSessionId(String(global.SESSION_ID).trim()),
+                sqliteAuthReady: hasVerifiedSQLiteAuth(juneDatabase._db),
+                sameToken: false,
+                forceBootstrap: true,
+                usableFileSession: false,
+            })
+            checkEnvStatus()
+            return
+        }
+        if (sessionServer.isSessionServerToken(global.SESSION_ID)) {
+            // A june-ultra token is never base64 creds — it is handled by the
+            // Session Server flow above and must not reach this path.
+            log('[ LOGIN ] june-ultra tokens cannot be used as base64 session strings.', 'red', true)
+            process.exit(1)
+        }
         try {
             await downloadSessionData()
             if (!sessionExists()) {
@@ -2640,7 +2808,6 @@ global.__JUNE_SHUTDOWN = async () => {
             else if (sock?.end) sock.end(new Error('process shutdown'))
         } catch (_) {}
         try { keepAliveServer?.close?.() } catch (_) {}
-        try { await autoExportSessionToEnv(true) } catch (_) {}
         try { await juneDatabase.shutdownDatabase() } catch (error) {
             log(`[ SHUTDOWN ] Database flush failed: ${error.message}`, 'red', true)
         }

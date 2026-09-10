@@ -22,3 +22,7 @@ session/
 *.log
 npm-debug.log*
 .DS_Store
+
+# no lockfiles in the repo — Render uses yarn, Koyeb will use Docker
+package-lock.json
+yarn.lock

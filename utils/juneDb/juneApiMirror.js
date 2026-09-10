@@ -81,7 +81,7 @@ function selection() {
 function getStatus() {
   const selected = selection();
   return {
-    configured: selected.storage === 'june-api',
+    configured: selected.storage === 'session-server',
     available: ready,
     mode: selected.mode,
     reason: selected.reason,
@@ -98,7 +98,7 @@ async function init() {
   initializing = (async () => {
     const selected = selection();
     const lifecycle = autoLifecycle;
-    if (selected.storage !== 'june-api') return getStatus();
+    if (selected.storage !== 'session-server') return getStatus();
     if (selected.error) {
       lastError = selected.error.message;
       if (announcedState !== 'config-failed') {
@@ -110,32 +110,35 @@ async function init() {
 
     try {
       store = selected.adapter;
-      if (selected.automatic) activeBotId = API_NAMESPACE;
+      // Session-server (one-token) storage pins a fixed namespace: the tenant
+      // is per-session, and a PN-derived prefix is not known before the first
+      // connect (which would orphan records).
+      activeBotId = API_NAMESPACE;
       const status = await store.status();
-      if (selected.automatic && lifecycle !== autoLifecycle) return getStatus();
+      if (lifecycle !== autoLifecycle) return getStatus();
       if (store.dbId && status?.installation?.dbId !== store.dbId) {
         throw new Error('JUNE_DB_ID does not match the installation token');
       }
       await store.snapshot({ limit: 1, prefix: `${activeBotId}:` });
       await store.heartbeat();
-      if (selected.automatic && lifecycle !== autoLifecycle) return getStatus();
+      if (lifecycle !== autoLifecycle) return getStatus();
       ready = true;
       if (autoRetryTimer) clearTimeout(autoRetryTimer);
       autoRetryTimer = null; autoRetryDelay = 15000;
       lastError = null;
       announceConnected();
     } catch (error) {
-      if (selected.automatic && lifecycle !== autoLifecycle) return getStatus();
+      if (lifecycle !== autoLifecycle) return getStatus();
       if (isTerminalAccessError(error)) {
         store = selected.adapter;
         stopRemotePersistence(error);
         return getStatus();
       }
-      if (selected.automatic) selected.adapter.close();
+      selected.adapter.close();
       ready = false;
       lastError = error?.message || String(error);
       announceUnavailable(lastError);
-      if (selected.automatic && error.retryable && !autoRetryTimer) {
+      if (error.retryable && !autoRetryTimer) {
         autoRetryTimer = setTimeout(() => { autoRetryTimer = null; void init(); }, autoRetryDelay);
         autoRetryTimer.unref?.();
         autoRetryDelay = Math.min(60000, autoRetryDelay * 2);

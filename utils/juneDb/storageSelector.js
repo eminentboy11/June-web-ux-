@@ -1,8 +1,9 @@
 'use strict';
 
-const { INTERNAL_JUNE_API_URL, JuneApiStore } = require('./juneApiAdapter');
-
-const VALID_MODES = new Set(['auto', 'ephemeral', 'persistent', 'local']);
+// Hard cutover (September 2026): the legacy DB= automatic June API storage and
+// the JUNE_DB_TOKEN/JUNE_DB_ID installation credentials were REMOVED.
+// The single supported remote storage is the Session Server token
+// (one-token mode). Direct PostgreSQL/MongoDB mirrors are unchanged.
 
 function hasValue(env, key) {
   return typeof env[key] === 'string' && env[key].trim() !== '';
@@ -23,65 +24,61 @@ function isKnownEphemeral(env) {
     || hasValue(env, 'KOYEB_APP_ID');                  // Koyeb
 }
 
-// Hosts with durable local disks where June DB usage is unnecessary by default.
-// Not exhaustive and not guaranteed correct for every panel config — that's
-// why JUNE_FORCE_DB exists as an escape hatch below.
+// Hosts with durable local disks where remote storage is unnecessary by default.
 function isKnownStable(env) {
   return hasValue(env, 'P_SERVER_UUID');   // Pterodactyl panel
 }
 
+function warnRetired(vars) {
+  const set = vars.filter((v) => hasValue(process.env, v));
+  if (set.length) {
+    console.warn(
+      `[storage] ${set.join(', ')} ${set.length > 1 ? 'are' : 'is'} set but the DB= / legacy June API storage system was RETIRED. ` +
+      'The value is ignored. Use your june-ultra:~ Session Server token (SESSION_ID / JUNE_SESSION_TOKEN) instead.'
+    );
+  }
+}
+
 function _computeSelection(env) {
   const requested = String(env.JUNE_STORAGE_MODE || 'auto').trim().toLowerCase();
+  const VALID_MODES = new Set(['auto', 'ephemeral', 'persistent', 'local']);
   if (!VALID_MODES.has(requested)) {
     throw new Error('JUNE_STORAGE_MODE must be one of auto, ephemeral, persistent, or local');
   }
 
-  // DATABASE_URL always wins. This preserves the existing direct PostgreSQL
-  // path even if a host also exposes an ephemeral-provider signal.
+  // DATABASE_URL (direct PostgreSQL mirror) always wins.
   if (hasValue(env, 'DATABASE_URL')) {
-    if (env.DB !== undefined) {
-      console.warn(
-        '[storage] Both DATABASE_URL and DB are set — DATABASE_URL takes ' +
-        'priority, so DB is being ignored and June DB will NOT be used. ' +
-        'Remove DATABASE_URL if you intended to use June DB instead.'
-      );
-    }
+    warnRetired(['DB', 'JUNE_DB_TOKEN', 'JUNE_DB_ID']);
     return { mode: requested, storage: 'postgres', reason: 'DATABASE_URL' };
   }
   if (requested === 'local' || requested === 'persistent') {
+    warnRetired(['DB', 'JUNE_DB_TOKEN', 'JUNE_DB_ID']);
     return { mode: requested, storage: 'sqlite', reason: requested };
   }
-  // DB is an explicit opt-in. It must not hijack pre-existing direct mirrors.
-  if (env.DB !== undefined) {
-    if (['POSTGRESQL_URL','POSTGRES_URL','MONGODB_URI','MONGO_URL'].some(key=>hasValue(env,key))) {
-      return { mode: requested, storage: 'sqlite', reason: 'existing-direct-mirror' };
+
+  // One-token mode: the Session Server token doubles as the storage
+  // credential. It only engages where local storage is not durable —
+  // known-stable hosts keep their local SQLite unless
+  // JUNE_FORCE_SESSION_STORE=1.
+  if (hasValue(env, 'JUNE_SESSION_TOKEN')) {
+    warnRetired(['DB', 'JUNE_DB_TOKEN', 'JUNE_DB_ID']);
+    if (isKnownStable(env) && !hasValue(env, 'JUNE_FORCE_SESSION_STORE')) {
+      return { mode: requested, storage: 'sqlite', reason: 'stable-host-session-token-ignored' };
     }
-    // If we're confident this host has durable local storage, don't let a
-    // stray/copy-pasted DB value occupy June DB unnecessarily. Users who
-    // genuinely need June DB on a "stable" host can force it with
-    // JUNE_FORCE_DB=1 (e.g. a Pterodactyl node whose volume isn't actually
-    // persisted in their specific setup).
-    if (isKnownStable(env) && !hasValue(env, 'JUNE_FORCE_DB')) {
-      console.warn(
-        '[storage] DB is set but this host looks stable/persistent, so ' +
-        'June DB is NOT being used — falling back to local SQLite to avoid ' +
-        'occupying June DB unnecessarily. If this host is actually ephemeral ' +
-        'and you need June DB, set JUNE_FORCE_DB=1.'
-      );
-      return { mode: requested, storage: 'sqlite', reason: 'stable-host-db-ignored' };
-    }
-    return { mode: requested, storage: 'june-api', reason: 'DB', automatic: true };
-  }
-  if (requested === 'ephemeral' || (requested === 'auto' && isKnownEphemeral(env))) {
-    return { mode: requested, storage: 'june-api', reason: requested === 'ephemeral' ? 'override' : 'known-ephemeral-provider' };
+    return { mode: requested, storage: 'session-server', reason: 'session-token', sessionServer: true };
   }
 
-  // Option B: this is the risky fallback — we couldn't confirm the host is
-  // ephemeral OR confirm it's persistent, we're just guessing "persistent".
-  // Warn loudly so an unrecognized host doesn't silently lose data on restart.
-  // Exception: if we recognize the host as a known-stable platform (e.g.
-  // Pterodactyl), skip the scary warning and log a calm confirmation instead,
-  // since data loss isn't actually a real risk there.
+  if (requested === 'ephemeral' || (requested === 'auto' && isKnownEphemeral(env))) {
+    // No token configured on an ephemeral host. The legacy DB= fallback was
+    // removed — fall back to local SQLite with a loud data-loss warning.
+    console.warn(
+      '[storage] This host looks ephemeral and no june-ultra:~ Session Server token is configured. ' +
+      'Defaulting to local SQLite — YOUR DATA WILL BE LOST on restart/redeploy. ' +
+      'Pair at the website and set SESSION_ID (or JUNE_SESSION_TOKEN) to survive redeploys.'
+    );
+    return { mode: requested, storage: 'sqlite', reason: requested === 'ephemeral' ? 'override-no-token' : 'known-ephemeral-provider-no-token' };
+  }
+
   if (requested === 'auto') {
     if (isKnownStable(env)) {
       console.log('[storage] Pterodactyl server detected — using local SQLite storage.');
@@ -89,9 +86,8 @@ function _computeSelection(env) {
       console.warn(
         '[storage] Could not detect a known ephemeral hosting provider. ' +
         'Defaulting to local SQLite storage. If this host wipes its disk on ' +
-        'restart/redeploy, your data WILL be lost. If that\'s the case, set ' +
-        'JUNE_STORAGE_MODE=ephemeral (or provide DATABASE_URL) to use persistent ' +
-        'June DB storage instead.'
+        'restart/redeploy, your data WILL be lost — set a june-ultra:~ Session ' +
+        'Server token (SESSION_ID) to survive redeploys.'
       );
     }
   }
@@ -99,9 +95,7 @@ function _computeSelection(env) {
   return { mode: requested, storage: 'sqlite', reason: 'unknown-or-persistent-environment' };
 }
 
-// Memoized so repeated calls (accidental or otherwise, e.g. once per
-// message/command instead of once at startup) don't re-run detection or
-// re-log warnings every time. Computed once per process, reused after that.
+// Memoized so repeated calls don't re-run detection or re-log warnings.
 let _cachedSelection = null;
 
 function selectStorage(env = process.env) {
@@ -110,30 +104,24 @@ function selectStorage(env = process.env) {
   return _cachedSelection;
 }
 
-function createSelectedStorage({ env = process.env, token, dbId, baseUrl, fetchImpl } = {}) {
+function createSelectedStorage({ env = process.env, baseUrl, fetchImpl } = {}) {
   const selection = selectStorage(env);
-  if (selection.storage !== 'june-api') {
+  if (selection.storage !== 'session-server') {
     return { ...selection, adapter: null };
   }
-  if (selection.automatic) {
-    if (token || dbId || hasValue(env,'JUNE_DB_TOKEN') || hasValue(env,'JUNE_DB_ID')) {
-      throw new Error('DB cannot be combined with legacy installation credentials; no automatic tenant migration is performed');
-    }
-    const { AutomaticJuneApiStore } = require('./automaticJuneApi');
-    return { ...selection, adapter: new AutomaticJuneApiStore({ secret:env.DB, fetchImpl }) };
-  }
-  const resolvedToken = token || env.JUNE_DB_TOKEN;
-  if (!resolvedToken) {
-    throw new Error('JUNE_DB_TOKEN is required when June API storage is selected');
-  }
+  const { SessionServerStore } = require('./sessionServerStore');
+  const { getServerUrl } = require('./sessionServer');
   return {
     ...selection,
-    adapter: new JuneApiStore({ token: resolvedToken, dbId: dbId || env.JUNE_DB_ID, baseUrl: baseUrl || env.JUNE_DB_API_URL || INTERNAL_JUNE_API_URL, fetchImpl }),
+    adapter: new SessionServerStore({
+      token: env.JUNE_SESSION_TOKEN,
+      baseUrl: baseUrl || getServerUrl(),
+      fetchImpl,
+    }),
   };
 }
 
 module.exports = {
-  VALID_MODES,
   isKnownEphemeral,
   isKnownStable,
   selectStorage,

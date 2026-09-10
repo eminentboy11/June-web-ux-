@@ -61,6 +61,19 @@ module.exports = {
 
       const result = await database.resetDatabase({ includeSession, includeOwner });
 
+      // Explicit user request (--session): also revoke the server-side
+      // Session Server session so the token can no longer fetch credentials.
+      // Only ever triggered here — never by transient errors or conflicts.
+      let sessionServerRevoked = null;
+      if (includeSession) {
+        try {
+          const sessionServer = require('../../utils/juneDb/sessionServer');
+          sessionServerRevoked = await sessionServer.revokeSession('user-reset');
+        } catch (_) {
+          sessionServerRevoked = { revoked: false, error: 'revoke-failed' };
+        }
+      }
+
       const lines = [
         '✅ *Database reset complete*\n',
         '🗄️ *Local tables cleared:* ' + (result.localCleared ? result.localCleared.length : 0),
@@ -74,6 +87,13 @@ module.exports = {
       if (includeSession) {
         lines.push('');
         lines.push('🔑 *Login session cleared* — the bot returns to the pairing screen on next reconnect/restart.');
+        if (sessionServerRevoked && sessionServerRevoked.revoked) {
+          lines.push('☁️ *Session Server token revoked* — the june-ultra token no longer works.');
+        } else if (sessionServerRevoked && sessionServerRevoked.skipped === 'already-revoked-or-not-active') {
+          lines.push('☁️ Session Server: no active token to revoke.');
+        } else if (sessionServerRevoked) {
+          lines.push('☁️ Session Server: could not revoke automatically — revoke the token on the manage page.');
+        }
       } else {
         lines.push('');
         lines.push('🔑 Login session kept — bot stays connected.');

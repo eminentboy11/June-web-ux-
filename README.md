@@ -87,3 +87,87 @@ Do not delete the live `database/` directory as an immediate test. First upload,
 - `database.js`, `index.js`, `mongoAdapter.js`, and `pgAdapter.js` parse successfully.
 - PostgreSQL and Mongo direct-auth mirror adapter round trips were tested with local in-memory test doubles.
 - The removed encryption helper is not referenced by the updated runtime source.
+
+---
+
+# Centralized Session Server (NEW — additive, in testing)
+
+June Ultra can now use a **centralized remote session system** instead of pasting
+huge base64 session strings:
+
+```
+Pair on the website → server stores your WhatsApp auth state (encrypted)
+→ you receive a short token:  june-ultra:~xxxxxxxxxxxxxxxxxxxxxxxx
+→ put it in your bot environment → the bot fetches the session and connects
+```
+
+## Setup
+
+1. Deploy/visit the **June Session Server** pairing website and pair your number
+   (pairing code, like before).
+2. Copy the `june-ultra:~…` token (shown on the site **and** sent to your WhatsApp).
+3. Set in the bot environment (`.env`, Heroku config vars, etc.):
+
+```
+JUNE_SESSION_TOKEN=june-ultra:~xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+4. Restart the bot. Done — no QR code, no base64 string.
+
+The session server URL is **built into the code** — users never set it.
+(`JUNE_SESSION_SERVER_URL` still exists as an undocumented override for
+testing/staging.) The built-in server is the unified June service at
+`https://burning-lorena-eminentbo-ede53cc1.koyeb.app` (pairing + sessions + storage in one).
+
+## One token = full setup (recommended)
+
+The **same `JUNE_SESSION_TOKEN`** also provides remote storage for your bot
+settings, group settings and kv data — no `DB=` and no separate database
+secret:
+
+- On hosts that wipe their disk (Render/Koyeb/Heroku/Replit/Railway/…), the
+  bot automatically mirrors its data to your session's private storage on
+  the session server. Pair once, redeploy freely — everything survives.
+- On hosts with durable disks (e.g. Pterodactyl/VPS), local SQLite is kept
+  (your data is already safe there). Set `JUNE_FORCE_SESSION_STORE=1` if you
+  want remote storage anyway.
+- Precedence if you set several: `DATABASE_URL` > `DB=` > session token.
+- Revoking your session (pairing site → Manage) removes the session **and**
+  its stored bot data in one action.
+
+## How it behaves
+
+- **SQLite remains the bot's local runtime auth store** — the token only provisions
+  and recovers it.
+- The token **never overrides a verified local session** (same policy as SESSION_ID).
+  Use `JUNE_FORCE_SESSION_BOOTSTRAP=true` for an intentional replacement.
+- While connected, the bot pushes evolved Signal keys back to the server, so
+  redeploys always get the latest state, and sends a heartbeat every 60 s.
+- **One bot per session**: a booting bot automatically takes over the session
+  lease (restarts are same-installation and never lock themselves out); a
+  second *running* deployment stops syncing this session — and two bots on one
+  token will also show device conflicts in WhatsApp.
+- **Revocation is conservative**: the server-side session is destroyed only on a
+  genuine WhatsApp logout or an explicit `.resetbot confirm --session`. Conflicts,
+  timeouts, restarts and server downtime never destroy anything.
+- If the session server is unreachable but the bot has a healthy local session,
+  the bot still connects normally.
+- Legacy `Ultra-X:~` / `JUNE-MD:~` / `June-Ultra:~` session strings keep working
+  exactly as before. This feature is purely additive.
+
+## Token management
+
+- `.getsession` (owner) — in token mode shows the token fingerprint, server
+  status and bot-online state instead of a base64 string.
+- The pairing website's **Manage** page can check status and revoke a token.
+- A revoked/expired token produces a clear terminal error; re-pair to get a new one.
+
+## New environment variables
+
+| Variable | Purpose |
+|---|---|
+| `JUNE_SESSION_TOKEN` | `june-ultra:~<24 chars>` or `june-ultra:<your-id>:~<24 chars>` token from the pairing website |
+| `JUNE_SESSION_SERVER_URL` | *(optional, undocumented)* override the built-in session server URL — testing/staging only |
+| `JUNE_FORCE_SESSION_STORE` | `1` = use session-token storage even on hosts with durable disks |
+| `JUNE_TAKEOVER_SESSION` | `true` to take over a session held by another deployment (rarely needed — taking over at boot is automatic) |
+| `JUNE_FORCE_SESSION_BOOTSTRAP` | `true` to replace verified local auth from the token's session |

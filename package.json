@@ -1,6 +1,6 @@
 {
-    "name": "June-X Ultra",
-    "version": "2.9.0",
+    "name": "june-x-ultra",
+    "version": "3.0.0",
     "description": "WhatsApp MD-Style Multi-Command Bot by Supreme",
     "main": "index.js",
     "type": "commonjs",
@@ -8,8 +8,7 @@
         "start": "node index.js",
         "build": "node obfuscator.js",
         "dev": "nodemon index.js",
-        "install:no-puppeteer": "PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install",
-        "test:june-api": "node --test test/june-api.test.js test/automatic-june-api.test.js"
+        "install:no-puppeteer": "PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install"
     },
     "keywords": [
         "whatsapp bot",
@@ -21,10 +20,9 @@
     "author": "Agent of Dusk",
     "license": "MIT",
     "engines": {
-    "node": ">=20.0.0 <21.0.0",
-    "npm": ">=10.x"
-  },
-
+        "node": ">=20.0.0 <21.0.0",
+        "npm": ">=10.x"
+    },
     "dependencies": {
         "@bochilteam/scraper": "^5.0.1",
         "@bochilteam/scraper-facebook": "^5.0.0",

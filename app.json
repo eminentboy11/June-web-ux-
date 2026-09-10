@@ -3,7 +3,14 @@
   "description": "June X Ultra - WhatsApp MD Multi-Device Bot powered by Baileys",
   "repository": "",
   "logo": "",
-  "keywords": ["whatsapp", "baileys", "bot", "node", "md", "june-ultra"],
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "bot",
+    "node",
+    "md",
+    "june-ultra"
+  ],
   "stack": "heroku-24",
   "buildpacks": [
     {
@@ -18,7 +25,12 @@
   },
   "env": {
     "SESSION_ID": {
-      "description": "June X Ultra session string. Accepted formats: JUNE-MD:~<base64>, Ultra-X:~<base64>, June-Ultra:~<base64>",
+      "description": "Official session mechanism: pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair and paste your june-ultra:~<token> here (or use JUNE_SESSION_TOKEN). Legacy base64 session strings were retired and no longer work.",
+      "required": false,
+      "value": ""
+    },
+    "JUNE_SESSION_TOKEN": {
+      "description": "Centralized session token (recommended) from the pairing website: june-ultra:~<24 chars> or june-ultra:<your-id>:~<24 chars>. Takes priority over SESSION_ID. The session server URL is built in.",
       "required": false,
       "value": ""
     }
