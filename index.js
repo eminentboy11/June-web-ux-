@@ -151,6 +151,11 @@ const {
     setSessionIdFingerprint,
     getSessionIdRevokedFingerprint,
     setSessionIdRevokedFingerprint,
+    getAuthSource,
+    setAuthSource,
+    isAuthConnectionVerified,
+    setAuthConnectionVerified,
+    isLocallyVerifiedAuth,
     hasVerifiedSQLiteAuth,
     clearSQLiteAuth,
     invalidateSQLiteAuth,
@@ -1377,7 +1382,18 @@ async function startJunexBot() {
                 // 403 ban-out) ONLY: revoke the server-side session so the
                 // token can no longer fetch these credentials. Conflicts,
                 // timeouts, 5xx and plain restarts never reach this branch.
-                sessionServer.revokeSession('whatsapp-logout').catch(() => {})
+                //
+                // v3.0.1 exception: if the credentials in use were only a
+                // mirror-restored copy that never opened a connection here,
+                // this 401 rejects THOSE KEYS — it is not proof that the
+                // server-side session died. Keep the token revocable at the
+                // manage page instead of destroying a possibly healthy session;
+                // the next start re-fetches the authoritative snapshot.
+                if (getAuthSource(juneDatabase._db) === 'mirror-restore' && !isAuthConnectionVerified(juneDatabase._db)) {
+                    log('[ SESSION SERVER ] Local auth was only a mirror copy; NOT revoking the server-side session — it will be re-fetched from the Session Server on the next start.', 'yellow')
+                } else {
+                    sessionServer.revokeSession('whatsapp-logout').catch(() => {})
+                }
                 global.botState = 'disconnected'
                 global.connectedAt = null
                 clearSessionFiles()
@@ -1531,6 +1547,12 @@ async function startJunexBot() {
             
             global.botState = 'connected'
             global.connectedAt = Date.now()
+            // v3.0.1 provenance: a real connection just opened with the current
+            // SQLite auth state — from now on this store's auth is trusted for
+            // the Session Server fast path. Never let bookkeeping break a connect.
+            try {
+                setAuthConnectionVerified(juneDatabase._db, true)
+            } catch (_) {}
             // Drop only stale replay traffic for a brief, bounded period after
             // reconnect so WhatsApp backlog delivery cannot block live commands.
             replayDrain.markConnectionOpen()
@@ -2061,14 +2083,27 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
     // FAST PATH — verified local auth exists: the token is only a recovery
     // input, exactly like a legacy SESSION_ID. Connect immediately; the
     // background sync (sessionServer.onBotConnected) refreshes the server copy.
-    if (sqliteAuthReady && !forceBootstrap) {
-        if (!sameToken && fingerprint) {
-            log('[ SESSION SERVER ] Token changed; keeping the verified local auth (set JUNE_FORCE_SESSION_BOOTSTRAP=true to replace it).', 'yellow')
+    if (sqliteAuthReady && !forceBootstrap && isLocallyVerifiedAuth(juneDatabase._db)) {
+        // v3.0.1: honest fingerprint reporting. A missing stored fingerprint
+        // (fresh or mirror-restored store) is NOT a token change.
+        const storedFingerprint = getSessionIdFingerprint(juneDatabase._db)
+        if (fingerprint && storedFingerprint !== fingerprint) {
+            if (storedFingerprint) {
+                log('[ SESSION SERVER ] Token changed; keeping the verified local auth (set JUNE_FORCE_SESSION_BOOTSTRAP=true to replace it).', 'yellow')
+            }
             rememberSessionIdFingerprint(fingerprint)
         }
         await saveLoginMethod('session')
         await startJunexBot()
         return
+    }
+
+    // v3.0.1: auth rows exist but are unproven (mirror-restored this boot, or
+    // restored and never connected). Connecting with them can draw a false
+    // 401-logout that would also revoke a healthy server-side session — fetch
+    // the authoritative snapshot from the Session Server instead.
+    if (sqliteAuthReady && !forceBootstrap) {
+        log('[ SESSION SERVER ] Local auth was restored from a mirror and has never opened a connection here; fetching the authoritative session from the Session Server instead of trusting the mirror copy.', 'yellow')
     }
 
     // FULL BOOTSTRAP — no usable local auth (or an explicit forced replace):
@@ -2092,6 +2127,10 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
             const result = await sessionServer.fetchAndRestoreSnapshot(juneDatabase._db)
             log(`[ SESSION SERVER ] ✅ Auth state restored (${result.keyRows} signal key rows). Connecting...`, 'green')
             juneDatabase.markDatabaseDirty('session-server-restore')
+            // v3.0.1: authoritative restore — this state is trusted for the
+            // fast path, and a 401 on it is genuine evidence the session died.
+            setAuthSource(juneDatabase._db, 'session-server')
+            setAuthConnectionVerified(juneDatabase._db, true)
             rememberSessionIdFingerprint(fingerprint)
             clearRevokedSessionIdFingerprint()
             await saveLoginMethod('session')
@@ -2128,10 +2167,12 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
                 continue
             }
             attempt += 1
-            if (usableFileSession && attempt >= 2) {
+            if ((usableFileSession || (sqliteAuthReady && !forceBootstrap)) && attempt >= 2) {
                 // The server is unreachable but local auth exists — never brick
-                // a deploy because of session-server downtime.
-                log(`[ SESSION SERVER ] Unreachable (${error.message}); falling back to the existing local file session.`, 'yellow')
+                // a deploy because of session-server downtime. v3.0.1: this can
+                // also be a mirror-restored (unproven) copy; the 401 handler
+                // knows not to revoke the server-side session for it.
+                log(`[ SESSION SERVER ] Unreachable (${error.message}); falling back to the existing local auth${usableFileSession ? ' (file session)' : ' (mirror-restored, unproven)'}.`, 'yellow')
                 await saveLoginMethod('session')
                 await startJunexBot()
                 return
@@ -2222,7 +2263,14 @@ async function main() {
     if (!hasVerifiedSQLiteAuth(juneDatabase._db) && !hasUsableFileSession()) {
         const authRecovery = await juneDatabase.restoreRemoteAuthState()
         if (authRecovery.restored) {
+            // v3.0.1 provenance record: mirror-restored keys are structurally
+            // 'verified' but unproven — they must never shortcut the Session
+            // Server bootstrap, and a 401 on them must not revoke the
+            // server-side session.
+            setAuthSource(juneDatabase._db, 'mirror-restore')
+            setAuthConnectionVerified(juneDatabase._db, false)
             log(`[ AUTH MIRROR ] Restored ${authRecovery.source} auth state (${authRecovery.keyRows} key rows).`, 'green')
+            log('[ AUTH MIRROR ] Mirror copy is unproven — the Session Server snapshot stays authoritative.', 'cyan')
         } else if (authRecovery.error) {
             log('[ AUTH MIRROR ] Remote auth state was unavailable or invalid.', 'yellow')
         }
