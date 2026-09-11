@@ -299,11 +299,11 @@ const APIs = {
 
   getIzumiDownloadByUrl: async (youtubeUrl) => {
     const res = await tryRequest(() =>
-      axios.get(`https://apiskeith2-production-3020.up.railway.app/download/audio?url=${encodeURIComponent(youtubeUrl)}`, DOWNLOAD_HEADERS)
+      axios.get(`https://apissupreme.vercel.app/media/ytmp3?apikey=supreme&url=${encodeURIComponent(youtubeUrl)}`, DOWNLOAD_HEADERS)
     );
-    if (res?.data?.status && res?.data?.result) {
+    if (res?.data?.status && res?.data?.downloadUrl) {
       return {
-        download: res.data.result,
+        download: res.data.downloadUrl,
         thumbnail: res.data.result.thumbnail
       };
     }
