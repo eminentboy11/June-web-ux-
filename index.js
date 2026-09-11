@@ -884,6 +884,11 @@ async function getLoginMethod() {
         }
 
         global.SESSION_ID = sessionId
+        // The Session Server client reads the token from the environment, not
+        // from this global — set both so interactive entry behaves exactly
+        // like a token configured in .env (fetch, sync and revoke all see it).
+        process.env.SESSION_ID = sessionId
+        process.env.JUNE_SESSION_TOKEN = sessionId
         await saveLoginMethod('session')
         return 'session'
     } else if (choice === '2') {
@@ -2139,6 +2144,14 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
             if (error.terminal) {
                 log(`[ SESSION SERVER ] ❌ ${error.code}: ${error.message}`, 'red', true)
                 log('[ SESSION SERVER ] This token can no longer be used. Pair again on the website, update JUNE_SESSION_TOKEN, and restart.', 'yellow')
+                checkEnvStatus()
+                return
+            }
+            // A missing token is a configuration error, not a network problem —
+            // retrying can never succeed. Fail fast with actionable guidance.
+            if (/No valid JUNE_SESSION_TOKEN/.test(error.message || '')) {
+                log('[ SESSION SERVER ] ❌ The session token is missing from the environment — this is a configuration error, not a network problem.', 'red', true)
+                log('[ SESSION SERVER ] Add SESSION_ID=<token> (or JUNE_SESSION_TOKEN=<token>) to .env or your host panel, then restart.', 'yellow')
                 checkEnvStatus()
                 return
             }
