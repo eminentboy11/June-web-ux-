@@ -247,7 +247,7 @@ module.exports = {
       }, { quoted: fakeQuoted });
 
       const markDone = () => sock.sendMessage(extra.from, {
-        text: applyFont(`_${db.getBotSetting('botName')} Loaded.._`),
+        text: applyFont(`_${db.getBotSetting('botName')}_`),
         edit: loadingMsg.key
       }).catch(() => {});
 
