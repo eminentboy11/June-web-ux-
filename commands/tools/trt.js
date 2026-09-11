@@ -2,7 +2,7 @@ const APIs = require('../../utils/api');
 
 module.exports = {
     name: 'translate',
-    aliases: ['tr'],
+    aliases: ['tr', 'trans'],  // 'trans' carried over from the retired general/translate.js
     category: 'tools',
     description: 'Translate text',
     usage: '.translate <lang_code> <text>',
