@@ -1722,6 +1722,10 @@ if (groupInvites.length > 0) {
             }
             handler.initializeAntiCall(sock)
 
+            // Scheduled website pinger (.pinger command): attach the socket so
+            // status-transition DMs can reach the owner; loads persisted targets.
+            require('./utils/pinger').onBotConnected(sock)
+
             // Session Server background sync (token mode only): authenticate,
             // verify the session belongs to this account, push the latest
             // verified auth state, and start the heartbeat. Never blocks the
