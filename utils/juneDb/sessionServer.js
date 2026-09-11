@@ -96,6 +96,21 @@ function describeTokenProblem(value) {
   return 'bad-charset';
 }
 
+/**
+ * Stable per-token bot identity for remote mirror scoping (v3.1.0+):
+ * 12 hex chars of SHA-256(token body) — the body is the 24 random chars that
+ * hold all the entropy, so a cosmetic custom-id label never moves the
+ * namespace. index.js uses this when no explicit PN/JUNE_PN/JUNE_BOT_ID/
+ * BOT_ID/OWNER_NUMBER is configured, so direct PostgreSQL/Mongo mirrors are
+ * scoped per session token without any extra .env configuration. Contains no
+ * reversible credential material — the same rule as SESSION_ID fingerprints.
+ */
+function tokenBotIdSuffix(value) {
+  const parsed = parseSessionServerToken(value);
+  if (!parsed) return null;
+  return sha256Hex(parsed.body).slice(0, 12);
+}
+
 function getServerUrl() {
   const override = String(process.env.JUNE_SESSION_SERVER_URL || '').trim().replace(/\/+$/, '');
   return override || DEFAULT_SESSION_SERVER_URL;
@@ -612,6 +627,7 @@ module.exports = {
   isSessionServerToken,
   parseSessionServerToken,
   describeTokenProblem,
+  tokenBotIdSuffix,
   getServerUrl,
   getConfiguredToken,
   isTokenModeActive,

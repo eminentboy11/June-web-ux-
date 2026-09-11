@@ -2198,10 +2198,29 @@ async function main() {
     //
     // Falls back to the bare product name when nothing is set, which is what
     // existing deployments already use, so their data stays reachable.
-    const botIdSource = process.env.PN || process.env.JUNE_PN ||
-        process.env.JUNE_BOT_ID || process.env.BOT_ID || process.env.OWNER_NUMBER ||
-        juneDatabase.getOwners()?.[0]
-    const configuredBotId = pgAdapter.buildBotId(botIdSource)
+    // v3.1.0 token-scoped identity: when no explicit PN/JUNE_PN/JUNE_BOT_ID/
+    // BOT_ID/OWNER_NUMBER is configured, the session token itself scopes the
+    // remote mirrors — SHA-256 of the token body (never raw token material) —
+    // so two token deployments can share one external Postgres/Mongo database
+    // without colliding and without any PN= configuration. Explicit env vars
+    // always win. The stored owner number only applies when no token is
+    // present, so re-pairing to a new token can never silently keep reading
+    // the previous number's partition.
+    const explicitBotIdSource = process.env.PN || process.env.JUNE_PN ||
+        process.env.JUNE_BOT_ID || process.env.BOT_ID || process.env.OWNER_NUMBER
+    const tokenBotId = explicitBotIdSource ? null
+        : sessionServer.tokenBotIdSuffix(sessionServer.getConfiguredToken())
+    let botIdSource
+    let configuredBotId
+    if (tokenBotId) {
+        botIdSource = 'session-token'
+        // Product prefix mirrors pgAdapter's BOT_ID_PRODUCT ('june-ultra-main').
+        configuredBotId = `june-ultra-main-tk-${tokenBotId}`
+        log(`[ BOT ID ] Session token identity active — remote data is scoped to bot_id="${configuredBotId}". No PN needed.`, 'cyan')
+    } else {
+        botIdSource = explicitBotIdSource || juneDatabase.getOwners()?.[0]
+        configuredBotId = pgAdapter.buildBotId(botIdSource)
+    }
     global.__BOT_ID_SOURCE__ = botIdSource || null
     pgAdapter.setBotId(configuredBotId)
     mongoAdapter.setBotId(configuredBotId)
@@ -2209,7 +2228,8 @@ async function main() {
     if (!botIdSource && (process.env.DATABASE_URL || process.env.MONGODB_URI || process.env.MONGO_URL)) {
         log('[ BOT ID ] No PN set — remote data is stored under the shared key '
           + `"${configuredBotId}". If another bot uses this same database they will `
-          + 'overwrite each other. Add PN=<your number> to .env.', 'yellow')
+          + 'overwrite each other. Add PN=<your number> to .env, or pair with a '
+          + 'session token to scope this deployment automatically.', 'yellow')
     }
 
     const [pgStatus, mongoStatus, juneApiStatus] = await Promise.all([
