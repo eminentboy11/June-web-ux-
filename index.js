@@ -19,7 +19,7 @@ process.on('warning', (warning) => {
     console.warn(warning);
 });
 // --- Environment Setup ---
-require('dotenv').config({ quiet: true });
+require('dotenv').config();
 
 // ─── Uptime Synchronization ──────────────────────────────────────────────────
 // If JUNE_START_TIME is set (passed by the supervisor), monkey-patch 
