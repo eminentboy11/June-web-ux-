@@ -160,7 +160,6 @@ if (forceSqlJs) {
     try {
       Database = require('better-sqlite3');
       dbDriver = 'better-sqlite3';
-      console.log(`[DB] Native SQLite probe passed (${process.version}/${process.platform}/${process.arch})`);
     } catch (_) {
       dbDriver = 'sql.js-fallback';
       console.warn('[DB] Native SQLite loaded in probe but failed in parent; using sql.js fallback');
@@ -832,7 +831,6 @@ async function openDatabase() {
   if (dbDriver === 'better-sqlite3') {
     try {
       connection = new Database(DB_FILE);
-      console.log('[DB] Using better-sqlite3 native');
     } catch (error) {
       // Do not print the native error: on incompatible VPS images it contains
       // a very noisy GLIBC/native-loader stack. Fall back cleanly instead.
@@ -858,7 +856,7 @@ async function openDatabase() {
 
     configureDatabase(connection);
     lastIntegrityCheck = { ok: true, result: 'ok', checkedAt: Date.now() };
-    console.log('[DB] ✅ Integrity check passed');
+    console.log('[DB] SQLite ready — better-sqlite3 native, integrity check passed');
     return connection;
 
   } else if (dbDriver === 'sql.js-fallback') {

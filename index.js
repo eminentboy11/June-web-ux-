@@ -19,7 +19,7 @@ process.on('warning', (warning) => {
     console.warn(warning);
 });
 // --- Environment Setup ---
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 // ─── Uptime Synchronization ──────────────────────────────────────────────────
 // If JUNE_START_TIME is set (passed by the supervisor), monkey-patch 
@@ -730,7 +730,6 @@ function rememberSessionIdFingerprint(fingerprint) {
     }
 
     juneDatabase.markDatabaseDirty('session-id-fingerprint')
-    log('[ AUTH META ] SESSION_ID fingerprint saved in SQLite.', 'green')
     return true
 }
 
@@ -1022,7 +1021,6 @@ async function checkSessionIntegrityAndClean() {
 
 function checkEnvStatus() {
     try {
-        log('[ WATCHER ] Monitoring .env for changes...', 'green')
         global._envWatcher = fs.watch(envPath, { persistent: false }, (eventType, filename) => {
             if (filename && eventType === 'change') {
                 // Suppress restart when we ourselves wrote the session update.
@@ -1198,7 +1196,6 @@ async function startJunexBot() {
         // LID row from the database backup on the next boot.
         try {
             await juneDatabase.createBackup?.()
-            log('[ AUTH ] Cleaned auth backup written; invalid LID mappings will not be restored.', 'cyan')
         } catch (backupError) {
             log(`[ AUTH ] Could not flush cleaned auth backup yet: ${backupError.message}`, 'yellow')
         }
@@ -1230,7 +1227,7 @@ async function startJunexBot() {
         authState = { ...fileState, source: 'files', stats: getSQLiteAuthStats(juneDatabase._db) }
     }
     const { state, saveCreds } = authState
-    log(`[ AUTH ] ${authState.source === 'sqlite' ? 'SQLite' : 'file'} auth active (${authState.stats.totalKeys} signal key rows in SQLite).`, 'cyan')
+    log(`[ AUTH ] ${authState.source === 'sqlite' ? 'SQLite' : 'file'} auth active (${authState.stats.totalKeys} key rows).`, 'cyan')
     const msgRetryCounterCache = new NodeCache()
     let fileMigrationInFlight = null
     let fileMigrationComplete = false
@@ -2078,7 +2075,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
         await delay(10000)
         process.exit(1)
     }
-    log('[ SESSION SERVER ] Session token configured (redacted).', 'cyan')
+    log('[ SESSION SERVER ] Token configured (redacted) — fetching the authoritative session…', 'cyan')
 
     // FAST PATH — verified local auth exists: the token is only a recovery
     // input, exactly like a legacy SESSION_ID. Connect immediately; the
@@ -2119,8 +2116,6 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
             log(`[ SESSION SERVER ] Could not quarantine prior file auth: ${error.message}`, 'yellow')
         }
     }
-    log('[ SESSION SERVER ] Fetching session from the Session Server...', 'white')
-
     let attempt = 0
     while (!global._shutdownRequested) {
         try {
@@ -2216,7 +2211,7 @@ async function main() {
         botIdSource = 'session-token'
         // Product prefix mirrors pgAdapter's BOT_ID_PRODUCT ('june-ultra-main').
         configuredBotId = `june-ultra-main-tk-${tokenBotId}`
-        log(`[ BOT ID ] Session token identity active — remote data is scoped to bot_id="${configuredBotId}". No PN needed.`, 'cyan')
+        log(`[ BOT ID ] Token identity active — bot_id="${configuredBotId}" (no PN needed).`, 'cyan')
     } else {
         botIdSource = explicitBotIdSource || juneDatabase.getOwners()?.[0]
         configuredBotId = pgAdapter.buildBotId(botIdSource)
@@ -2269,8 +2264,7 @@ async function main() {
         try {
             const pushed = juneDatabase.backfillRemote()
             if (pushed.pushed > 0) {
-                log(`[ SYNC ] Backfilled ${pushed.pushed} local records to the remote mirror `
-                  + `(${pushed.botSettings} settings, ${pushed.groups} groups, ${pushed.moderators} sudo).`, 'cyan')
+                log(`[ SYNC ] Backfilled ${pushed.pushed} records to the remote mirror.`, 'cyan')
             }
         } catch (e) {
             log(`[ SYNC ] Backfill skipped: ${e.message}`, 'yellow')
@@ -2322,7 +2316,7 @@ async function main() {
 
     // 2. Restore the persisted retry counter from SQLite KV.
     global.errorRetryCount = getPersistedSessionErrorState().count
-    log(`Initial 408 retry count: ${global.errorRetryCount}`, 'yellow')
+    if (global.errorRetryCount > 0) log(`Initial 408 retry count: ${global.errorRetryCount}`, 'yellow')
 
     cleanupExpiredSessionQuarantines('startup')
 
@@ -2366,7 +2360,7 @@ async function main() {
         const _ssValid = sessionServer.isSessionServerToken(_ssToken)
         const _ssFlag = /^(1|true|yes|on)$/i.test(String(process.env.JUNE_FORCE_SESSION_BOOTSTRAP || ''))
         if (_ssToken) {
-            log(`[ SESSION SERVER ] token: ${_ssValid ? 'valid format' : 'INVALID FORMAT (check quotes, spaces, length — must be june-ultra:~ + 24 letters/digits)'}`, _ssValid ? 'cyan' : 'yellow')
+            if (!_ssValid) log('[ SESSION SERVER ] token: INVALID FORMAT (check quotes, spaces, length — must be june-ultra:~ + 24 letters/digits)', 'yellow')
         } else if (_ssFlag) {
             log('[ SESSION SERVER ] JUNE_FORCE_SESSION_BOOTSTRAP is set but no JUNE_SESSION_TOKEN is configured — the flag has no effect.', 'yellow')
         } else if (String(process.env.JUNE_SESSION_SERVER_URL || '').trim()) {
