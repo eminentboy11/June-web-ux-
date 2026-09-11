@@ -304,7 +304,10 @@ const APIs = {
     if (res?.data?.status && res?.data?.downloadUrl) {
       return {
         download: res.data.downloadUrl,
-        thumbnail: res.data.result.thumbnail
+        title: res.data.title,
+        thumbnail: res.data.thumbnail,
+        duration: res.data.duration,
+        source: res.data.source
       };
     }
     throw new Error('no download URL returned');
