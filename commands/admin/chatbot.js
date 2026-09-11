@@ -246,11 +246,25 @@ function buildContextPrompt(conversation, newQuery, botName, userProfile = null,
 // All text AI routes through NVIDIA (baked-in key in utils/api.js). The
 // modelKey is used only as a label for which model was tried; every configured
 // model resolves to the reliable NVIDIA provider so no config breaks.
+//
+// 2026-09-11: NVIDIA retired the previous default chat model
+// (nemotron-nano-12b-v2-vl, EOL 2026-08-26 — every call returned HTTP 410 and
+// the bot answered 'trouble connecting'). utils/api.js still defaults to the
+// retired model (protected file — the owner's dev should update
+// NVIDIA_DEFAULT_MODEL there), so every NVIDIA call below passes an explicit,
+// current model. The omni successor is multimodal: it serves both the text
+// path and the vision fallback below.
+const NVIDIA_CHAT_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning';
+
 async function queryAI(modelKey, prompt, timeout = 35000, rawQuery = null) {
   if (!AI_MODELS[modelKey]) return null;
   try {
-    const answer = await APIs.nvidiaChat(prompt, { maxTokens: 700, timeoutMs: 90000 });
-    if (answer && answer.trim().length >= 3) return answer.trim();
+    const answer = await APIs.nvidiaChat(prompt, { model: NVIDIA_CHAT_MODEL, maxTokens: 700, timeoutMs: 90000 });
+    if (answer && answer.trim().length >= 3) {
+      // Reasoning-family models can emit <think>…</think> blocks; never show them.
+      const cleaned = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      if (cleaned.length >= 3) return cleaned;
+    }
   } catch (err) {
     console.error(`[Chatbot/NVIDIA/${modelKey}]`, err.message);
   }
@@ -342,7 +356,7 @@ async function queryVision(prompt, imageBuffer) {
     const text = await APIs.nvidiaVision(
       effectivePrompt,
       imageBuffer,
-      { model: 'nvidia/nemotron-nano-12b-v2-vl', maxTokens: 1024, timeoutMs: 90000 }
+      { model: NVIDIA_CHAT_MODEL, maxTokens: 1024, timeoutMs: 90000 }
     );
     return text ? text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim() : null;
   } catch (err) {
