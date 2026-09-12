@@ -1731,6 +1731,10 @@ if (groupInvites.length > 0) {
             // status-transition DMs can reach the owner; loads persisted targets.
             require('./utils/pinger').onBotConnected(sock)
 
+            // Notes reminders (.mynotes remind / .note-remind): attach the
+            // socket for reminder DMs; the scanner loads persisted reminders.
+            require('./utils/notes').onBotConnected(sock)
+
             // Session Server background sync (token mode only): authenticate,
             // verify the session belongs to this account, push the latest
             // verified auth state, and start the heartbeat. Never blocks the
