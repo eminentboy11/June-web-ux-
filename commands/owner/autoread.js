@@ -20,11 +20,11 @@ const KEY = 'autoReadMode';
 const MODES = ['off', 'pm', 'gc', 'all', 'contacts'];
 
 const LABELS = {
-    off: '❌ OFF — incoming messages are not auto-read',
-    pm: '📩 PM — only private messages are marked read',
-    gc: '💬 GC — only group messages are marked read',
-    all: '✅ ALL — every incoming chat message is marked read',
-    contacts: '👥 CONTACTS — only messages from known contacts are read',
+    off: '❌ Auto-read: off',
+    pm: '📩 Auto-read: pm',
+    gc: '💬 Auto-read: gc',
+    all: '✅ Auto-read: all',
+    contacts: '👥 Auto-read: contacts',
 };
 
 /** Current persisted mode (always a valid value). */
@@ -99,28 +99,20 @@ module.exports = {
             const opt = (args[0] || '').toLowerCase();
 
             if (!opt) {
-                return extra.reply(
-                    `📖 *Auto Read*\n\n${LABELS[currentMode()]}\n\n` +
-                    `*Options:*\n\n` +
-                    `• \`.autoread off\` — disable (default)\n` +
-                    `• \`.autoread pm\` — read incoming from private message only\n` +
-                    `• \`.autoread gc\` — read incoming message from group only\n` +
-                    `• \`.autoread all\` — read every incoming message\n` +
-                    `• \`.autoread contacts\` — read known contacts only`
-                );
+                return extra.reply(LABELS[currentMode()]);
             }
 
             if (!MODES.includes(opt)) {
-                return extra.reply(`⚠️ Invalid option. Usage: \`.autoread <off | all | contacts>\``);
+                return extra.reply(`Usage: .autoread <off|pm|gc|all|contacts>`);
             }
 
             db.setBotSetting(KEY, opt);
             if (extra.react) await extra.react(opt === 'off' ? '❌' : '✅').catch(() => {});
-            return extra.reply(`📖 *Auto Read updated*\n\n${LABELS[opt]}`);
+            return extra.reply(LABELS[opt]);
         } catch (error) {
             console.error('[autoread]', error.message);
             if (extra.react) await extra.react('❌').catch(() => {});
-            return extra.reply(`❌ AutoRead error: ${error.message}`);
+            return extra.reply(`❌ ${error.message}`);
         }
     },
 
