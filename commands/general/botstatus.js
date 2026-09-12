@@ -100,7 +100,7 @@ module.exports = {
                 `┃ Behavior\n` +
 
                 `➥ Mode          ➜ ${getModeLabel()}\n` +
-                `➥ Auto Read     ➜ ${database.getBotSetting('autoRead')      ? '✅' : '❌'}\n` +
+                `➥ Auto Read     ➜ ${({ all: '✅', contacts: '👥' })[database.getBotSetting('autoReadMode') || 'off'] || '❌'} (${(database.getBotSetting('autoReadMode') || 'off').toUpperCase()})\n` +
                 `➥ Auto Typing   ➜ ${database.getBotSetting('autoTyping')    ? '✅' : '❌'}\n` +
                 `➥ Auto React    ➜ ${database.getBotSetting('autoReact')     ? '✅' : '❌'} (${database.getBotSetting('autoReactMode') || 'bot'})\n` +
                 `➥ Auto Sticker  ➜ ${database.getBotSetting('autoSticker')   ? '✅' : '❌'}\n` +

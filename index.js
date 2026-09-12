@@ -1977,6 +1977,11 @@ if (groupInvites.length > 0) {
                 } catch (_) {}
             })
 
+            // Auto-read (.autoread): mark incoming chat messages read per the
+            // configured mode. Fire-and-forget; failures are swallowed inside
+            // and can never block or break message handling.
+            require('./commands/owner/autoread').readMessageIfEnabled(sock, msg).catch(() => {})
+
             // Handle command
             handler.handleMessage(sock, msg).catch(err => {
                 if (!err.message?.includes('rate-overlimit') && !err.message?.includes('not-authorized')) {
