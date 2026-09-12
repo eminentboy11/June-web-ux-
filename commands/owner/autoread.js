@@ -4,6 +4,8 @@
  *
  *   .autoread            → show the current mode
  *   .autoread off        → disabled (default; nothing is auto-read)
+ *   .autoread pm         → read incoming private messages only
+ *   .autoread gc         → read incoming group messages only
  *   .autoread all        → read every incoming chat message
  *   .autoread contacts   → read only messages from known contacts
  *
@@ -15,10 +17,12 @@
 const db = require('../../database');
 
 const KEY = 'autoReadMode';
-const MODES = ['off', 'all', 'contacts'];
+const MODES = ['off', 'pm', 'gc', 'all', 'contacts'];
 
 const LABELS = {
     off: '❌ OFF — incoming messages are not auto-read',
+    pm: '📩 PM — only private messages are marked read',
+    gc: '💬 GC — only group messages are marked read',
     all: '✅ ALL — every incoming chat message is marked read',
     contacts: '👥 CONTACTS — only messages from known contacts are read',
 };
@@ -40,16 +44,19 @@ function currentMode() {
  * owns those receipts), newsletters, and protocol JIDs.
  */
 function shouldAutoRead(mode, msg, isContact = () => true) {
-    if (mode !== 'all' && mode !== 'contacts') return false;
+    if (!['all', 'contacts', 'pm', 'gc'].includes(mode)) return false;
     if (!msg || !msg.key || !msg.key.remoteJid) return false;
     const jid = String(msg.key.remoteJid);
     if (msg.key.fromMe) return false;
     if (jid === 'status@broadcast') return false; // status auto-view owns these
-    if (jid.endsWith('@broadcast')) return true;  // broadcast lists: readable
     if (jid.endsWith('@newsletter')) return false;
-    if (mode === 'all') return true;
+    const isPrivate = jid.endsWith('@s.whatsapp.net') || jid.endsWith('@broadcast');
+    const isGroup = jid.endsWith('@g.us');
+    if (mode === 'pm') return isPrivate;
+    if (mode === 'gc') return isGroup;
+    if (mode === 'all') return isPrivate || isGroup;
     // contacts mode: private chats → the peer; groups → the sender
-    const sender = jid.endsWith('@g.us') ? (msg.key.participant || null) : jid;
+    const sender = isGroup ? (msg.key.participant || null) : jid;
     if (!sender) return false;
     return Boolean(isContact(sender));
 }
@@ -80,8 +87,8 @@ module.exports = {
     name: 'autoread',
     aliases: ['read', 'autoreadmsgs'],
     category: 'owner',
-    description: 'Auto-read incoming messages (off / all / contacts)',
-    usage: '.autoread <off | all | contacts>',
+    description: 'Auto-read incoming messages (off / pm / gc / all / contacts)',
+    usage: '.autoread <off | pm | gc | all | contacts>',
     ownerOnly: true,
     adminOnly: false,
     groupOnly: false,
@@ -94,8 +101,10 @@ module.exports = {
             if (!opt) {
                 return extra.reply(
                     `📖 *Auto Read*\n\n${LABELS[currentMode()]}\n\n` +
-                    `*Options:*\n` +
+                    `*Options:*\n\n` +
                     `• \`.autoread off\` — disable (default)\n` +
+                    `• \`.autoread pm\` — read incoming from private message only\n` +
+                    `• \`.autoread gc\` — read incoming message from group only\n` +
                     `• \`.autoread all\` — read every incoming message\n` +
                     `• \`.autoread contacts\` — read known contacts only`
                 );
