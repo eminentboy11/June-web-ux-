@@ -478,7 +478,7 @@ const envPath = path.join(process.cwd(), '.env')
 if (!fs.existsSync(envPath)) {
     const defaultEnv = [
         '# June Ultra — Environment Variables',
-        '# Official session mechanism: pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair',
+        `# Official session mechanism: pair at ${sessionServer.getServerUrl()}/pair`,
         '# and paste your june-ultra:~ token here (JUNE_SESSION_TOKEN also works).',
         'SESSION_ID=',
         '',
@@ -797,7 +797,7 @@ async function checkAndHandleSessionFormat() {
             log(chalk.black.bgRedBright('[ERROR]: The raw-session SESSION_ID format was RETIRED.'), 'white')
             log(chalk.white.bgRedBright('Your SESSION_ID is an old Ultra-X:~/JUNE-MD:~/June-Ultra:~ base64 string.'), 'white')
             log(chalk.white.bgRedBright('These no longer work. Migrate now:'), 'white')
-            log(chalk.white.bgRedBright('  1. Pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair'), 'white')
+            log(chalk.white.bgRedBright(`  1. Pair at ${sessionServer.getServerUrl()}/pair`), 'white')
             log(chalk.white.bgRedBright('  2. Set SESSION_ID to your new june-ultra:~ token'), 'white')
             log(chalk.white.bgRedBright('  3. Restart the bot. Exiting in 30 seconds...'), 'white')
             await delay(30000)
@@ -806,7 +806,7 @@ async function checkAndHandleSessionFormat() {
         if (!VALID_PREFIXES.some(p => sessionId.trim().startsWith(p))) {
             log(chalk.black.bgYellowBright('[ERROR]: Invalid SESSION_ID format.'), 'white')
             log(chalk.black.bgYellowBright('[SESSION ID] Must be a june-ultra:~ Session Server token.'), 'white')
-            log(chalk.black.bgYellowBright('Get one at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair — then restart. Exiting in 20 seconds...'), 'white')
+            log(chalk.black.bgYellowBright(`Get one at ${sessionServer.getServerUrl()}/pair — then restart. Exiting in 20 seconds...`), 'white')
             await delay(20000)
             process.exit(1)
         }
@@ -824,7 +824,7 @@ async function downloadSessionData() {
         // RETIRED with the hard cutover.
         if (sessionServer.isSessionServerToken(sid)) return
         log('[ SESSION ] The raw-session SESSION_ID download path was retired. '
-          + 'Pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair and use a june-ultra:~ token.', 'red', true)
+          + `Pair at ${sessionServer.getServerUrl()}/pair and use a june-ultra:~ token.`, 'red', true)
         process.exit(1)
     }
 }
@@ -874,7 +874,7 @@ async function getLoginMethod() {
     choice = choice.trim()
 
     if (choice === '1') {
-        log('\nEnter your session token — get it at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair', 'yellow')
+        log(`\nEnter your session token — get it at ${sessionServer.getServerUrl()}/pair`, 'yellow')
         log('Accepted format: june-ultra:~<token> or june-ultra:<id>:~<token>', 'yellow')
         let sessionId = await question(chalk.greenBright('\nYour session token: '))
         sessionId = sessionId.trim()

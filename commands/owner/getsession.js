@@ -66,7 +66,7 @@ module.exports = {
         '❌ *No Session Server token configured.*\n\n' +
         'Raw session IDs (Ultra-X:~/JUNE-MD:~) were retired —\n' +
         'the token is now the only session mechanism.\n\n' +
-        '1️⃣ Pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair\n' +
+        `1️⃣ Pair at ${sessionServer.getServerUrl()}/pair\n` +
         '2️⃣ Copy your june-ultra:~ token\n' +
         '3️⃣ Set it as SESSION_ID in this bot\'s .env\n' +
         '4️⃣ Restart the bot'
