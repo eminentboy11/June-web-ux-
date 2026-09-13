@@ -176,10 +176,16 @@ const nextPool = new Pool({
   ssl: pgConfig.ssl,
 });
 
-    nextPool.on('error', (error) => {
-      lastError = error.message;
-      console.warn(`[PG] Pool error: ${error.message}`);
-    });
+nextPool.on('error', (error) => {
+  lastError = error.message;
+  // A dead database fires this on every failed operation — log it at most
+  // once every 5 minutes so the console never floods.
+  const now = Date.now();
+  if (now - nextPool._lastErrorLog >= 5 * 60 * 1000) {
+    nextPool._lastErrorLog = now;
+    console.warn(`[PG] Pool error: ${error.message}`);
+  }
+});
 
     try {
       await nextPool.query('SELECT 1');
