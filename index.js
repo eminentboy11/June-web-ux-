@@ -2247,10 +2247,13 @@ async function main() {
     mongoAdapter.setBotId(configuredBotId)
     juneApiAdapter.setBotId(configuredBotId)
     if (!botIdSource && (process.env.DATABASE_URL || process.env.MONGODB_URI || process.env.MONGO_URL)) {
-        log('[ BOT ID ] No PN set — remote data is stored under the shared key '
-          + `"${configuredBotId}". If another bot uses this same database they will `
-          + 'overwrite each other. Add PN=<your number> to .env, or pair with a '
-          + 'session token to scope this deployment automatically.', 'yellow')
+        log('[ BOT ID ] No SESSION_ID set — cloud data (Postgres/Mongo) is saved under the shared name '
+          + `"${configuredBotId}".\n`
+          + '  • Running only ONE bot on this database? You can ignore this.\n'
+          + '  • Running more than one bot on the same database? They will overwrite each other\'s data.\n'
+          + '  • Fix: paste your session token (SESSION_ID) in .env — each token automatically gets its own '
+          + 'separate data space.\n'
+          + '    (Old way still works: PN=<your number> in .env)', 'yellow')
     }
 
     const [pgStatus, mongoStatus, juneApiStatus] = await Promise.all([
@@ -2507,7 +2510,7 @@ async function main() {
         await saveLoginMethod('session')
         log('[ SESSION_ID ] Existing usable file session retained; rebuilding SQLite auth if needed.', 'cyan')
     } else {
-        log('[ALERT] No SESSION_ID in .env..', 'blue')
+        log('[ SESSION_ID ] No SESSION_ID in .env — checking for a saved session...', 'yellow')
     }
 
     // 4. Integrity check on stored session
@@ -2515,7 +2518,7 @@ async function main() {
 
     // 5. Use existing stored session if valid
     if (sessionExists()) {
-        log('[ALERT] Valid stored session found.', 'green')
+        log('[ SESSION_ID ] Saved session found — continuing with it.', 'green')
         await startJunexBot()
         checkEnvStatus()
         return
