@@ -2318,23 +2318,29 @@ const initializeAntiCall = (sock) => {
       // Settings are read straight from SQLite below, so there is no module
       // cache to bust. This previously did require.resolve('./config'), which
       // throws MODULE_NOT_FOUND now that config.js is gone.
-      if (!database.getDefaultGroupSettings().anticall) return;
+      const settings = database.getDefaultGroupSettings();
+      if (!settings.anticall) return;
 
-      const action = database.getDefaultGroupSettings().anticallAction || 'block';
+      const action = settings.anticallAction || 'block';
+      const callsList = Array.isArray(calls) ? calls : [calls];
+      const defaultMessage = database.ANTICALL_PRESETS?.[0]?.message
+        || "Sorry, I don't accept WhatsApp calls. Please send a message.";
+      const callMessage = settings.anticallMessage || defaultMessage;
 
-      for (const call of calls) {
+      for (const call of callsList) {
+        if (!call?.id || !call?.from) continue;
         if (call.status === 'offer') {
           // Decline the call
           await sock.rejectCall(call.id, call.from);
 
-          // Block the caller if action is 'block' or 'on'
+          // The message is sent before blocking so WhatsApp can deliver it.
+          if (settings.anticallNotify !== false) {
+            await sock.sendMessage(call.from, { text: callMessage });
+          }
+
+          // Block the caller if action is 'block'
           if (action === 'block') {
             await sock.updateBlockStatus(call.from, 'block');
-
-            // Notify user
-            await sock.sendMessage(call.from, {
-              text: '🚫 Calls are not allowed. You have been blocked.'
-            });
           }
         }
       }
