@@ -1433,7 +1433,8 @@ const handleMessage = async (sock, msg) => {
       command: commandName,
       reply: (text) => sock.sendMessage(from, { text: applyFont(text) }, { quoted: msg }),
       react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
-      getCommandCount: () => commands.size,
+      getCommandCount: () => commands.commandCount ?? commands.size,
+      getAliasCount: () => commands.aliasCount ?? 0,
       getActiveUsers: (groupId, limit) => getActiveUsers(groupId, limit),
       getInactiveUsers: (groupId, participants) => getInactiveUsers(groupId, participants)
     });
@@ -2637,5 +2638,6 @@ module.exports = {
   isSudo,
   getGroupMetadata,
   findParticipant,
-  getCommandCount: () => commands.size
+  getCommandCount: () => commands.commandCount ?? commands.size,
+  getAliasCount: () => commands.aliasCount ?? 0
 };

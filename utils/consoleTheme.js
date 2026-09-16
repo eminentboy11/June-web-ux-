@@ -371,7 +371,7 @@ function bootBanner(data = {}) {
     if (data.owner) line('💡', chalk.white, `Owner     : ${data.owner}`);
     if (data.prefix !== undefined) line('💡', chalk.white, `Prefix    : [ ${data.prefix} ]`);
     if (data.mode) line('💡', chalk.white, `Mode      : ${String(data.mode).toUpperCase()}`);
-    if (data.commandCount !== undefined) line('💡', chalk.white, `Commands  : ${data.commandCount} loaded`);
+    if (data.commandCount !== undefined) line('💡', chalk.white, `Commands  : ${data.commandCount} loaded${data.aliasCount ? ` (+${data.aliasCount} aliases)` : ''}`);
     line('🗄️', chalk.magenta, `Database  : ${data.sqliteLabel || 'ready'} (${data.sqliteDriver || 'sqlite'})`);
     if (data.sessionLabel) line('🔌', chalk.cyan, `Session   : ${data.sessionLabel} (${data.authSource || 'sqlite'})`);
     if (data.platform) line('💡', chalk.white, `Platform  : ${data.platform} • Node ${data.nodeVersion || process.version}`);

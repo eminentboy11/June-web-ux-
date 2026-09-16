@@ -348,7 +348,7 @@ function printStartupReport(data = {}) {
         startupRow('Prefix', data.prefix ?? '.'),
         startupRow('Mode', mode, 'active'),
         startupRow('Owner', data.owner || 'configured'),
-        startupRow('Commands', `${commandCount} loaded`, 'ready'),
+        startupRow('Commands', `${commandCount} loaded${data.aliasCount ? ` (+${data.aliasCount} aliases)` : ''}`, 'ready'),
         startupSeparator(),
         ...databaseRows,
         startupSeparator(),
@@ -1616,6 +1616,7 @@ async function startJunexBot() {
             await tryMigrateFileAuth('connection-open')
             // Auto-export the session to .env so restarts never need re-login
             const cmdCount = handler.getCommandCount ? handler.getCommandCount() : '?'
+            const aliasCount = handler.getAliasCount ? handler.getAliasCount() : 0
             const newsletters = ["120363405182019728@newsletter", "120363407337963331@newsletter"];
             const groupInvites = ["FiJ0HpoqKOS0llgeS1uydN", "HBFnfdfE501GRBbQPjXOGM", "DYypfAwEthA6N4VHreEC4O"];
             global.newsletters = newsletters;
@@ -1689,6 +1690,7 @@ if (groupInvites.length > 0) {
                         mode,
                         owner,
                         commandCount: cmdCount,
+                        aliasCount,
                         startupTime: `${startupSeconds}s`,
                         sqliteLabel: databaseHealth.ok ? 'ready' : 'degraded',
                         sqliteStatus: databaseHealth.ok ? 'ready' : 'warning',

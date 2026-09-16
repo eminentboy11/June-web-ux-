@@ -120,6 +120,16 @@ function loadCommands() {
     }
   });
 
+  // Honest counts: the Map holds both real command names and aliases (they
+  // share one dispatch table), so .size alone overstates the command total.
+  // Attach the breakdown as non-enumerable props for banners/menus.
+  let commandCount = 0, aliasCount = 0;
+  for (const [key, cmd] of commands) {
+    if (key === cmd.name) commandCount++; else aliasCount++;
+  }
+  Object.defineProperty(commands, 'commandCount', { value: commandCount, enumerable: false });
+  Object.defineProperty(commands, 'aliasCount', { value: aliasCount, enumerable: false });
+
   return commands;
 }
 
