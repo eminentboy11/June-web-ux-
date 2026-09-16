@@ -22,11 +22,16 @@ module.exports = {
       const opt = (args[0] || '').toLowerCase().trim();
       const tz = consoleTheme.getTimeZone();
       const tzSource = consoleTheme.getTimeZoneSource();
-      const tzLabel = tzSource === 'bot'
-        ? `${tz} (bot setting — change with .settimezone)`
-        : tzSource === 'env'
-          ? `${tz} (TIMEZONE env)`
-          : `${tz} (bot default — change with .settimezone)`;
+      const SRC_LABELS = {
+        setting: 'set with .settimezone',
+        bot: 'set with .settimezone',
+        env: 'TIMEZONE env',
+        'auto:owner': 'auto-detected from owner number \u{1F4F1}',
+        'auto:paired': 'auto-detected from paired number \u{1F4F1}',
+        default: 'bot default — .settimezone <zone> or .settimezone auto',
+        utc: 'UTC fallback',
+      };
+      const tzLabel = `${tz} (${SRC_LABELS[tzSource] || tzSource})`;
       const mode = consoleTheme.getMode();
       const active = consoleTheme.currentTheme();
       const activeLabel = active === 'light' ? '☀️ white (June Lite style)' : '🌙 dark (June Ultra style)';

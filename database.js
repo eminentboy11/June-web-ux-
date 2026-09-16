@@ -1716,29 +1716,31 @@ const _isValidTimeZone = (v) => {
   try { new Intl.DateTimeFormat('en-US', { timeZone: v }).format(new Date()); return true; }
   catch (_) { return false; }
 };
-const getTimeZone = () => {
+const { resolveTimeZone } = require('./utils/tzResolver');
+
+const _rawStoredTz = () => {
   try {
     if (db && stmts.getBotSetting) {
       const row = stmts.getBotSetting.get('timezone');
-      if (row && row.value) {
-        const v = parse(row.value);
-        if (_isValidTimeZone(v)) return v;
-      }
+      if (row && row.value) return parse(row.value);
     }
   } catch (_) {}
-  if (_isValidTimeZone(process.env.TIMEZONE)) return process.env.TIMEZONE;
-  return _isValidTimeZone(BOT_SETTINGS_DEFAULTS.timezone) ? BOT_SETTINGS_DEFAULTS.timezone : 'UTC';
+  return undefined;
 };
-const getTimeZoneSource = () => {
-  try {
-    if (db && stmts.getBotSetting) {
-      const row = stmts.getBotSetting.get('timezone');
-      if (row && row.value && _isValidTimeZone(parse(row.value))) return 'bot';
-    }
-  } catch (_) {}
-  if (_isValidTimeZone(process.env.TIMEZONE)) return 'env';
-  return 'default';
-};
+const _tzPayload = () => ({
+  storedTz: _rawStoredTz(),
+  envTz: process.env.TIMEZONE,
+  ownerNumber: (Array.isArray(getOwners()) && getOwners()[0]) || '',
+  botNumber: [
+    (() => { try { const u = global && global.currentSock && global.currentSock.user; return u && u.id ? String(u.id).split('@')[0].split(':')[0] : null; } catch (_) { return null; } })(),
+    (() => { try { return global && global.phoneNumber ? String(global.phoneNumber).replace(/\D/g, '') : null; } catch (_) { return null; } })(),
+  ].filter(Boolean),
+  defaultTz: BOT_SETTINGS_DEFAULTS.timezone,
+});
+// Priority: stored .settimezone value ('auto' = detect) -> TIMEZONE env ->
+// AUTO from phone number (owner first, then paired) -> shipped default.
+const getTimeZone = () => resolveTimeZone(_tzPayload()).tz;
+const getTimeZoneSource = () => resolveTimeZone(_tzPayload()).source;
 
 // Owner display names. Never returns an empty list: display sites across the
 // codebase use `Array.isArray(x) ? x[0] : (x || 'N/A')`, which puts the
