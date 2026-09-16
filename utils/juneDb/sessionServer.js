@@ -378,7 +378,8 @@ function validateSnapshot(statePayload) {
   const meta = Array.isArray(statePayload.sessionAuthMeta) ? statePayload.sessionAuthMeta : null;
   if (!creds || !keys || !meta) return null;
   if (!creds.some((row) => row?.key === 'creds' && typeof row.value === 'string')) return null;
-  if (keys.length === 0) return null;
+  // CREDS-ONLY VAULT: the server stores just the identity — an empty
+  // sessionKeys array is valid now (keys regenerate after reconnect).
   if (meta.find((row) => row?.key === 'status')?.value !== 'verified') return null;
   if (!creds.every((row) => typeof row?.key === 'string' && typeof row?.value === 'string')) return null;
   if (!keys.every((row) => typeof row?.type === 'string' && typeof row?.id === 'string' && typeof row?.value === 'string')) return null;
@@ -444,7 +445,8 @@ function filesToSnapshot(files) {
     if (!parsed || !value || typeof value !== 'object') continue;
     sessionKeys.push({ type: parsed.type, id: parsed.id, value: JSON.stringify(value), updated_at: now });
   }
-  if (sessionKeys.length === 0) return null;
+  // CREDS-ONLY VAULT: a blob with just creds.json is valid — Baileys
+  // regenerates every key file when the restored bot reconnects.
   const sessionAuthMeta = [
     { key: 'status', value: 'verified' },
     { key: 'source', value: 'june-session-server' },
