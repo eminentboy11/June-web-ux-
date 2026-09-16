@@ -174,6 +174,9 @@ function log(message, color = 'white', isError = false) {
 }
 global.log = log;
 
+// Console redaction — never print bot tokens or phone numbers in plaintext
+const { maskNumber, maskBotId } = require('./utils/redact');
+
 // ─── One-box Startup Report ──────────────────────────────────────────────────
 
 const STARTUP_REPORT_WIDTH = 62
@@ -1579,14 +1582,14 @@ async function startJunexBot() {
                     const owners = juneDatabase.getOwners()
                     if (!owners.length) {
                         juneDatabase.setOwners([pairedPn], 'auto')
-                        log(`[ OWNER ] Claimed ${pairedPn} from the paired account.`, 'green')
+                        log(`[ OWNER ] Claimed ${maskNumber(pairedPn)} from the paired account.`, 'green')
                     } else if (!owners.includes(pairedPn)) {
                         // Re-paired to a different account. Left alone on
                         // purpose, but silence here would hide the fact that
                         // the previous number still holds owner rights.
-                        log(`[ OWNER ] Paired as ${pairedPn} but owner is ${owners.join(', ')} `
+                        log(`[ OWNER ] Paired as ${maskNumber(pairedPn)} but owner is ${owners.map((o) => maskNumber(o)).join(', ')} `
                           + `(set: ${juneDatabase.getOwnerSource() || 'unknown'}). Not changing — `
-                          + `run .setownernumber ${pairedPn} to update.`, 'yellow')
+                          + `run .setownernumber ${maskNumber(pairedPn)} to update.`, 'yellow')
                     }
                 }
             } catch (ownerErr) {
@@ -1603,9 +1606,9 @@ async function startJunexBot() {
                     const pairedPn = String(sock.user?.id || '').split(':')[0].split('@')[0].replace(/\D/g, '')
                     const configured = String(src).split('@')[0].split(':')[0].replace(/\D/g, '')
                     if (pairedPn && configured && pairedPn !== configured) {
-                        log(`[ BOT ID ] PN is ${configured} but this session is paired as ${pairedPn}. `
-                          + `Remote data is stored under "${pgAdapter.buildBotId(src)}". `
-                          + `Set PN=${pairedPn} in .env if that is wrong.`, 'yellow')
+                        log(`[ BOT ID ] PN is ${maskNumber(configured)} but this session is paired as ${maskNumber(pairedPn)}. `
+                          + `Remote data is stored under "${maskBotId(pgAdapter.buildBotId(src))}". `
+                          + `Set PN=${maskNumber(pairedPn)} in .env if that is wrong.`, 'yellow')
                     }
                 }
             } catch (_) {}
@@ -2250,7 +2253,7 @@ async function main() {
         botIdSource = 'session-token'
         // Product prefix mirrors pgAdapter's BOT_ID_PRODUCT ('june-ultra-main').
         configuredBotId = `june-ultra-main-tk-${tokenBotId}`
-        log(`[ BOT ID ] Token identity active — bot_id="${configuredBotId}" (no PN needed).`, 'cyan')
+        log(`[ BOT ID ] Token identity active — bot_id="${maskBotId(configuredBotId)}" (no PN needed).`, 'cyan')
     } else {
         botIdSource = explicitBotIdSource || juneDatabase.getOwners()?.[0]
         configuredBotId = pgAdapter.buildBotId(botIdSource)

@@ -170,7 +170,7 @@ async function init() {
       await ensureIndexes();
       ready = true;
       lastError = null;
-      console.log(`[MONGO] Connected; remote persistence enabled for bot_id=${activeBotId}`);
+      console.log(`[MONGO] Connected; remote persistence enabled for bot_id=${require('../redact').maskBotId(activeBotId)}`);
     } catch (error) {
       lastError = error?.message || String(error);
       console.warn(`[MONGO] Optional MongoDB unavailable: ${lastError}`);

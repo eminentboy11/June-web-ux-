@@ -48,7 +48,7 @@ function announceUnavailable(message) {
 function announceConnected() {
   if (announcedState === 'connected') return;
   announcedState = 'connected';
-  console.log(`[JUNE API] Connected; remote persistence enabled for bot_id=${activeBotId}`);
+  console.log(`[JUNE API] Connected; remote persistence enabled for bot_id=${require('../redact').maskBotId(activeBotId)}`);
 }
 
 function stopRemotePersistence(error) {

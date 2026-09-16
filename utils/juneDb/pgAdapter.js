@@ -194,7 +194,7 @@ nextPool.on('error', (error) => {
       ready = true;
       schemaReady = true;
       lastError = null;
-      console.log(`[PG] Connected; remote persistence enabled for bot_id=${activeBotId}`);
+      console.log(`[PG] Connected; remote persistence enabled for bot_id=${require('../redact').maskBotId(activeBotId)}`);
     } catch (error) {
       lastError = error.message;
       console.warn(`[PG] Optional PostgreSQL unavailable: ${error.message}`);
