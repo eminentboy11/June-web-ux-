@@ -201,7 +201,10 @@ async function postGroupStatus(sock, jid, content) {
     jid,
     {
       messageContextInfo: { messageSecret: secret },
-      groupStatusMessageV2: {
+      // Baileys 7 uses groupStatusMessage for the active group-status
+      // envelope. groupStatusMessageV2 is retained in the proto for
+      // compatibility, but media sent through it is rejected by WhatsApp.
+      groupStatusMessage: {
         message: {
           ...inside,
           messageContextInfo: { messageSecret: secret },
