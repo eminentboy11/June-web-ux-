@@ -4,6 +4,7 @@
 
 const database = require('./database');
 const { loadCommands, watchCommands } = require('./utils/commandLoader');
+const commandToggle = require('./utils/commandToggle');
 const { addMessage, getActiveUsers, getInactiveUsers } = require('./utils/groupstats');
 const { jidDecode, jidEncode } = require('@whiskeysockets/baileys');
 const fs = require('fs');
