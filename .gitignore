@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-
 # Runtime state — created by the bot at run time, never part of the source.
 # database/ holds the SQLite file, its WAL/SHM sidecars, backups and the
 # native-driver probe cache. The public loader preserves this directory
