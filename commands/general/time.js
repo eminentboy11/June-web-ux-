@@ -9,7 +9,7 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     try {
-      const tz = args.join(' ').trim() || database.getBotSetting('timezone') || 'Asia/Kolkata';
+      const tz = args.join(' ').trim() || database.getTimeZone();
 
       let valid = true;
       try {

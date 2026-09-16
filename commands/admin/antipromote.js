@@ -44,7 +44,7 @@ async function handlePromote(sock, groupId, actor, promotedJid) {
         const actorNum  = actor       ? actor.split('@')[0]       : 'Unknown';
         const targetNum = promotedJid ? promotedJid.split('@')[0] : 'Unknown';
         const timestamp = new Date().toLocaleString('en-GB', {
-            timeZone: database.getBotSetting('timezone') || 'Africa/Nairobi',
+            timeZone: database.getTimeZone(),
             hour12: false, day: '2-digit', month: '2-digit',
             year: 'numeric', hour: '2-digit', minute: '2-digit'
         });

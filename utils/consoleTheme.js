@@ -37,6 +37,11 @@ function _validTz(v) {
   catch (_) { return false; }
 }
 function getTimeZone() {
+  // Single source of truth lives in database.js (bot setting → TIMEZONE env
+  // → shipped default). Legacy chain below only for stubs/unloaded db.
+  if (typeof db.getTimeZone === 'function') {
+    try { return db.getTimeZone(); } catch (_) {}
+  }
   try {
     const setting = db.getBotSetting('timezone');
     if (_validTz(setting)) return setting;
@@ -45,9 +50,12 @@ function getTimeZone() {
   return 'UTC';
 }
 function getTimeZoneSource() {
+  if (typeof db.getTimeZoneSource === 'function') {
+    try { return db.getTimeZoneSource(); } catch (_) {}
+  }
   try { if (_validTz(db.getBotSetting('timezone'))) return 'bot'; } catch (_) {}
   if (_validTz(process.env.TIMEZONE)) return 'env';
-  return 'utc';
+  return 'default';
 }
 
 function nowParts() {

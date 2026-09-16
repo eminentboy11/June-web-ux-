@@ -1706,6 +1706,40 @@ const getStoredBotSettings = () => {
 const getAllBotSettings = () => ({ ...BOT_SETTINGS_DEFAULTS, ...getStoredBotSettings() });
 const updateBotSettings = (updates) => { for (const [key, value] of Object.entries(updates)) setBotSetting(key, value); return true; };
 
+// ── Canonical Timezone ──────────────────────────────────────────────────────
+// ONE source of truth for the bot's clock, used by every timestamp in the
+// bot (rainbow message log, theme console, .time, antidelete, etc.).
+// Priority: 1) stored 'timezone' setting (.settimezone) → 2) TIMEZONE env
+// (June Lite parity) → 3) shipped default (BOT_SETTINGS_DEFAULTS.timezone).
+const _isValidTimeZone = (v) => {
+  if (!v || typeof v !== 'string') return false;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: v }).format(new Date()); return true; }
+  catch (_) { return false; }
+};
+const getTimeZone = () => {
+  try {
+    if (db && stmts.getBotSetting) {
+      const row = stmts.getBotSetting.get('timezone');
+      if (row && row.value) {
+        const v = parse(row.value);
+        if (_isValidTimeZone(v)) return v;
+      }
+    }
+  } catch (_) {}
+  if (_isValidTimeZone(process.env.TIMEZONE)) return process.env.TIMEZONE;
+  return _isValidTimeZone(BOT_SETTINGS_DEFAULTS.timezone) ? BOT_SETTINGS_DEFAULTS.timezone : 'UTC';
+};
+const getTimeZoneSource = () => {
+  try {
+    if (db && stmts.getBotSetting) {
+      const row = stmts.getBotSetting.get('timezone');
+      if (row && row.value && _isValidTimeZone(parse(row.value))) return 'bot';
+    }
+  } catch (_) {}
+  if (_isValidTimeZone(process.env.TIMEZONE)) return 'env';
+  return 'default';
+};
+
 // Owner display names. Never returns an empty list: display sites across the
 // codebase use `Array.isArray(x) ? x[0] : (x || 'N/A')`, which puts the
 // fallback on the wrong branch — an empty array takes the array path and
@@ -2642,7 +2676,7 @@ module.exports = {
   getWarnings, addWarning, removeWarning, clearWarnings,
   getModerators, addModerator, removeModerator, isModerator,
   muteUser, unmuteUser, isUserMuted, getMutedUsers,
-  getBotSetting, setBotSetting, getStoredBotSettings, getAllBotSettings, updateBotSettings, BOT_SETTINGS_DEFAULTS,
+  getBotSetting, setBotSetting, getTimeZone, getTimeZoneSource, getStoredBotSettings, getAllBotSettings, updateBotSettings, BOT_SETTINGS_DEFAULTS,
   clearBotSettingsCache,
   getOwners, setOwners, getOwnerNames, setOwnerNames, getOwnerSource, setRuntimeOwnerName, SESSION_NAME,
   getStoredGroupSettings,

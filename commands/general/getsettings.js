@@ -102,7 +102,7 @@ module.exports = {
 
                 `🔹 *prefix* : ${p}\n` +
                 `🔹 *owner* : ${ownerName}\n` +
-                `🔹 *timezone* : ${database.getBotSetting('timezone') || 'Africa/Nairobi'}\n` +
+                `🔹 *timezone* : ${database.getTimeZone()}\n` +
                 `🔹 *botname* : ${database.getBotSetting('botName')}\n` +
                 `🔹 *botmode* : ${botMode}\n` +
                 `🔹 *selfmode* : ${flag(selfMode)}\n` +

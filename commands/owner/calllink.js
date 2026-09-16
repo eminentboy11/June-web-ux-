@@ -138,7 +138,7 @@ module.exports = {
         if (type) tokens.shift();
         else type = 'audio';
 
-        const tz = database.getBotSetting('timezone') || 'Africa/Lagos';
+        const tz = database.getTimeZone();
         let startTime = null;
         try {
             startTime = parseStart(tokens, tz);

@@ -95,7 +95,7 @@ module.exports = {
                 `➥ RAM       ➜ ${usedMem}/${totalMem} MB (${memPercent}%)\n` +
                 `➥ CPU       ➜ ${cpuModel}\n` +
                 `➥ Cores     ➜ ${cpuCount}\n` +
-                `➥ Timezone  ➜ ${database.getBotSetting('timezone') || 'UTC'}\n\n` +
+                `➥ Timezone  ➜ ${database.getTimeZone()}\n\n` +
 
                 `┃ Behavior\n` +
 

@@ -62,7 +62,7 @@ module.exports = {
                 const name       = g.subject || '(no name)';
                 const desc       = g.desc ? g.desc.trim() : 'No description';
                 const createdAt  = g.creation
-                    ? new Date(g.creation * 1000).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi' })
+                    ? new Date(g.creation * 1000).toLocaleString('en-GB', { timeZone: database.getTimeZone() })
                     : 'Unknown';
                 const botMeta    = members.find(p => {
                     const phone = (sock.user?.id || '').split('@')[0].split(':')[0];

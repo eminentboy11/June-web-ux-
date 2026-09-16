@@ -84,7 +84,7 @@ module.exports = {
         try {
             if (extra.react) await extra.react('🔎').catch(() => {});
             const info = await sock.groupGetInviteInfo(code);
-            const tz = database.getBotSetting('timezone') || 'Africa/Lagos';
+            const tz = database.getTimeZone();
 
             const ownerJid = await preferPn(sock, info.owner, info.ownerPn);
             const subjectOwner = await preferPn(sock, info.subjectOwner, info.subjectOwnerPn);

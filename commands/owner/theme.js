@@ -26,7 +26,7 @@ module.exports = {
         ? `${tz} (bot setting — change with .settimezone)`
         : tzSource === 'env'
           ? `${tz} (TIMEZONE env)`
-          : 'UTC (no timezone configured)';
+          : `${tz} (bot default — change with .settimezone)`;
       const mode = consoleTheme.getMode();
       const active = consoleTheme.currentTheme();
       const activeLabel = active === 'light' ? '☀️ white (June Lite style)' : '🌙 dark (June Ultra style)';

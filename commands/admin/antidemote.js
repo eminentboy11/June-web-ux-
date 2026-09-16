@@ -44,7 +44,7 @@ async function handleDemote(sock, groupId, actor, demotedJid) {
         const actorNum  = actor       ? actor.split('@')[0]       : 'Unknown';
         const targetNum = demotedJid  ? demotedJid.split('@')[0]  : 'Unknown';
         const timestamp = new Date().toLocaleString('en-GB', {
-            timeZone: database.getBotSetting('timezone') || 'Africa/Nairobi',
+            timeZone: database.getTimeZone(),
             hour12: false, day: '2-digit', month: '2-digit',
             year: 'numeric', hour: '2-digit', minute: '2-digit'
         });

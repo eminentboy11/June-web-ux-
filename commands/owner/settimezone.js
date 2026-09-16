@@ -48,7 +48,6 @@ module.exports = {
 
       // Persist to database and update runtime config
       db.setBotSetting('timezone', newTz);
-      db.setBotSetting('timezone', newTz);
 
       const now = new Date().toLocaleString('en-US', { timeZone: newTz, dateStyle: 'full', timeStyle: 'long' });
       await extra.reply(`✅ Timezone set to: *${newTz}*\n\n🕐 Current time: ${now}`);
