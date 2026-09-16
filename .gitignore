@@ -10,7 +10,7 @@ data/
 session/
 
 # Build output
-"June x on"/
+June x on/
 .obfuscate-cache.json
 
 # Environment

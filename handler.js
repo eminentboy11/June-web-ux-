@@ -1206,6 +1206,9 @@ const handleMessage = async (sock, msg) => {
     }
     // ─────────────────────────────────────────────────────────────────────────────
 
+    // Themed console message box (white/Lite theme only — no-op in dark)
+    try { require('./utils/consoleTheme').printMessage(msg, content, sock, { groupName: groupMetadata?.subject || null }) } catch (_) {}
+
     // Prefix gate — determine whether this message even looks like a command attempt.
     // When prefix is empty ('') every message is a potential command (intentional),
     // but that means "command not found" below is what routes to chatbot instead
@@ -1406,14 +1409,12 @@ const handleMessage = async (sock, msg) => {
       console.error('[PRESENCE] error:', presenceErr.message);
     }
 
-    // Colored command execution log
-    const chalk = require('chalk');
+    // Themed command execution log (dark = classic Ultra, light = Lite style)
     const senderNum = sender.split('@')[0].split(':')[0];
-    console.log(
-      chalk.magenta.bold('[ CMD ]'),
-      chalk.cyan(`✦ ${commandName}`),
-      chalk.yellow(`← ${senderNum}`),
-      senderIsOwner ? chalk.green('[OWNER]') : senderIsSudo ? chalk.blue('[SUDO]') : chalk.white('[USER]')
+    require('./utils/consoleTheme').cmdLine(
+      commandName,
+      senderNum,
+      senderIsOwner ? 'OWNER' : senderIsSudo ? 'SUDO' : 'USER'
     );
 
     const { applyFont } = require('./utils/fontConverter');

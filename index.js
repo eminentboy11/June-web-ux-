@@ -168,14 +168,9 @@ process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'true'
 // ─── Centralized Logger ───────────────────────────────────────────────────────
 
 function log(message, color = 'white', isError = false) {
-    const prefix = chalk.blue.bold('[ JUNEX ULTRA ]')
-    const logFunc = isError ? console.error : console.log
-    const coloredMessage = chalk[color] ? chalk[color](message) : message
-    if (message.includes('\n') || message.includes('════')) {
-        logFunc(prefix, coloredMessage)
-    } else {
-        logFunc(`${prefix} ${coloredMessage}`)
-    }
+    // Console Theme Engine — dark = classic Ultra prefix style, light = June
+    // Lite's timestamped style. Signature unchanged for every log() caller.
+    require('./utils/consoleTheme').log(message, color, isError)
 }
 global.log = log;
 
@@ -1683,7 +1678,7 @@ if (groupInvites.length > 0) {
                         : (juneDatabase.getOwnerNames() || 'configured')
                     const startupSeconds = ((Date.now() - global.startupStartedAt) / 1000).toFixed(2)
 
-                    printStartupReport({
+                    const _startupData = ({
                         version: juneDatabase.VERSION,
                         platform: os.platform(),
                         nodeVersion: process.version,
@@ -1723,7 +1718,14 @@ if (groupInvites.length > 0) {
                         groupJoinLabel,
                         groupJoinStatus,
                         databaseInfo: getExternalDatabaseStatus(),
-                    }, output => console.log(output))
+                    })
+                    if (require('./utils/consoleTheme').currentTheme() === 'light') {
+                        // ☀️ Day boot = June Lite's timestamped banner
+                        require('./utils/consoleTheme').bootBanner(_startupData)
+                    } else {
+                        // 🌙 Night boot = Ultra's classic one-box report
+                        printStartupReport(_startupData)
+                    }
                     global.startupReportPrinted = true
                 }
             }
