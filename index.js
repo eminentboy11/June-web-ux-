@@ -1944,7 +1944,12 @@ if (groupInvites.length > 0) {
             }
 
             // ── JUNE-X Style Message Log ────────────────────────────────────────
-            if (msg.message) {
+            // Themed gate: this rainbow log is the DARK theme's message
+            // display. In light (Lite) theme the boxed Lite-style logger in
+            // handler.js is shown instead — never both at once.
+            let _msgLogDark = true
+            try { _msgLogDark = require('./utils/consoleTheme').currentTheme() === 'dark' } catch (_) {}
+            if (msg.message && _msgLogDark) {
                 try {
                     const tz = juneDatabase.getBotSetting('timezone') || 'Africa/Nairobi'
                     const mtype = Object.keys(msg.message)[0] || 'N/A'
