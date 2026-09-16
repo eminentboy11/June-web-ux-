@@ -73,12 +73,28 @@ function isSessionServerToken(value) {
   return parseSessionServerToken(value) !== null;
 }
 
+// ─── JUNE~ handles (lite vault, 2026-09) ────────────────────────────────────
+// New short Session IDs: JUNE~ab12cd. The handle IS the credential — the bot
+// fetches the full auth blob from GET /v1/session/:handle and re-exports it
+// into SQLite exactly like a token-restored snapshot.
+const HANDLE_PATTERN = /^JUNE~[A-Za-z0-9]{4,12}$/i; // case-insensitive: users may type june~; the server normalizes
+
+function isJuneHandle(value) {
+  return HANDLE_PATTERN.test(String(value || '').trim());
+}
+
 /** Distinguish predictable user mistakes for a clear error message. */
 function describeTokenProblem(value) {
   const raw = String(value || '').trim();
   if (!raw) return 'empty';
   if (raw.startsWith('June-Ultra:~') || raw.startsWith('Ultra-X:~') || raw.startsWith('JUNE-MD:~')) {
     return 'legacy-string-in-token-var';
+  }
+  if (/^june~/i.test(raw)) {
+    const body = raw.replace(/^june~/i, '');
+    if (!body) return 'june-handle-empty (expected JUNE~ + 6 letters/digits)';
+    if (body.length < 4 || body.length > 12) return `june-handle-bad-length (${body.length} after ~, expected 6)`;
+    return 'june-handle-charset (only letters/digits after JUNE~)';
   }
   if (!raw.startsWith(TOKEN_PREFIX)) {
     if (raw.toLowerCase().startsWith(TOKEN_PREFIX)) return 'wrong-case';
@@ -106,6 +122,8 @@ function describeTokenProblem(value) {
  * reversible credential material — the same rule as SESSION_ID fingerprints.
  */
 function tokenBotIdSuffix(value) {
+  const raw = String(value || '').trim();
+  if (isJuneHandle(raw)) return sha256Hex(raw.slice(5).toLowerCase()).slice(0, 12);
   const parsed = parseSessionServerToken(value);
   if (!parsed) return null;
   return sha256Hex(parsed.body).slice(0, 12);
@@ -120,11 +138,12 @@ function getConfiguredToken() {
   const fromEnv = String(process.env.JUNE_SESSION_TOKEN || '').trim();
   if (fromEnv) return fromEnv;
   const sessionId = String(process.env.SESSION_ID || '').trim();
-  return isSessionServerToken(sessionId) ? sessionId : '';
+  return (isSessionServerToken(sessionId) || isJuneHandle(sessionId)) ? sessionId : '';
 }
 
 function isTokenModeActive() {
-  return isSessionServerToken(getConfiguredToken());
+  const token = getConfiguredToken();
+  return isSessionServerToken(token) || isJuneHandle(token);
 }
 
 function sha256Hex(value) {
@@ -290,10 +309,27 @@ async function authenticate({ takeover = false, db = null } = {}) {
 
   const token = getConfiguredToken();
   const serverUrl = getServerUrl();
-  if (!isSessionServerToken(token)) {
-    throw new SessionServerError('No valid JUNE_SESSION_TOKEN configured');
+  if (!isSessionServerToken(token) && !isJuneHandle(token)) {
+    throw new SessionServerError('No valid JUNE_SESSION_TOKEN or JUNE~ Session ID configured');
   }
   if (!serverUrl) throw new SessionServerError('JUNE_SESSION_SERVER_URL is not configured');
+
+  // HANDLE MODE: the handle itself is the bearer credential — the server
+  // accepts it on every protected route, so there is nothing to exchange.
+  // No HTTP round trip; refresh the local lease window and return.
+  if (isJuneHandle(token)) {
+    if (state.authPromise) return state.authPromise;
+    state.authPromise = Promise.resolve().then(() => {
+      state.leaseToken = token;
+      state.leaseExpiresAt = Date.now() + 20 * 60 * 1000;
+      state.sessionId = null;
+      state.sessionMeta = null;
+      state.terminalFailure = null;
+      state.everAuthenticated = true;
+      return { session: null, lease: { token, expiresAt: state.leaseExpiresAt } };
+    }).finally(() => { state.authPromise = null; });
+    return state.authPromise;
+  }
 
   state.authPromise = (async () => {
     let lastError = null;
@@ -377,8 +413,67 @@ function restoreSnapshotIntoSQLite(db, snapshot) {
   return { credentialRows: snapshot.creds.length, keyRows: snapshot.keys.length, metaRows: snapshot.meta.length };
 }
 
+// ─── JUNE~ handle restore (lite vault) ──────────────────────────────────────
+// Same key-type list as the SQLite auth-state layer — the server names files
+// with the exact same convention the bot writes them.
+const AUTH_KEY_TYPES = [
+  'app-state-sync-version', 'app-state-sync-key', 'sender-key-memory',
+  'sender-key', 'identity-key', 'device-list', 'lid-mapping',
+  'pre-key', 'session', 'tctoken',
+];
+
+function parseAuthKeyFilename(name) {
+  if (!name.endsWith('.json') || name === 'creds.json') return null;
+  const base = name.slice(0, -'.json'.length);
+  const type = AUTH_KEY_TYPES.find((candidate) => base.startsWith(`${candidate}-`));
+  if (!type) return null;
+  const id = base.slice(type.length + 1).replace(/__/g, '/').replace(/-/g, ':');
+  return id ? { type, id } : null;
+}
+
+/** Lite blob { 'creds.json': obj, '<type>-<id>.json': obj } → SQLite row snapshot. */
+function filesToSnapshot(files) {
+  const now = Date.now();
+  const credsFile = files ? files['creds.json'] : null;
+  if (!credsFile || typeof credsFile !== 'object') return null;
+  const sessionCreds = [{ key: 'creds', value: JSON.stringify(credsFile), updated_at: now }];
+  const sessionKeys = [];
+  for (const [name, value] of Object.entries(files || {})) {
+    if (name === 'creds.json') continue;
+    const parsed = parseAuthKeyFilename(name);
+    if (!parsed || !value || typeof value !== 'object') continue;
+    sessionKeys.push({ type: parsed.type, id: parsed.id, value: JSON.stringify(value), updated_at: now });
+  }
+  if (sessionKeys.length === 0) return null;
+  const sessionAuthMeta = [
+    { key: 'status', value: 'verified' },
+    { key: 'source', value: 'june-session-server' },
+  ];
+  return { creds: sessionCreds, keys: sessionKeys, meta: sessionAuthMeta };
+}
+
 /** Authenticate + fetch + validate + restore. Used by the index.js token branch. */
 async function fetchAndRestoreSnapshot(db) {
+  // HANDLE MODE: one GET returns the complete session blob — creds + key
+  // files in plain JSON. Convert to SQLite rows and restore.
+  const configuredCredential = getConfiguredToken();
+  if (isJuneHandle(configuredCredential)) {
+    if (!state.leaseToken || Date.now() >= state.leaseExpiresAt - 60000) {
+      await authenticate({ db });
+    }
+    const serverUrl = getServerUrl();
+    const data = await rawRequest(`${serverUrl}/v1/session/${encodeURIComponent(configuredCredential)}`);
+    if (!data || data.success !== true) {
+      throw new SessionServerError('This Session ID is unknown or was revoked', { code: 'session_revoked' });
+    }
+    const snapshot = filesToSnapshot(data.files);
+    if (!snapshot) {
+      throw new SessionServerError('Session Server returned an invalid session blob', { code: 'session_state_missing' });
+    }
+    state.version = null; // fresh mirror; the next push adopts the server version
+    const restored = restoreSnapshotIntoSQLite(db, snapshot);
+    return { ...restored, version: null, sessionId: null };
+  }
   // Only (re)authenticate when no valid lease is held. FIRST acquisition in
   // this process takes over (a booting bot is by definition the new owner);
   // later refreshes are same-installation and allowed without takeover.
@@ -602,7 +697,7 @@ async function revokeSession(reason = 'whatsapp-logout') {
 async function checkTokenStatus() {
   const token = getConfiguredToken();
   const serverUrl = getServerUrl();
-  if (!isSessionServerToken(token) || !serverUrl) return null;
+  if ((!isSessionServerToken(token) && !isJuneHandle(token)) || !serverUrl) return null;
   const data = await rawRequest(`${serverUrl}/v1/manage/check`, { method: 'POST', body: { token } });
   return data;
 }
@@ -622,7 +717,10 @@ function getStatus() {
 
 module.exports = {
   TOKEN_PREFIX,
+  HANDLE_PATTERN,
   DEFAULT_SESSION_SERVER_URL,
+  isJuneHandle,
+  filesToSnapshot,
   SessionServerError,
   isSessionServerToken,
   parseSessionServerToken,

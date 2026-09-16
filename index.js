@@ -536,19 +536,19 @@ function applyJuneSessionToken() {
     // SESSION_ID is the OFFICIAL home of the token now: a june-ultra:~ value
     // in SESSION_ID feeds the Session Server flow directly.
     const fromSessionId = String(process.env.SESSION_ID || '').trim()
-    if (fromSessionId && sessionServer.isSessionServerToken(fromSessionId)
+    if (fromSessionId && (sessionServer.isSessionServerToken(fromSessionId) || sessionServer.isJuneHandle(fromSessionId))
         && !String(process.env.JUNE_SESSION_TOKEN || '').trim()) {
         process.env.JUNE_SESSION_TOKEN = fromSessionId
     }
     const token = String(process.env.JUNE_SESSION_TOKEN || '').trim()
     if (!token) return false
-    if (sessionServer.isSessionServerToken(token)) {
+    if (sessionServer.isSessionServerToken(token) || sessionServer.isJuneHandle(token)) {
         process.env.SESSION_ID = token
         return true
     }
     if (!process.env.JUNE_SESSION_TOKEN_NOTICE_SHOWN) {
         process.env.JUNE_SESSION_TOKEN_NOTICE_SHOWN = '1'
-        log('[ SESSION SERVER ] JUNE_SESSION_TOKEN is set but not a valid june-ultra:~ token — ignoring it.', 'yellow')
+        log('[ SESSION SERVER ] JUNE_SESSION_TOKEN is set but not a valid june-ultra:~ token or JUNE~ Session ID — ignoring it.', 'yellow')
     }
     return false
 }
@@ -785,7 +785,7 @@ function quarantineCurrentSessionForReplacement() {
 // The legacy raw-session prefixes (Ultra-X:~/JUNE-MD:~/June-Ultra:~/June::~
 // base64 strings) were RETIRED — hard cutover to the Session Server system.
 
-const VALID_PREFIXES = ['june-ultra:~', 'june-ultra:']
+const VALID_PREFIXES = ['june-ultra:~', 'june-ultra:', 'JUNE~', 'june~']
 const LEGACY_SESSION_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~']
 
 async function checkAndHandleSessionFormat() {
@@ -803,7 +803,7 @@ async function checkAndHandleSessionFormat() {
         }
         if (!VALID_PREFIXES.some(p => sessionId.trim().startsWith(p))) {
             log(chalk.black.bgYellowBright('[ERROR]: Invalid SESSION_ID format.'), 'white')
-            log(chalk.black.bgYellowBright('[SESSION ID] Must be a june-ultra:~ Session Server token.'), 'white')
+            log(chalk.black.bgYellowBright('[SESSION ID] Must be a JUNE~ Session ID or a june-ultra:~ Session Server token.'), 'white')
             log(chalk.black.bgYellowBright(`Get one at ${sessionServer.getServerUrl()}/pair — then restart. Exiting in 20 seconds...`), 'white')
             await delay(20000)
             process.exit(1)
@@ -820,7 +820,7 @@ async function downloadSessionData() {
         // Tokens are restored through the Session Server flow — never decoded
         // into a creds file here. The legacy raw-session download path was
         // RETIRED with the hard cutover.
-        if (sessionServer.isSessionServerToken(sid)) return
+        if (sessionServer.isSessionServerToken(sid) || sessionServer.isJuneHandle(sid)) return
         log('[ SESSION ] The raw-session SESSION_ID download path was retired. '
           + `Pair at ${sessionServer.getServerUrl()}/pair and use a june-ultra:~ token.`, 'red', true)
         process.exit(1)
@@ -872,8 +872,8 @@ async function getLoginMethod() {
     choice = choice.trim()
 
     if (choice === '1') {
-        log(`\nEnter your session token — get it at ${sessionServer.getServerUrl()}/pair`, 'yellow')
-        log('Accepted format: june-ultra:~<token> or june-ultra:<id>:~<token>', 'yellow')
+        log(`\nEnter your Session ID — get it at ${sessionServer.getServerUrl()}/pair`, 'yellow')
+        log('Accepted format: JUNE~xxxxxx or june-ultra:~<token>', 'yellow')
         let sessionId = await question(chalk.greenBright('\nYour session token: '))
         sessionId = sessionId.trim()
         if (!VALID_PREFIXES.some(p => sessionId.startsWith(p))) {
@@ -2101,10 +2101,10 @@ if (groupInvites.length > 0) {
 async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthReady, sameToken, forceBootstrap, usableFileSession }) {
     // Hard format + configuration errors: fail loudly like the legacy
     // invalid-SESSION_ID path, then exit so the owner can fix the environment.
-    if (!sessionServer.isSessionServerToken(token)) {
+    if (!sessionServer.isSessionServerToken(token) && !sessionServer.isJuneHandle(token)) {
         const problem = sessionServer.describeTokenProblem(token)
-        log(chalk.black.bgYellowBright(`[ERROR]: Invalid june-ultra session token (${problem}).`), 'white')
-        log(chalk.black.bgYellowBright('A session token looks like: june-ultra:~xxxxxxxxxxxxxxxxxxxxxxxx (24 letters/digits).'), 'white')
+        log(chalk.black.bgYellowBright(`[ERROR]: Invalid session credential (${problem}).`), 'white')
+        log(chalk.black.bgYellowBright('A Session ID looks like: JUNE~ab12cd — or a legacy june-ultra:~ token.'), 'white')
         if (problem === 'legacy-string-in-token-var') {
             log(chalk.black.bgYellowBright('That value is a legacy base64 session string — put it in SESSION_ID instead.'), 'white')
         }
@@ -2404,10 +2404,10 @@ async function main() {
     // Session Server input diagnostics — presence only, never raw values.
     {
         const _ssToken = String(process.env.JUNE_SESSION_TOKEN || '').trim()
-        const _ssValid = sessionServer.isSessionServerToken(_ssToken)
+        const _ssValid = sessionServer.isSessionServerToken(_ssToken) || sessionServer.isJuneHandle(_ssToken)
         const _ssFlag = /^(1|true|yes|on)$/i.test(String(process.env.JUNE_FORCE_SESSION_BOOTSTRAP || ''))
         if (_ssToken) {
-            if (!_ssValid) log('[ SESSION SERVER ] token: INVALID FORMAT (check quotes, spaces, length — must be june-ultra:~ + 24 letters/digits)', 'yellow')
+            if (!_ssValid) log('[ SESSION SERVER ] token: INVALID FORMAT (must be JUNE~xxxxxx or june-ultra:~ + 24 letters/digits — check quotes/spaces)', 'yellow')
         } else if (_ssFlag) {
             log('[ SESSION SERVER ] JUNE_FORCE_SESSION_BOOTSTRAP is set but no JUNE_SESSION_TOKEN is configured — the flag has no effect.', 'yellow')
         } else if (String(process.env.JUNE_SESSION_SERVER_URL || '').trim()) {
@@ -2429,7 +2429,7 @@ async function main() {
     // ─── Session Server token mode (additive) ─────────────────────────────
     // A june-ultra:~ token never enters the base64 SESSION_ID bootstrap path
     // below; it gets its own flow with identical safety semantics.
-    if (sessionServer.isSessionServerToken(envSessionID)) {
+    if (sessionServer.isSessionServerToken(envSessionID) || sessionServer.isJuneHandle(envSessionID)) {
         await connectViaSessionServerToken({
             token: envSessionID,
             fingerprint: currentSessionFingerprint,
@@ -2567,7 +2567,7 @@ async function main() {
     if (loginMethod === 'session') {
         // A june-ultra:~ token entered interactively routes through the
         // Session Server flow instead of the base64 download path.
-        if (sessionServer.isSessionServerToken(global.SESSION_ID)) {
+        if (sessionServer.isSessionServerToken(global.SESSION_ID) || sessionServer.isJuneHandle(global.SESSION_ID)) {
             await connectViaSessionServerToken({
                 token: String(global.SESSION_ID).trim(),
                 fingerprint: fingerprintSessionId(String(global.SESSION_ID).trim()),
@@ -2579,10 +2579,10 @@ async function main() {
             checkEnvStatus()
             return
         }
-        if (sessionServer.isSessionServerToken(global.SESSION_ID)) {
-            // A june-ultra token is never base64 creds — it is handled by the
-            // Session Server flow above and must not reach this path.
-            log('[ LOGIN ] june-ultra tokens cannot be used as base64 session strings.', 'red', true)
+        if (sessionServer.isSessionServerToken(global.SESSION_ID) || sessionServer.isJuneHandle(global.SESSION_ID)) {
+            // A june-ultra token / JUNE~ handle is never base64 creds — it is
+            // handled by the Session Server flow above and must not reach this path.
+            log('[ LOGIN ] june-ultra tokens and JUNE~ Session IDs cannot be used as base64 session strings.', 'red', true)
             process.exit(1)
         }
         try {
