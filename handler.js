@@ -831,6 +831,11 @@ const handleMessage = async (sock, msg) => {
           extra.isOwner = msg.key.fromMe || extra.isOwner;
           extra.isSudo = extra.isOwner || extra.isSudo;
           extra.isMod = extra.isSudo;
+          // Disabled-command gate (button route) — owner/sudo are never blocked
+          if (!extra.isOwner && !extra.isSudo && commandToggle.isDisabled(dynCmd.name)) {
+            await sock.sendMessage(from, { text: `🚫 The command *${dynCmd.name}* is currently disabled.` }, { quoted: msg });
+            return;
+          }
           if (dynCmd.ownerOnly && !extra.isOwner && !extra.isSudo) {
             await sock.sendMessage(from, { text: database.MESSAGES.ownerOnly }, { quoted: msg });
             return;
@@ -1372,6 +1377,12 @@ const handleMessage = async (sock, msg) => {
       if (!botIsAdmin) {
         return sock.sendMessage(from, { text: database.MESSAGES.botAdminNeeded }, { quoted: msg });
       }
+    }
+
+    // Disabled-command gate — owners/sudo are never blocked, so .enable
+    // always works even while its target command is disabled.
+    if (!senderIsOwner && !senderIsSudo && commandToggle.isDisabled(command.name)) {
+      return sock.sendMessage(from, { text: `🚫 The command *${command.name}* is currently disabled.` }, { quoted: msg });
     }
 
     // Auto presence indicators — read from database/bot-settings.json via presenceSettings

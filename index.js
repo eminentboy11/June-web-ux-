@@ -1297,7 +1297,8 @@ async function startJunexBot() {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' }))
         },
-        markOnlineOnConnect: true,
+        // Stealth mode: connect without the "online" mark while stealth is on
+        markOnlineOnConnect: (() => { try { return !require('./utils/stealthMode').isEnabled(); } catch (_) { return true; } })(),
         generateHighQualityLinkPreview: false,
         syncFullHistory: false,
         downloadHistory: false,
@@ -1321,6 +1322,11 @@ async function startJunexBot() {
     store.bind(sock.ev)
     sock.botStore = store
     global.currentSock = sock
+
+    // Stealth mode: silence presence updates + read receipts on this socket.
+    // Wrapped per connection (checks the setting on every call), so every
+    // reconnect is covered and toggling stealth takes effect immediately.
+    try { require('./utils/stealthMode').applyToSocket(sock) } catch (_) {}
 
     // ── Connection Updates ──────────────────────────────────────────────────────
     let _pairingCodeRequested = false
