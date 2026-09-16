@@ -26,16 +26,28 @@ const VALID = ['auto', 'dark', 'light'];
 const DAY_START_HOUR = 6;   // ☀️ white theme from 06:00 (inclusive)…
 const NIGHT_START_HOUR = 18; // …🌙 dark theme from 18:00 (inclusive)
 
-// ── Time zone (user spec: TIMEZONE env → standard UTC) ─────────────────────
+// ── Time zone — ONE source of truth: the bot's own timezone setting ────────
+// Priority: 1) bot setting 'timezone' (set with .settimezone, default from
+// database.js) → 2) TIMEZONE env (parity with June Lite) → 3) UTC fallback.
+// The theme clock and every themed timestamp follow the SAME clock as the
+// rest of the bot — no duplicate timezone.
+function _validTz(v) {
+  if (!v || typeof v !== 'string') return false;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: v }).format(new Date()); return true; }
+  catch (_) { return false; }
+}
 function getTimeZone() {
-  const env = process.env.TIMEZONE;
-  if (env) {
-    try {
-      new Intl.DateTimeFormat('en-US', { timeZone: env }).format(new Date());
-      return env;
-    } catch (_) { /* invalid TIMEZONE value — fall through to UTC */ }
-  }
+  try {
+    const setting = db.getBotSetting('timezone');
+    if (_validTz(setting)) return setting;
+  } catch (_) {}
+  if (_validTz(process.env.TIMEZONE)) return process.env.TIMEZONE;
   return 'UTC';
+}
+function getTimeZoneSource() {
+  try { if (_validTz(db.getBotSetting('timezone'))) return 'bot'; } catch (_) {}
+  if (_validTz(process.env.TIMEZONE)) return 'env';
+  return 'utc';
 }
 
 function nowParts() {
@@ -362,6 +374,6 @@ function bootBanner(data = {}) {
 }
 
 module.exports = {
-  KEY, VALID, getTimeZone, nowParts, getMode, setMode,
+  KEY, VALID, getTimeZone, getTimeZoneSource, nowParts, getMode, setMode,
   currentTheme, ensureTheme, log, cmdLine, printMessage, bootBanner,
 };

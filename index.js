@@ -1951,7 +1951,7 @@ if (groupInvites.length > 0) {
             try { _msgLogDark = require('./utils/consoleTheme').currentTheme() === 'dark' } catch (_) {}
             if (msg.message && _msgLogDark) {
                 try {
-                    const tz = juneDatabase.getBotSetting('timezone') || 'Africa/Nairobi'
+                    const tz = require('./utils/consoleTheme').getTimeZone() // same clock as the theme
                     const mtype = Object.keys(msg.message)[0] || 'N/A'
                     const pushname = msg.pushName || 'N/A'
                     const body = msg.message?.conversation

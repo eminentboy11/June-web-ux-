@@ -21,6 +21,12 @@ module.exports = {
     try {
       const opt = (args[0] || '').toLowerCase().trim();
       const tz = consoleTheme.getTimeZone();
+      const tzSource = consoleTheme.getTimeZoneSource();
+      const tzLabel = tzSource === 'bot'
+        ? `${tz} (bot setting — change with .settimezone)`
+        : tzSource === 'env'
+          ? `${tz} (TIMEZONE env)`
+          : 'UTC (no timezone configured)';
       const mode = consoleTheme.getMode();
       const active = consoleTheme.currentTheme();
       const activeLabel = active === 'light' ? '☀️ white (June Lite style)' : '🌙 dark (June Ultra style)';
@@ -31,7 +37,7 @@ module.exports = {
           `📌 Mode    : *${mode}*${mode === 'auto' ? ' ⏰' : ''}\n` +
           `🖥️ Right now: ${activeLabel}\n` +
           `⏰ Auto    : ☀️ 06:00 → 🌙 18:00\n` +
-          `🌍 Timezone: ${tz}${tz === 'UTC' && !process.env.TIMEZONE ? ' (default — set TIMEZONE env to change)' : ''}\n\n` +
+          `🌍 Timezone: ${tzLabel}\n\n` +
           `*Usage:*\n` +
           `  .theme dark  → Ultra's dark console always\n` +
           `  .theme light → Lite's white console always\n` +
@@ -50,7 +56,7 @@ module.exports = {
 
       return extra.reply(
         opt === 'auto'
-          ? `⏰ Theme set to *AUTO*\n\n☀️ white 06:00 → 18:00\n🌙 dark 18:00 → 06:00\n🌍 Timezone: ${tz}\n\n🖥️ Showing right now: ${nowLabel}`
+          ? `⏰ Theme set to *AUTO*\n\n☀️ white 06:00 → 18:00\n🌙 dark 18:00 → 06:00\n🌍 Timezone: ${tzLabel}\n\n🖥️ Showing right now: ${nowLabel}`
           : `🎨 Theme locked to *${opt.toUpperCase()}*\n\n🖥️ Console is now: ${nowLabel}\n\n_(use .theme auto to follow the day/night clock again)_`
       );
     } catch (err) {
