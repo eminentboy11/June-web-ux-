@@ -2170,12 +2170,9 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
     }
 
     // v3.0.1: auth rows exist but are unproven (mirror-restored this boot, or
-    // restored and never connected). Connecting with them can draw a false
-    // 401-logout that would also revoke a healthy server-side session — fetch
-    // the authoritative snapshot from the Session Server instead.
-    if (sqliteAuthReady && !forceBootstrap) {
-        log('[ SESSION SERVER ] Local auth was restored from a mirror and has never opened a connection here; fetching the authoritative session from the Session Server instead of trusting the mirror copy.', 'yellow')
-    }
+    // restored and never connected) — the authoritative snapshot is fetched
+    // from the Session Server below. Deliberately silent: the mirror layer
+    // already reported the restore, and the fetch logs one green line.
 
     // FULL BOOTSTRAP — no usable local auth (or an explicit forced replace):
     // fetch the encrypted session from the server and restore it into SQLite.
@@ -2194,7 +2191,8 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
     while (!global._shutdownRequested) {
         try {
             const result = await sessionServer.fetchAndRestoreSnapshot(juneDatabase._db)
-            log(`[ SESSION SERVER ] ✅ Auth state restored (${result.keyRows} signal key rows). Connecting...`, 'green')
+            const mergeNote = result.mergedKeys ? ' — mirror keys kept, no rebuild needed' : ''
+            log(`[ SESSION SERVER ] ✅ Auth state restored (${result.keyRows} signal key rows${mergeNote}). Connecting...`, 'green')
             juneDatabase.markDatabaseDirty('session-server-restore')
             // v3.0.1: authoritative restore — this state is trusted for the
             // fast path, and a 401 on it is genuine evidence the session died.
@@ -2368,8 +2366,7 @@ async function main() {
             // server-side session.
             setAuthSource(juneDatabase._db, 'mirror-restore')
             setAuthConnectionVerified(juneDatabase._db, false)
-            log(`[ AUTH MIRROR ] Restored ${authRecovery.source} auth state (${authRecovery.keyRows} key rows).`, 'green')
-            log('[ AUTH MIRROR ] Mirror copy is unproven — the Session Server snapshot stays authoritative.', 'cyan')
+            log(`[ AUTH MIRROR ] Restored ${authRecovery.source} auth state (${authRecovery.keyRows} key rows).`)
         } else if (authRecovery.error) {
             log('[ AUTH MIRROR ] Remote auth state was unavailable or invalid.', 'yellow')
         }
