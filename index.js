@@ -966,6 +966,35 @@ async function sendWelcomeMessage(sock) {
 
         await sock.sendMessage(botJid, { text: welcomeText })
 
+        // Creds-only warm start: tell the owner what to expect (once per
+        // boot). Self-chat needs no session negotiation, so this lands even
+        // while WhatsApp keys are still rebuilding. Guarded send — a notice
+        // failure must never reset the connection state.
+        if (global._credsOnlyWarmStart) {
+            global._credsOnlyWarmStart = false
+            await delay(1200)
+            try {
+                const warmUpText = applyFont(
+`🔥 WARMING UP…
+
+Your session is restored and the bot is online ✅
+
+WhatsApp keys are rebuilding in the background —
+this is normal after a fresh deploy or restart.
+
+⏳ For the next 2–3 minutes, some replies may be
+slow or arrive late.
+
+⚡ After that, everything responds instantly.
+
+No action needed — just give it a moment 💚`
+                )
+                await sock.sendMessage(botJid, { text: warmUpText })
+            } catch (warmError) {
+                log(`Warm-up notice error: ${warmError.message}`, 'yellow')
+            }
+        }
+
         clearPersistedSessionErrorState()
         global.errorRetryCount = 0
     } catch (e) {
@@ -1230,7 +1259,18 @@ async function startJunexBot() {
         authState = { ...fileState, source: 'files', stats: getSQLiteAuthStats(juneDatabase._db) }
     }
     const { state, saveCreds } = authState
-    log(`[ AUTH ] ${authState.source === 'sqlite' ? 'SQLite' : 'file'} auth active (${authState.stats.totalKeys} key rows).`, 'cyan')
+    // Creds-only warm start: 0 signal key rows means every WhatsApp key
+    // (pre-keys, per-contact sessions) regenerates after connecting — the
+    // first messages may be slow for a few minutes. Flag it so the owner
+    // gets the "warming up" notice after the CONNECTED banner, and never
+    // mistakes a warming bot for a broken one.
+    global._credsOnlyWarmStart = authState.source === 'sqlite' && authState.stats.totalKeys === 0
+    const authLine = `[ AUTH ] ${authState.source === 'sqlite' ? 'SQLite' : 'file'} auth active (${authState.stats.totalKeys} key rows).`
+    if (global._credsOnlyWarmStart) {
+        log(`${authLine} Creds-only session — WhatsApp keys rebuild after connecting (first messages may take 2–3 min, then instant).`, 'cyan')
+    } else {
+        log(authLine, 'cyan')
+    }
     const msgRetryCounterCache = new NodeCache()
     let fileMigrationInFlight = null
     let fileMigrationComplete = false
