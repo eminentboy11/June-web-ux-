@@ -951,7 +951,7 @@ async function sendWelcomeMessage(sock) {
         const ownerName = (Array.isArray(juneDatabase.getOwnerNames()) ? juneDatabase.getOwnerNames()[0] : juneDatabase.getOwnerNames()) || 'Bot Owner'
 
         const welcomeText = applyFont(
-`┏━━━━━━✧ CONNECTED ✧━━━━━━━
+`┏━━✧ CONNECTED ✧━━━
 ┃✧ Bot: ${juneDatabase.getBotSetting('botName')}
 ┃✧ Prefix: [ ${prefix} ]
 ┃✧ Owner: ${ownerName}
@@ -961,8 +961,7 @@ async function sendWelcomeMessage(sock) {
 ┃✧ T.Group: t.me/juneOff
 ┃✧ Telegram: t.me/supremlord
 ┃✧ Repo: https://github.com/Vinpink2
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━`
-        )
+┗━━━━━━━━━━━━━━━━━━` )
 
         // Creds-only warm start: instead of a separate message, fold the
         // warm-up info UNDER the CONNECTED banner behind WhatsApp's
@@ -989,7 +988,7 @@ Session restored — bot is online ✅
 First replies may be slow for 2–3 minutes
 while keys rebuild. Then: instant ⚡`
             )
-            outgoingText = `${welcomeText}\n${readmore}\n${warmUpText}`
+            outgoingText = `${welcomeText}${readmore}\n${warmUpText}`
         }
 
         await sock.sendMessage(botJid, { text: outgoingText })
