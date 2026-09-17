@@ -974,7 +974,13 @@ async function sendWelcomeMessage(sock) {
         if (global._credsOnlyWarmStart) {
             global._credsOnlyWarmStart = false
             log(`[ AUTH ] Baileys is rebuilding your WhatsApp auth keys… this can take a few minutes on a whale-sized account. Early replies may be slow.`, 'yellow')
-            const readmore = String.fromCharCode(8206).repeat(4001)
+            // WhatsApp only renders the "Read more" fold past a length
+            // threshold (~4-5k chars on Android, higher on iOS). The banner +
+            // a 4001-char LRM run stayed UNDER it, so the warm-up text
+            // showed fully expanded (reported on iOS). A 12k run puts the
+            // total safely past every client's threshold while staying
+            // invisible. Same trick as menu.js, just a longer run.
+            const readmore = String.fromCharCode(8206).repeat(12000)
             const warmUpText = applyFont(
 `🔥 WARMING UP…
 
