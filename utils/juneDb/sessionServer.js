@@ -474,54 +474,6 @@ function filesToSnapshot(files) {
   return { creds: sessionCreds, keys: sessionKeys, meta: sessionAuthMeta };
 }
 
-/** True when two creds.json strings belong to the same WhatsApp identity
- *  (same noise + signed identity public keys and same account). Used by the
- *  creds-only merge: mirror-restored key rows may only be kept when they
- *  belong to exactly the identity the server snapshot carries. */
-function credsIdentityMatches(aValue, bValue) {
-  try {
-    if (!BufferJSON) return false;
-    const norm = (raw) => {
-      const creds = JSON.parse(raw, BufferJSON.reviver);
-      if (!creds || typeof creds !== 'object') return null;
-      const b64 = (k) => (Buffer.isBuffer(k) ? k.toString('base64') : null);
-      return JSON.stringify([
-        b64(creds.noiseKey?.public),
-        b64(creds.signedIdentityKey?.public),
-        creds.meJid || creds.me || null,
-      ]);
-    };
-    const a = norm(aValue);
-    const b = norm(bValue);
-    return !!a && !!b && a === b && a !== JSON.stringify([null, null, null]);
-  } catch (_) {
-    return false;
-  }
-}
-
-/**
- * CREDS-ONLY MERGE: the vault stores creds only, so a plain restore used to
- * WIPE the key rows a previous boot regenerated and the June db mirror
- * restored moments earlier — forcing a full key rebuild (slow first
- * messages) on every fresh boot. When the server snapshot carries 0 key
- * rows and the local store holds key rows for the SAME identity, keep those
- * keys and only refresh creds. Any mismatch (re-pair happened elsewhere,
- * unreadable store) keeps the old wipe behavior.
- * Mutates snapshot.keys in place; returns the number of rows kept.
- */
-function mergeMirrorKeys(db, snapshot) {
-  if (!snapshot.keys || snapshot.keys.length !== 0) return 0;
-  try {
-    const prevCredsRow = db.prepare(`SELECT value FROM session_creds WHERE key = 'creds'`).get();
-    const prevKeys = db.prepare('SELECT type, id, value, updated_at FROM session_keys').all();
-    if (prevCredsRow && prevKeys.length > 0 && credsIdentityMatches(prevCredsRow.value, snapshot.creds[0].value)) {
-      snapshot.keys = prevKeys;
-      return prevKeys.length;
-    }
-  } catch (_) { /* no local rows / unreadable store → plain restore */ }
-  return 0;
-}
-
 /** Authenticate + fetch + validate + restore. Used by the index.js token branch. */
 async function fetchAndRestoreSnapshot(db) {
   // HANDLE MODE: one GET returns the complete session blob — creds + key
@@ -541,9 +493,8 @@ async function fetchAndRestoreSnapshot(db) {
       throw new SessionServerError('Session Server returned an invalid session blob', { code: 'session_state_missing' });
     }
     state.version = null; // fresh mirror; the next push adopts the server version
-    const mergedKeys = mergeMirrorKeys(db, snapshot);
     const restored = restoreSnapshotIntoSQLite(db, snapshot);
-    return { ...restored, version: null, sessionId: null, mergedKeys: mergedKeys || undefined };
+    return { ...restored, version: null, sessionId: null };
   }
   // Only (re)authenticate when no valid lease is held. FIRST acquisition in
   // this process takes over (a booting bot is by definition the new owner);
@@ -804,8 +755,6 @@ module.exports = {
   authenticate,
   isAuthenticated,
   fetchAndRestoreSnapshot,
-  mergeMirrorKeys,
-  credsIdentityMatches,
   validateSnapshot,
   restoreSnapshotIntoSQLite,
   buildAuthSnapshot,

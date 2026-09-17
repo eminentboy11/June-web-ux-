@@ -2191,8 +2191,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
     while (!global._shutdownRequested) {
         try {
             const result = await sessionServer.fetchAndRestoreSnapshot(juneDatabase._db)
-            const mergeNote = result.mergedKeys ? ' — mirror keys kept, no rebuild needed' : ''
-            log(`[ SESSION SERVER ] ✅ Auth state restored (${result.keyRows} signal key rows${mergeNote}). Connecting...`, 'green')
+            log(`[ SESSION SERVER ] ✅ Auth state restored (${result.keyRows} signal key rows). Connecting...`, 'green')
             juneDatabase.markDatabaseDirty('session-server-restore')
             // v3.0.1: authoritative restore — this state is trusted for the
             // fast path, and a 401 on it is genuine evidence the session died.
