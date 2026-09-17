@@ -977,17 +977,10 @@ async function sendWelcomeMessage(sock) {
                 const warmUpText = applyFont(
 `🔥 WARMING UP…
 
-Your session is restored and the bot is online ✅
+Session restored — bot is online ✅
 
-WhatsApp keys are rebuilding in the background —
-this is normal after a fresh deploy or restart.
-
-⏳ For the next 2–3 minutes, some replies may be
-slow or arrive late.
-
-⚡ After that, everything responds instantly.
-
-No action needed — just give it a moment 💚`
+First replies may be slow for 2–3 minutes
+while keys rebuild. Then: instant ⚡`
                 )
                 await sock.sendMessage(botJid, { text: warmUpText })
             } catch (warmError) {
@@ -1260,14 +1253,14 @@ async function startJunexBot() {
     }
     const { state, saveCreds } = authState
     // Creds-only warm start: 0 signal key rows means every WhatsApp key
-    // (pre-keys, per-contact sessions) regenerates after connecting — the
-    // first messages may be slow for a few minutes. Flag it so the owner
-    // gets the "warming up" notice after the CONNECTED banner, and never
-    // mistakes a warming bot for a broken one.
-    global._credsOnlyWarmStart = authState.source === 'sqlite' && authState.stats.totalKeys === 0
+    // regenerates after connecting — first messages may be slow for a few
+    // minutes. ONLY a session-server restore warms up (fresh manual pairings
+    // generate their keys during pairing; local restarts already have keys),
+    // so the notice never fires in those cases.
+    global._credsOnlyWarmStart = authState.source === 'sqlite' && authState.stats.totalKeys === 0 && getAuthSource(juneDatabase._db) === 'session-server'
     const authLine = `[ AUTH ] ${authState.source === 'sqlite' ? 'SQLite' : 'file'} auth active (${authState.stats.totalKeys} key rows).`
     if (global._credsOnlyWarmStart) {
-        log(`${authLine} Creds-only session — WhatsApp keys rebuild after connecting (first messages may take 2–3 min, then instant).`, 'cyan')
+        log(`${authLine} Creds-only restore — keys rebuild after connect (first messages slow ~2 min).`, 'cyan')
     } else {
         log(authLine, 'cyan')
     }
