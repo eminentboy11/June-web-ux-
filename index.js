@@ -964,29 +964,29 @@ async function sendWelcomeMessage(sock) {
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━`
         )
 
-        await sock.sendMessage(botJid, { text: welcomeText })
-
-        // Creds-only warm start: tell the owner what to expect (once per
-        // boot). Self-chat needs no session negotiation, so this lands even
-        // while WhatsApp keys are still rebuilding. Guarded send — a notice
-        // failure must never reset the connection state.
+        // Creds-only warm start: instead of a separate message, fold the
+        // warm-up info UNDER the CONNECTED banner behind WhatsApp's
+        // "Read more" button (same LRM trick as menu.js). Only a
+        // session-server restore warms up — manual pairings generate keys
+        // during pairing, and restarts with local keys have nothing to
+        // rebuild, so neither sees this.
+        let outgoingText = welcomeText
         if (global._credsOnlyWarmStart) {
             global._credsOnlyWarmStart = false
-            await delay(1200)
-            try {
-                const warmUpText = applyFont(
+            log(`[ AUTH ] Baileys is rebuilding your WhatsApp auth keys… this can take a few minutes on a whale-sized account. Early replies may be slow.`, 'yellow')
+            const readmore = String.fromCharCode(8206).repeat(4001)
+            const warmUpText = applyFont(
 `🔥 WARMING UP…
 
 Session restored — bot is online ✅
 
 First replies may be slow for 2–3 minutes
 while keys rebuild. Then: instant ⚡`
-                )
-                await sock.sendMessage(botJid, { text: warmUpText })
-            } catch (warmError) {
-                log(`Warm-up notice error: ${warmError.message}`, 'yellow')
-            }
+            )
+            outgoingText = `${welcomeText}\n${readmore}\n${warmUpText}`
         }
+
+        await sock.sendMessage(botJid, { text: outgoingText })
 
         clearPersistedSessionErrorState()
         global.errorRetryCount = 0
