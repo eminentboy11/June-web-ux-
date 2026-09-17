@@ -18,6 +18,11 @@
 
 const crypto = require('crypto');
 
+// Baileys' canonical auth JSON codec — Buffer fields must round-trip through
+// its replacer/reviver forms (see filesToSnapshot for why this matters).
+let BufferJSON = null;
+try { ({ BufferJSON } = require('@whiskeysockets/baileys/lib/Utils/generics')); } catch (_) { /* optional */ }
+
 const TOKEN_PREFIX = 'june-ultra:';
 const TOKEN_LABEL_PATTERN = /^[A-Za-z0-9_-]{3,24}$/;
 const TOKEN_BODY_PATTERN = /^[A-Za-z0-9]{24}$/;
@@ -435,7 +440,22 @@ function parseAuthKeyFilename(name) {
 /** Lite blob { 'creds.json': obj, '<type>-<id>.json': obj } → SQLite row snapshot. */
 function filesToSnapshot(files) {
   const now = Date.now();
-  const credsFile = files ? files['creds.json'] : null;
+  // Canonicalize every file: whatever Buffer shape the payload carries (real
+  // Buffers, PocketBase array form { type:'Buffer', data:[…] }, or Baileys'
+  // canonical base64 form), revive→replacer re-encodes it to the exact
+  // base64 shape Baileys' reviver accepts. Without this, an array-form
+  // routingInfo/noiseKey survives as a plain object and makeNoiseHandler
+  // throws RangeError: Buffer.alloc(NaN) on the next connect (the restore
+  // retry loop on fresh deploys).
+  const canonicalAuthJson = (value) => {
+    try {
+      const revived = JSON.parse(JSON.stringify(value), BufferJSON.reviver);
+      return JSON.parse(JSON.stringify(revived, BufferJSON.replacer));
+    } catch (_) {
+      return value;
+    }
+  };
+  const credsFile = files ? canonicalAuthJson(files['creds.json']) : null;
   if (!credsFile || typeof credsFile !== 'object') return null;
   const sessionCreds = [{ key: 'creds', value: JSON.stringify(credsFile), updated_at: now }];
   const sessionKeys = [];
@@ -443,7 +463,7 @@ function filesToSnapshot(files) {
     if (name === 'creds.json') continue;
     const parsed = parseAuthKeyFilename(name);
     if (!parsed || !value || typeof value !== 'object') continue;
-    sessionKeys.push({ type: parsed.type, id: parsed.id, value: JSON.stringify(value), updated_at: now });
+    sessionKeys.push({ type: parsed.type, id: parsed.id, value: JSON.stringify(canonicalAuthJson(value)), updated_at: now });
   }
   // CREDS-ONLY VAULT: a blob with just creds.json is valid — Baileys
   // regenerates every key file when the restored bot reconnects.
