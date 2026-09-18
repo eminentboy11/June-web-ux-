@@ -1060,6 +1060,38 @@ const handleMessage = async (sock, msg) => {
       // Silently ignore if tictactoe command doesn't exist or has errors
     }
 
+    // Check for active ttt2 games (before prefix check)
+    try {
+      const ttt2Module = require('./commands/fun/ttt2');
+      if (ttt2Module.handleTtt2Move) {
+        // Check if user is in an active game
+        const isInTtt2 = Object.values(ttt2Module.games || {}).some(room =>
+          room.id.startsWith('ttt2') &&
+          [room.game.playerX, room.game.playerO].includes(sender) &&
+          room.state === 'PLAYING'
+        );
+
+        if (isInTtt2) {
+          // User has active game, process input
+          const handledTtt2 = await ttt2Module.handleTtt2Move(sock, msg, {
+            from,
+            sender,
+            isGroup,
+            groupMetadata,
+            isOwner: isOwner(sender),
+            isAdmin: await isAdmin(sock, sender, from, groupMetadata),
+            isBotAdmin: await isBotAdmin(sock, sender, from, groupMetadata),
+            isMod: isMod(sender),
+            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
+            react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
+          });
+          if (handledTtt2) return; // Don't process as command if move was handled
+        }
+      }
+    } catch (e) {
+      // Silently ignore if ttt2 command doesn't exist or has errors
+    }
+
 
     // Fancy text style selection: reply to fancy list with just a number
     if (/^\d+$/.test(body.trim())) {
