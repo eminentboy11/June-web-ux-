@@ -32,21 +32,7 @@ h1{margin:0;font-size:15px;color:#39e889;letter-spacing:.5px}.sub{margin:2px 0 8
 </div><script>
 (function(){
 'use strict';
-function genCat(prefix,n,base){
-  var out=[];
-  for(var i=1;i<=n;i++){
-    out.push({"n":base+i,"a":i%3===0?[base[0]+i]:[],"d":"Sample description for "+base+i+" command, used for testing scroll behavior.","u":"!"+base+i+" [args]"});
-  }
-  return out;
-}
-var D={
-  "prefix": "!",
-  "cats": {
-    "moderation": genCat('!',22,'mod'),
-    "fun": genCat('!',18,'fun'),
-    "utility": genCat('!',25,'util')
-  }
-};
+var D=__MENUDATA__;
 var cats=Object.keys(D.cats||{}), active='all', q='';
 var chipsEl=document.getElementById('chips'), listEl=document.getElementById('list'), footEl=document.getElementById('foot');
 function chipLabel(c){return c==='all'?('All ('+countAll()+')'):(c+' ('+D.cats[c].length+')');}
