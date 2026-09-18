@@ -3,9 +3,10 @@
 body{padding:10px}.card{max-width:340px;margin:0 auto;padding:12px;border-radius:16px;background:#080d0b;color:#d9fbe6;box-shadow:0 6px 18px #0008;border:1px solid #123b25;height:520px;display:flex;flex-direction:column;overflow:hidden}
 h1{margin:0;font-size:15px;color:#39e889;letter-spacing:.5px}.sub{margin:2px 0 8px;font-size:11px;color:#6fae8c}
 #q{width:100%;padding:9px 12px;font-size:13px;border-radius:10px;border:1px solid #1d7347;background:#0b130f;color:#d9fbe6;outline:none}
-#chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+#chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;max-height:132px;overflow-y:auto}
 .chip{padding:5px 10px;font-size:11px;border-radius:999px;border:1px solid #123b25;background:#0b130f;color:#9ed8b4;cursor:pointer}
 .chip.on{background:#123b25;border-color:#39e889;color:#c9f7dd}
+.backbar{display:none;margin:8px 0;padding:8px 12px;font-size:12px;border-radius:10px;border:1px solid #1d7347;background:#0b130f;color:#c9f7dd;cursor:pointer}
 #list{flex:1 1 auto;overflow-y:auto;min-height:0}
 .cmd{border:1px solid #123b25;border-radius:10px;padding:8px 10px;margin-bottom:6px;cursor:pointer;background:#0b130f}
 .cmd .nm{font-size:13px;font-weight:700;color:#c9f7dd}.cmd .cnt{float:right;font-size:10px;color:#4d8a6a}
@@ -20,6 +21,7 @@ h1{margin:0;font-size:15px;color:#39e889;letter-spacing:.5px}.sub{margin:2px 0 8
 <p class="sub">tappable commands · search · category chips</p>
 <input id="q" placeholder="Search commands…">
 <div id="chips"></div>
+<div id="backbar">‹ all categories</div>
 <div id="list"></div>
 <p class="foot" id="foot"></p>
 </div><script>
@@ -27,11 +29,16 @@ h1{margin:0;font-size:15px;color:#39e889;letter-spacing:.5px}.sub{margin:2px 0 8
 'use strict';
 var D=__MENUDATA__, cats=Object.keys(D.cats||{}), active='all', q='';
 var chipsEl=document.getElementById('chips'), listEl=document.getElementById('list'), footEl=document.getElementById('foot');
+var backEl=document.getElementById('backbar');
+backEl.onclick=function(){active='all';renderChips();renderList();};
 function chipLabel(c){return c==='all'?('All ('+countAll()+')'):(c+' ('+D.cats[c].length+')');}
 function countAll(){var n=0;for(var k in D.cats)n+=D.cats[k].length;return n;}
 function renderChips(){chipsEl.innerHTML='';var all=['all'].concat(cats);
  all.forEach(function(c){var b=document.createElement('div');b.className='chip'+(c===active?' on':'');b.textContent=chipLabel(c);
-  b.onclick=function(){active=c;renderChips();renderList();};chipsEl.appendChild(b);});}
+  b.onclick=function(){active=c;renderChips();renderList();};chipsEl.appendChild(b);});
+ chipsEl.style.display=(active==='all'&&!q)?'flex':'none';
+ backEl.style.display=active==='all'?'none':'block';
+ if(active!=='all')backEl.textContent='‹ all categories — '+active+' ('+D.cats[active].length+' cmds)';}
 function renderList(){listEl.innerHTML='';var shown=0;
  var eff=(q?'all':active);
  cats.forEach(function(c){if(eff!=='all'&&eff!==c)return;
