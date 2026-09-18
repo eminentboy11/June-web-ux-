@@ -45,11 +45,11 @@ function buildHtml(data, prefix) {
 }
 
 module.exports = {
-    name: 'imenu',
-    aliases: ['minimenu'],
+    name: 'help',
+    aliases: ['help'],
     category: 'games',
     description: 'BETA interactive menu card — tappable command list (mini-app)',
-    usage: '.imenu',
+    usage: '.help',
 
     async execute(sock, msg, args, extra) {
         const chatId = extra.from || msg.key.remoteJid;
