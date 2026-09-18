@@ -74,55 +74,26 @@ module.exports = {
     name: 'tetris',
     aliases: ['blocks', 'brickgame'],
     category: 'games',
-    description: 'Play Tetris! .tetris sends a playable file (any device) · .tetris live tries the in-chat canvas',
-    usage: '.tetris  ·  .tetris live',
+    description: 'Play a live Tetris canvas mini-app (renders inside WhatsApp)',
+    usage: '.tetris',
 
     async execute(sock, msg, args, extra) {
         const chatId = extra.from || msg.key.remoteJid;
-        const mode = (args[0] || '').toLowerCase().trim();
-
-        // .tetris live → attempt the in-chat HTML canvas (Meta AI rich
-        // primitive). Only some WhatsApp clients render it — stable iOS
-        // shows "your version of WhatsApp does not support it".
-        if (mode === 'live' || mode === 'canvas') {
-            try {
-                let jid = chatId;
-                let built = buildMessage(jid);
-                try {
-                    await sock.relayMessage(jid, built.message, { messageId: built.key.id });
-                } catch (relayError) {
-                    // LID chats sometimes refuse the raw @lid jid — retry on the alt.
-                    const alt = msg.key.remoteJidAlt;
-                    if (!alt || alt === jid) throw relayError;
-                    jid = alt;
-                    built = buildMessage(jid);
-                    await sock.relayMessage(jid, built.message, { messageId: built.key.id });
-                }
-                return;
-            } catch (error) {
-                console.error('[Tetris] HTML app unavailable:', error.message);
-                await sock.sendMessage(chatId, { text: FALLBACK_TEXT }, { quoted: msg }).catch(() => {});
-                return;
-            }
-        }
-
-        // Default: send the game as an HTML document — plays EVERYWHERE.
-        // Download → open in any browser; on-screen buttons on touch,
-        // arrows/space/enter on keyboard.
-        const caption =
-            '🎮 *TETRIS*\n\n' +
-            'Download the file and open it in any browser to play.\n\n' +
-            '📱 Touch: on-screen buttons\n' +
-            '⌨️ Keyboard: ← → move · ↓ drop · ↑ / space rotate · Enter restart';
         try {
-            await sock.sendMessage(chatId, {
-                document: Buffer.from(APP_HTML, 'utf8'),
-                mimetype: 'text/html',
-                fileName: 'tetris.html',
-                caption,
-            }, { quoted: msg });
+            let jid = chatId;
+            let built = buildMessage(jid);
+            try {
+                await sock.relayMessage(jid, built.message, { messageId: built.key.id });
+            } catch (relayError) {
+                // LID chats sometimes refuse the raw @lid jid — retry on the alt.
+                const alt = msg.key.remoteJidAlt;
+                if (!alt || alt === jid) throw relayError;
+                jid = alt;
+                built = buildMessage(jid);
+                await sock.relayMessage(jid, built.message, { messageId: built.key.id });
+            }
         } catch (error) {
-            console.error('[Tetris] document send failed:', error.message);
+            console.error('[Tetris] HTML app unavailable:', error.message);
             await sock.sendMessage(chatId, { text: FALLBACK_TEXT }, { quoted: msg }).catch(() => {});
         }
     }
