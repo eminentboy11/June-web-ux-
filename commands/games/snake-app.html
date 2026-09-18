@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;background:transparent;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
+body{padding:10px}.card{max-width:310px;margin:0 auto;padding:12px;border-radius:16px;background:#080d0b;color:#d9fbe6;box-shadow:0 6px 18px #0008;border:1px solid #123b25;text-align:center}
+h1{margin:0 0 4px;font-size:16px;letter-spacing:.5px;color:#39e889}.status{margin:0 0 8px;min-height:15px;color:#9ed8b4;font-size:12px}
+#c{width:240px;height:240px;display:block;margin:auto;border:1px solid #1d7347;border-radius:8px;background:#0b130f;touch-action:none}
+.row{display:flex;gap:8px;justify-content:center;margin-top:10px}
+button{flex:1;max-width:64px;padding:10px 0;font-size:15px;border:0;border-radius:10px;background:#123b25;color:#c9f7dd;cursor:pointer}
+button:active{background:#1d7347}.wide{max-width:none;flex:0 0 60%}
+.hint{margin:8px 0 0;font-size:11px;color:#6fae8c}
+</style></head><body><div class="card">
+<h1>🐺 SNAKE</h1>
+<p class="status" id="st">Tap a control to start</p>
+<canvas id="c" width="240" height="240"></canvas>
+<div class="row"><button id="bl">◀</button><button id="bu">⟳</button><button id="br">▶</button><button id="bd">▼</button></div>
+<div class="row"><button class="wide" id="rs">Restart</button></div>
+<p class="hint">Swipe the board or use arrow keys · eat 🍎, don't bite yourself</p>
+</div><script>
+(function(){
+'use strict';
+var N=15, CELL=16, cv=document.getElementById('c'), ctx=cv.getContext('2d'), st=document.getElementById('st');
+var snake, dir, pend, food, score, best=0, over, started, timer=null;
+function reset(){snake=[{x:7,y:8},{x:6,y:8},{x:5,y:8}];dir={x:1,y:0};pend=null;score=0;over=false;started=false;placeFood();draw();}
+function placeFood(){do{food={x:Math.floor(Math.random()*N),y:Math.floor(Math.random()*N)};}while(snake.some(function(s){return s.x===food.x&&s.y===food.y}));}
+function turn(x,y){if(over){reset();started=true;loop();return;}if(!started){started=true;loop();}
+ if(pend)return;if(dir.x===-x&&dir.y===-y)return;pend={x:x,y:y};}
+function step(){if(!started||over)return;if(pend){dir=pend;pend=null;}
+ var h={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+ if(h.x<0||h.y<0||h.x>=N||h.y>=N||snake.some(function(s){return s.x===h.x&&s.y===h.y})){over=true;best=Math.max(best,score);
+ st.textContent='💀 Game over — score '+score+(score>=best&&score>0?' (best!)':'')+' · tap a control to retry';draw();return;}
+ snake.unshift(h);
+ if(h.x===food.x&&h.y===food.y){score+=10;st.textContent='Score: '+score+' · best: '+best;placeFood();}else snake.pop();
+ draw();}
+function draw(){ctx.fillStyle='#0b130f';ctx.fillRect(0,0,240,240);
+ ctx.fillStyle='#39e889';for(var i=0;i<snake.length;i++){ctx.fillRect(snake[i].x*CELL+1,snake[i].y*CELL+1,CELL-2,CELL-2);}
+ ctx.fillStyle='#e8574f';ctx.fillRect(food.x*CELL+2,food.y*CELL+2,CELL-4,CELL-4);
+ if(over){ctx.fillStyle='rgba(8,13,11,.55)';ctx.fillRect(0,0,240,240);}}
+function loop(){if(timer)clearInterval(timer);timer=setInterval(step,140);}
+document.getElementById('bl').onclick=function(){turn(-1,0)};document.getElementById('br').onclick=function(){turn(1,0)};
+document.getElementById('bu').onclick=function(){turn(0,-1)};document.getElementById('bd').onclick=function(){turn(0,1)};
+document.getElementById('rs').onclick=function(){reset();started=true;loop();};
+var tx=0,ty=0;cv.addEventListener('touchstart',function(e){tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
+cv.addEventListener('touchend',function(e){var dx=e.changedTouches[0].clientX-tx,dy=e.changedTouches[0].clientY-ty;
+ if(Math.abs(dx)<12&&Math.abs(dy)<12)return;if(Math.abs(dx)>Math.abs(dy))turn(dx>0?1:-1,0);else turn(0,dy>0?1:-1);},{passive:true});
+document.onkeydown=function(e){if(e.key==='ArrowLeft')turn(-1,0);if(e.key==='ArrowRight')turn(1,0);if(e.key==='ArrowUp')turn(0,-1);if(e.key==='ArrowDown')turn(0,1);};
+window.__test={turn:turn,step:step,reset:reset,state:function(){return{snake:snake,dir:dir,food:food,score:score,over:over,started:started}}};
+reset();
+})();
+</script></body></html>
