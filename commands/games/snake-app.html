@@ -1,13 +1,14 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;background:transparent;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
-body{padding:10px}.card{max-width:310px;margin:0 auto;padding:12px;border-radius:16px;background:#080d0b;color:#d9fbe6;box-shadow:0 6px 18px #0008;border:1px solid #123b25;text-align:center}
-h1{margin:0 0 4px;font-size:16px;letter-spacing:.5px;color:#39e889}.status{margin:0 0 8px;min-height:15px;color:#9ed8b4;font-size:12px}
+body{padding:10px}.card{max-width:310px;margin:0 auto;padding:12px;border-radius:16px;background:#0a0616;color:#e9defc;box-shadow:0 6px 22px #000a,0 0 24px #7c3aed40;border:1px solid #5b21b6;text-align:center}
+h1{margin:0 0 4px;font-size:16px;letter-spacing:.5px;background:linear-gradient(90deg,#ec4899,#a855f7 45%,#38bdf8);-webkit-background-clip:text;background-clip:text;color:transparent}
+.status{margin:0 0 8px;min-height:15px;color:#c4b5fd;font-size:12px}
 .board-wrap{display:flex;justify-content:center;width:100%}
-#c{width:240px;height:240px;display:block;border:1px solid #1d7347;border-radius:8px;background:#0b130f;touch-action:none}
+#c{width:240px;height:240px;display:block;border:1px solid #7c3aed;border-radius:8px;background:#0d0a1f;touch-action:none}
 .row{display:flex;gap:8px;justify-content:center;margin-top:10px;width:100%}
-button{flex:1;max-width:64px;padding:10px 0;font-size:15px;border:0;border-radius:10px;background:#123b25;color:#c9f7dd;cursor:pointer}
-button:active{background:#1d7347}.wide{max-width:none;flex:0 0 60%}
-.hint{margin:8px 0 0;font-size:11px;color:#6fae8c}
+button{flex:1;max-width:64px;padding:10px 0;font-size:15px;border:0;border-radius:10px;background:#2e1a5e;color:#e9d5ff;cursor:pointer}
+button:active{background:#7c3aed}.wide{max-width:none;flex:0 0 60%}
+.hint{margin:8px 0 0;font-size:11px;color:#8b7bb8}
 </style></head><body><div class="card">
 <h1>🐍 SNAKE</h1>
 <p class="status" id="st">Tap a control to start</p>
@@ -31,10 +32,11 @@ function step(){if(!started||over)return;if(pend){dir=pend;pend=null;}
  snake.unshift(h);
  if(h.x===food.x&&h.y===food.y){score+=10;st.textContent='Score: '+score+' · best: '+best;placeFood();}else snake.pop();
  draw();}
-function draw(){ctx.fillStyle='#0b130f';ctx.fillRect(0,0,240,240);
- ctx.fillStyle='#39e889';for(var i=0;i<snake.length;i++){ctx.fillRect(snake[i].x*CELL+1,snake[i].y*CELL+1,CELL-2,CELL-2);}
+var SNAKE_COLORS=['#a855f7','#8b5cf6','#7c3aed','#38bdf8'];
+function draw(){ctx.fillStyle='#0d0a1f';ctx.fillRect(0,0,240,240);
+ for(var i=0;i<snake.length;i++){ctx.fillStyle=i===0?'#ec4899':SNAKE_COLORS[i%SNAKE_COLORS.length];ctx.fillRect(snake[i].x*CELL+1,snake[i].y*CELL+1,CELL-2,CELL-2);}
  ctx.fillStyle='#e8574f';ctx.fillRect(food.x*CELL+2,food.y*CELL+2,CELL-4,CELL-4);
- if(over){ctx.fillStyle='rgba(8,13,11,.55)';ctx.fillRect(0,0,240,240);}}
+ if(over){ctx.fillStyle='rgba(10,6,22,.6)';ctx.fillRect(0,0,240,240);}}
 function loop(){if(timer)clearInterval(timer);timer=setInterval(step,140);}
 document.getElementById('bl').onclick=function(){turn(-1,0)};document.getElementById('br').onclick=function(){turn(1,0)};
 document.getElementById('bu').onclick=function(){turn(0,-1)};document.getElementById('bd').onclick=function(){turn(0,1)};
