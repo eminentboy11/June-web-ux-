@@ -16,7 +16,7 @@ const path = require('path');
 const { loadCommands } = require('../../utils/commandLoader');
 const { sendRichApp, RICH_FALLBACK } = require('../../utils/richApp');
 
-const TEMPLATE = fs.readFileSync(path.join(__dirname, 'imenu-app.html'), 'utf8');
+const TEMPLATE = fs.readFileSync(path.join(__dirname, 'help.html'), 'utf8');
 
 function collectCommands() {
     const seen = new Set();
@@ -57,7 +57,7 @@ module.exports = {
             const prefix = extra.prefix || '.';
             await sendRichApp(sock, msg, buildHtml(collectCommands(), prefix), chatId);
         } catch (error) {
-            console.error('[IMenu] mini-app unavailable:', error.message);
+            console.error('[help] command unavailable:', error.message);
             await sock.sendMessage(chatId, { text: RICH_FALLBACK('MINI MENU') }, { quoted: msg }).catch(() => {});
         }
     }
