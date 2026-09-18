@@ -168,8 +168,6 @@ process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'true'
 // ─── Centralized Logger ───────────────────────────────────────────────────────
 
 function log(message, color = 'white', isError = false) {
-    // Console Theme Engine — dark = classic Ultra prefix style, light = June
-    // Lite's timestamped style. Signature unchanged for every log() caller.
     require('./utils/consoleTheme').log(message, color, isError)
 }
 global.log = log;
@@ -270,10 +268,9 @@ function getStartupToggleState() {
             return Boolean(db.getBotSetting?.('autoReact') ?? juneDatabase.getBotSetting('autoReact'))
         }
     })()
-    // Auto-download status has one source of truth: SQLite bot_settings.
+    // Auto-download status source of truth: SQLite bot_settings.
     const autoDownload = Boolean(db.getAutoDownloadStatusSettings().enabled)
-    // Anti-feature configuration is read directly from SQLite. There is no
-    // data/*.json or config.js fallback for these values.
+    // Anti-feature config is read directly from SQLite; no JSON fallback.
     const antideleteMode = db.getAntideleteMode()
     const antideleteStatus = db.isAntideleteStatusEnabled()
 
@@ -310,8 +307,7 @@ function printStartupReport(data = {}) {
         startupRow('Integrity', data.integrityLabel || 'passed', data.integrityStatus || 'passed'),
     ];
     
-    // Show both available remote adapters while none is configured. Once a
-    // remote database is configured, show only the configured adapter(s).
+    // Show both remote adapters when none is configured; once configured, show only that one.
     const configuredExternal = (dbInfo.databases || []).filter((entry) => entry.configured)
     databaseRows.push(startupSeparator());
     databaseRows.push(startupHeading(
@@ -382,10 +378,9 @@ function printStartupReport(data = {}) {
         `┗${'━'.repeat(46)}┛`,
     ];
     
-    //console.clear();
     console.log(lines.join('\n'));
     
-    // Log actual remote adapter state without exposing connection strings.
+    // Log remote adapter state without exposing connection strings.
     const configuredExternalForLog = (dbInfo.databases || []).filter((entry) => entry.configured)
     const connectedExternal = configuredExternalForLog.filter((entry) => entry.connected)
     if (connectedExternal.length > 0) {
@@ -435,17 +430,13 @@ global.__ROOT__ = __dirname
 
 
 // ─── Apply Persisted Runtime Settings ─────────────────────────────────────────
-// Database access must happen after juneDatabase.ready resolves. Keeping this
-// at module scope races the async sql.js fallback and leaves stmts undefined.
+// Must run after juneDatabase.ready — running earlier races the sql.js fallback.
 async function applyPersistedRuntimeSettings() {
     try {
         await juneDatabase.ready;
         const db = juneDatabase;
-        // Nothing to hydrate any more: config.js is gone and every caller reads
-        // database.getBotSetting() directly, so stored values are already live.
-        // Only the presence flags below still need mirroring, because they are
-        // owned by utils/presenceSettings rather than bot_settings.
-        // Restore presence flags so .botstatus/.getsettings reflect the correct state
+        // config.js is gone; every caller reads database.getBotSetting() directly.
+        // Only presence flags still need mirroring (owned by presenceSettings).
         try {
           const _m = require('./utils/presenceSettings').getModes();
           juneDatabase.setBotSetting('autoTyping', _m.pm === 'typing' || _m.group === 'typing');
@@ -453,23 +444,21 @@ async function applyPersistedRuntimeSettings() {
           juneDatabase.setBotSetting('autoRecordType', _m.pm === 'recordtype' || _m.group === 'recordtype');
         } catch (_) {}
 
-        // Custom menu images stay in SQLite and are decoded directly by
-        // commands/general/menu.js when a menu is sent. Do not rebuild or
-        // maintain a persistent runtime image copy here.
+        // Custom menu images stay in SQLite and are decoded by commands/general/menu.js.
     } catch (e) {
         log(`[ SETTINGS ] Could not load runtime settings: ${e.message}`, 'yellow');
     }
 }
 
-// Loaded only after database.ready in main(), because command modules may read
-// database-backed settings during require-time.
+// Loaded only after database.ready in main(), since command modules may read
+// database-backed settings at require-time.
 let handler = null
 const { saveSession, getSession, clearSession } = juneDatabase
 
 const sessionDir = path.join(__dirname, juneDatabase.SESSION_NAME || 'session')
 const credsPath = path.join(sessionDir, 'creds.json')
 const envPath = path.join(process.cwd(), '.env')
-// Login metadata and session-ID fingerprints are stored in SQLite metadata.
+// Login metadata and session-ID fingerprints live in SQLite metadata.
 // Raw SESSION_ID values remain environment-only secrets.
 
 // ─── Auto-generate .env if missing ────────────────────────────────────────────
@@ -495,7 +484,7 @@ function readSessionIDFromEnv() {
         for (const line of lines) {
             const trimmed = line.trim()
             if (trimmed.startsWith('#') || !trimmed.startsWith('SESSION_ID=')) continue
-            // Everything after the first '=' is the value (preserves '=' inside base64)
+            // Everything after the first '=' is the value (keeps '=' inside base64)
             const value = trimmed.slice('SESSION_ID='.length).trim()
             return value
         }
@@ -505,16 +494,15 @@ function readSessionIDFromEnv() {
     return ''
 }
 
-// Inject the directly-read value into process.env so the rest of the code
+// Inject the directly-read value into process.env so the rest of the code sees it
 const _rawSessionID = readSessionIDFromEnv()
-// A non-empty local .env value overrides the platform value. An empty local
-// value intentionally leaves Heroku/Replit/Railway environment secrets intact.
+// A non-empty local .env value overrides the platform value; an empty local
+// value leaves Heroku/Replit/Railway environment secrets intact.
 if (_rawSessionID) process.env.SESSION_ID = _rawSessionID
 
 // ─── Direct .env JUNE_SESSION_TOKEN reader (Session Server token) ───────────
-// Additive centralized-session support: a june-ultra:~ token takes priority
-// over a legacy SESSION_ID. It is routed through process.env.SESSION_ID so
-// all existing fingerprint/revocation bookkeeping works unchanged.
+// A june-ultra:~ token takes priority over a legacy SESSION_ID, routed through
+// process.env.SESSION_ID so existing fingerprint/revocation logic works unchanged.
 function readJuneSessionTokenFromEnv() {
     try {
         if (!fs.existsSync(envPath)) return ''
@@ -533,8 +521,7 @@ function readJuneSessionTokenFromEnv() {
 function applyJuneSessionToken() {
     const fromFile = readJuneSessionTokenFromEnv()
     if (fromFile) process.env.JUNE_SESSION_TOKEN = fromFile
-    // SESSION_ID is the OFFICIAL home of the token now: a june-ultra:~ value
-    // in SESSION_ID feeds the Session Server flow directly.
+    // SESSION_ID is the official home of the token now.
     const fromSessionId = String(process.env.SESSION_ID || '').trim()
     if (fromSessionId && (sessionServer.isSessionServerToken(fromSessionId) || sessionServer.isJuneHandle(fromSessionId))
         && !String(process.env.JUNE_SESSION_TOKEN || '').trim()) {
@@ -555,8 +542,7 @@ function applyJuneSessionToken() {
 applyJuneSessionToken()
 
 // ─── Session Error Counter Helpers ───────────────────────────────────────────
-// The retry state is stored in SQLite KV through database.js. No session error
-// counter file is read or written.
+// Retry state is stored in SQLite KV through database.js.
 
 function getPersistedSessionErrorState() {
     try {
@@ -606,8 +592,7 @@ function clearSessionFiles() {
         global.errorRetryCount = 0
         clearSession()
         clearSQLiteAuth(juneDatabase._db, 'session-cleared')
-        // A deliberate local logout/session clear must not leave an older
-        // remote auth state behind in the external mirror.
+        // Prevent an older remote auth state from lingering after a deliberate logout.
         juneDatabase.clearRemoteAuthState()
         clearSessionIdFingerprint()
         juneDatabase.markDatabaseDirty('session-cleared')
@@ -721,8 +706,7 @@ function rememberSessionIdFingerprint(fingerprint) {
     setSessionIdFingerprint(juneDatabase._db, fingerprint)
     const persisted = getSessionIdFingerprint(juneDatabase._db)
     if (persisted !== fingerprint) {
-        // Never print the fingerprint itself. The presence check is enough to
-        // diagnose persistence without exposing any session-derived value.
+        // Never print the fingerprint itself — presence check is enough to diagnose.
         log('[ AUTH META ] SESSION_ID fingerprint could not be verified in SQLite.', 'red', true)
         return false
     }
@@ -761,8 +745,8 @@ function cleanupExpiredSessionQuarantines(source = 'startup') {
     return result
 }
 
-// A new SESSION_ID deliberately replaces file auth once. The old directory is
-// preserved as a short-lived quarantine backup, never deleted during the swap.
+// A new SESSION_ID replaces file auth once; the old directory is kept as a
+// short-lived quarantine backup, never deleted during the swap.
 function quarantineCurrentSessionForReplacement() {
     if (!fs.existsSync(sessionDir)) return null
     try {
@@ -780,10 +764,8 @@ function quarantineCurrentSessionForReplacement() {
 }
 
 // ─── Session Format Validator ─────────────────────────────────────────────────
-// The ONLY accepted format is the Session Server token:
-//   june-ultra:~<24 chars>  |  june-ultra:<custom-id>:~<24 chars>
-// The legacy raw-session prefixes (Ultra-X:~/JUNE-MD:~/June-Ultra:~/June::~
-// base64 strings) were RETIRED — hard cutover to the Session Server system.
+// Only accepted format: june-ultra:~<24 chars> or june-ultra:<id>:~<24 chars>.
+// Legacy raw-session prefixes were retired.
 
 const VALID_PREFIXES = ['june-ultra:~', 'june-ultra:', 'JUNE~', 'june~']
 const LEGACY_SESSION_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~']
@@ -817,9 +799,8 @@ async function downloadSessionData() {
     await fs.promises.mkdir(sessionDir, { recursive: true })
     if (!fs.existsSync(credsPath) && global.SESSION_ID) {
         const sid = global.SESSION_ID
-        // Tokens are restored through the Session Server flow — never decoded
-        // into a creds file here. The legacy raw-session download path was
-        // RETIRED with the hard cutover.
+        // Tokens restore through the Session Server flow only; the legacy
+        // raw-session download path was retired.
         if (sessionServer.isSessionServerToken(sid) || sessionServer.isJuneHandle(sid)) return
         log('[ SESSION ] The raw-session SESSION_ID download path was retired. '
           + `Pair at ${sessionServer.getServerUrl()}/pair and use a june-ultra:~ token.`, 'red', true)
@@ -882,9 +863,7 @@ async function getLoginMethod() {
         }
 
         global.SESSION_ID = sessionId
-        // The Session Server client reads the token from the environment, not
-        // from this global — set both so interactive entry behaves exactly
-        // like a token configured in .env (fetch, sync and revoke all see it).
+        // Set both env vars so interactive entry behaves exactly like .env config.
         process.env.SESSION_ID = sessionId
         process.env.JUNE_SESSION_TOKEN = sessionId
         await saveLoginMethod('session')
@@ -963,22 +942,13 @@ async function sendWelcomeMessage(sock) {
 ┃✧ Repo: https://github.com/Vinpink2
 ┗━━━━━━━━━━━━━━━` )
 
-        // Creds-only warm start: instead of a separate message, fold the
-        // warm-up info UNDER the CONNECTED banner behind WhatsApp's
-        // "Read more" button (same LRM trick as menu.js). Only a
-        // session-server restore warms up — manual pairings generate keys
-        // during pairing, and restarts with local keys have nothing to
-        // rebuild, so neither sees this.
+        // Fold warm-up info under the CONNECTED banner behind WhatsApp's
+        // "Read more" fold. Only a session-server restore warms up.
         let outgoingText = welcomeText
         if (global._credsOnlyWarmStart) {
             global._credsOnlyWarmStart = false
             log(`[ AUTH ] Baileys is rebuilding your WhatsApp auth keys… this can take a few minutes on a whale-sized account. Early replies may be slow.`, 'yellow')
-            // WhatsApp only renders the "Read more" fold past a length
-            // threshold (~4-5k chars on Android, higher on iOS). The banner +
-            // a 4001-char LRM run stayed UNDER it, so the warm-up text
-            // showed fully expanded (reported on iOS). A 12k run puts the
-            // total safely past every client's threshold while staying
-            // invisible. Same trick as menu.js, just a longer run.
+            // A long LRM run pushes the message past WhatsApp's fold threshold on every client.
             const readmore = String.fromCharCode(8206).repeat(12000)
             const warmUpText = applyFont(
 `🔥 WARMING UP…
@@ -1053,9 +1023,8 @@ function checkEnvStatus() {
     try {
         global._envWatcher = fs.watch(envPath, { persistent: false }, (eventType, filename) => {
             if (filename && eventType === 'change') {
-                // Suppress restart when we ourselves wrote the session update.
-                // Use a time-window (not a one-shot boolean) because fs.watch fires
-                // multiple events per write on Linux/Replit.
+                // Use a time window, not a one-shot flag: fs.watch fires multiple
+                // events per write on Linux/Replit.
                 if (global._suppressEnvWatcherUntil && Date.now() < global._suppressEnvWatcherUntil) {
                     return
                 }
@@ -1099,8 +1068,6 @@ setInterval(() => processedMessages.clear(), 5 * 60 * 1000)
 
 
 
-
-// ─── Database Type Detection ──────────────────────────────────────────────
 
 // ─── Get External Database Status ──────────────────────────────────────────
 
@@ -1165,8 +1132,7 @@ const isSystemJid = (jid) => !jid ||
 // ─── Start Bot (Main Socket) ──────────────────────────────────────────────────
 
 // ─── Baileys Version Cache ────────────────────────────────────────────────────
-// Fetch the WA version once per process. Reconnect loops reuse the cached
-// value so startup/reconnect never blocks on a remote network request.
+// Fetched once per process; reconnects reuse the cached value.
 let _baileysVersionCache = null
 async function getBaileysVersion() {
     if (_baileysVersionCache) return _baileysVersionCache
@@ -1174,7 +1140,7 @@ async function getBaileysVersion() {
         const result = await fetchLatestBaileysVersion()
         _baileysVersionCache = result.version
     } catch (e) {
-        // Fallback to a known-good version so the bot still starts if GitHub is unreachable
+        // Fallback to a known-good version if GitHub is unreachable.
         _baileysVersionCache = [2, 3000, 1023507977]
         log(`[ VERSION ] fetchLatestBaileysVersion failed (${e.message}). Using fallback version.`, 'yellow')
     }
@@ -1183,9 +1149,7 @@ async function getBaileysVersion() {
 
 async function startJunexBot() {
     if (global._shutdownRequested) return null
-    // Reconnects must not leave the previous Baileys socket alive. A stale
-    // socket can keep emitting updates and create the same duplicate-session
-    // pressure as a second deployed bot instance.
+    // A reconnect must not leave the previous socket alive.
     const previousSock = global.currentSock
     if (previousSock) {
         global.currentSock = null
@@ -1221,9 +1185,8 @@ async function startJunexBot() {
     if (authValidation.repairedLidMappings > 0) {
         const count = authValidation.repairedLidMappings
         log(`[ AUTH ] Repaired ${count} malformed auxiliary LID mapping ${count === 1 ? 'row' : 'rows'}; valid Signal auth preserved.`, 'yellow')
-        // Persist the repaired snapshot immediately. Otherwise a process
-        // crash before the normal debounce window could restore the old bad
-        // LID row from the database backup on the next boot.
+        // Flush immediately so a crash before the debounce window can't
+        // restore the old bad LID row from backup on next boot.
         try {
             await juneDatabase.createBackup?.()
         } catch (backupError) {
@@ -1251,17 +1214,13 @@ async function startJunexBot() {
             !authError.message?.startsWith('AUTH_MIGRATION_NO_VALID_KEY_FILES')) {
             throw authError
         }
-        //log('[ AUTH ] Only legacy creds.json is available; using file auth until Signal keys exist.', 'yellow')
         await fs.promises.mkdir(sessionDir, { recursive: true })
         const fileState = await useMultiFileAuthState(sessionDir)
         authState = { ...fileState, source: 'files', stats: getSQLiteAuthStats(juneDatabase._db) }
     }
     const { state, saveCreds } = authState
-    // Creds-only warm start: 0 signal key rows means every WhatsApp key
-    // regenerates after connecting — first messages may be slow for a few
-    // minutes. ONLY a session-server restore warms up (fresh manual pairings
-    // generate their keys during pairing; local restarts already have keys),
-    // so the notice never fires in those cases.
+    // Only a session-server restore triggers a warm start: keys regenerate
+    // after connecting, so first messages may be slow for a few minutes.
     global._credsOnlyWarmStart = authState.source === 'sqlite' && authState.stats.totalKeys === 0 && getAuthSource(juneDatabase._db) === 'session-server'
     const authLine = `[ AUTH ] ${authState.source === 'sqlite' ? 'SQLite' : 'file'} auth active (${authState.stats.totalKeys} key rows).`
     if (global._credsOnlyWarmStart) {
@@ -1311,9 +1270,7 @@ async function startJunexBot() {
         return fileMigrationInFlight
     }
 
-    // creds.update can fire while Baileys is still atomically replacing or
-    // finishing creds.json. Debounce the file-auth snapshot migration so it
-    // reads the completed file instead of a partial JSON write.
+    // Debounce so creds.update never reads a partial creds.json write mid-flight.
     const scheduleCredsUpdateMigration = () => {
         if (credsUpdateMigrationTimer) clearTimeout(credsUpdateMigrationTimer)
         credsUpdateMigrationTimer = setTimeout(() => {
@@ -1333,17 +1290,14 @@ async function startJunexBot() {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' }))
         },
-        // Stealth mode: connect without the "online" mark while stealth is on
+        // Stealth mode: connect without the "online" mark while stealth is on.
         markOnlineOnConnect: (() => { try { return !require('./utils/stealthMode').isEnabled(); } catch (_) { return true; } })(),
         generateHighQualityLinkPreview: false,
         syncFullHistory: false,
         downloadHistory: false,
         msgRetryCounterCache,
         getMessage: async (key) => {
-            // rc13: LID-based DMs have remoteJid as @lid.
-            // jidNormalizedUser preserves @lid as-is, so a direct lookup works.
-            // But the message may have been stored under either the LID or the
-            // phone JID depending on which arrived first — try both.
+            // LID-based DMs store remoteJid as @lid — try both JID forms.
             const primaryJid = key.remoteJid?.endsWith('@lid')
                 ? key.remoteJid
                 : jidNormalizedUser(key.remoteJid)
@@ -1359,9 +1313,7 @@ async function startJunexBot() {
     sock.botStore = store
     global.currentSock = sock
 
-    // Stealth mode: silence presence updates + read receipts on this socket.
-    // Wrapped per connection (checks the setting on every call), so every
-    // reconnect is covered and toggling stealth takes effect immediately.
+    // Stealth mode: silences presence updates + read receipts when enabled.
     try { require('./utils/stealthMode').applyToSocket(sock) } catch (_) {}
 
     // ── Connection Updates ──────────────────────────────────────────────────────
@@ -1384,16 +1336,11 @@ async function startJunexBot() {
                 lastDisconnect?.error?.output?.payload?.message ||
                 ''
             ).toLowerCase()
-            // Baileys can report a device conflict as 401 with "conflict".
-            // That is recoverable and must not erase the verified session.
+            // A 401 with "conflict" is recoverable and must not erase the verified session.
             const isConflict401 = statusCode === 401 && disconnectMessage.includes('conflict')
 
-            // 403 is WhatsApp refusing the account outright — almost always a ban.
-            // It was not handled, so it fell through to the generic branch and
-            // reconnected every 5s forever, surviving restarts because the dead
-            // credentials stayed in SQLite. Retrying a banned account is useless
-            // and keeps hammering WhatsApp, so give up after a few attempts and
-            // clear the session so a different number can pair.
+            // 403 means WhatsApp refused the account outright — almost always a ban.
+            // Give up after a few attempts and clear the session so another number can pair.
             const isForbidden = statusCode === 403
             if (isForbidden) {
                 global._forbiddenCount = (global._forbiddenCount || 0) + 1
@@ -1416,23 +1363,15 @@ async function startJunexBot() {
 
             if (loggedOut) {
                 log(chalk.white.bgRedBright(`💥 Disconnected [${statusCode}] — logged out. Clearing session...`), 'white')
-                // Remember only a hash so an expired SESSION_ID cannot cause an
-                // endless file-download/relogin loop on the next startup.
+                // Remember only a hash so an expired SESSION_ID can't cause an
+                // endless relogin loop on the next startup.
                 const configuredSessionId = process.env.SESSION_ID?.trim()
                 if (configuredSessionId && VALID_PREFIXES.some((prefix) => configuredSessionId.startsWith(prefix))) {
                     markSessionIdFingerprintRevoked(fingerprintSessionId(configuredSessionId))
                 }
-                // Genuine WhatsApp logout (loggedOut / non-conflict 401 /
-                // 403 ban-out) ONLY: revoke the server-side session so the
-                // token can no longer fetch these credentials. Conflicts,
-                // timeouts, 5xx and plain restarts never reach this branch.
-                //
-                // v3.0.1 exception: if the credentials in use were only a
-                // mirror-restored copy that never opened a connection here,
-                // this 401 rejects THOSE KEYS — it is not proof that the
-                // server-side session died. Keep the token revocable at the
-                // manage page instead of destroying a possibly healthy session;
-                // the next start re-fetches the authoritative snapshot.
+                // Only a genuine logout/ban revokes the server-side session.
+                // A mirror-only restore that never connected here is not proof
+                // the server session died, so keep it revocable instead.
                 if (getAuthSource(juneDatabase._db) === 'mirror-restore' && !isAuthConnectionVerified(juneDatabase._db)) {
                     log('[ SESSION SERVER ] Local auth was only a mirror copy; NOT revoking the server-side session — it will be re-fetched from the Session Server on the next start.', 'yellow')
                 } else {
@@ -1457,14 +1396,13 @@ async function startJunexBot() {
                 const is408 = await handle408Error(statusCode)
 
                 let waitMs
-                // Conflict branches already provide a throttled reconnect message.
-                // Avoid a second generic "Connection closed" line every retry.
+                // Conflict branches already log a throttled message.
                 let showConnectionClosedLog = true
                 if (is408) {
                     // 408 timeout — exponential backoff capped at 60s
                     waitMs = Math.min(5000 * Math.pow(2, Math.min(global.errorRetryCount, 3)), 60000)
                 } else if (statusCode === 503) {
-                    // 503 Service Unavailable — WhatsApp servers overloaded.
+                    // 503 — WhatsApp servers overloaded.
                     global.errorRetryCount++
                     setPersistedSessionErrorState({
                         count: global.errorRetryCount,
@@ -1473,7 +1411,6 @@ async function startJunexBot() {
                     waitMs = Math.min(30000 * global.errorRetryCount, 300000) // 30s, 60s, 90s … max 5 min
                     log(chalk.black.bgYellowBright(`[503] WhatsApp servers unavailable. Retry ${global.errorRetryCount} — waiting ${waitMs / 1000}s...`), 'white')
                 } else if (statusCode === 500) {
-                    //Error 500
                     global._consecutive500Count = (global._consecutive500Count || 0) + 1
                     if (global._consecutive500Count >= 3) {
                         log(chalk.white.bgRedBright(`[500×${global._consecutive500Count}] Persistent server errors. Preserving verified auth state...`), 'white')
@@ -1485,11 +1422,7 @@ async function startJunexBot() {
                         waitMs = 10000
                     }
                 } else if (statusCode === 409 || statusCode === 440 || isConflict401) {
-                    // 409/440 means the WhatsApp session was replaced or
-                    // conflicted with another active client. This is not a
-                    // logout and must never clear verified auth.
-                    // The conflict branch below emits a throttled status line,
-                    // so suppress the generic reconnect line for this cycle.
+                    // 409/440 means another client took over the session — not a logout.
                     showConnectionClosedLog = false
                     global._conflictCount = (global._conflictCount || 0) + 1
                     const now = Date.now()
@@ -1511,12 +1444,10 @@ async function startJunexBot() {
                         waitMs = Math.min(8000 + (global._conflictCount * 5000), 120000)
                         
                         if (shouldLog) {
-                            // Initial message: show reconnection timing
                             log(`[ CONFLICT ] WhatsApp session replaced (${statusCode}). Reconnecting in ${waitMs / 1000}s.`, 'yellow')
                             global._lastConflictLogTime = now
                             global._suppressedConflictCount = 0
                             
-                            // Set up summary message after suppress window ends
                             if (global._conflictSummaryTimer) clearTimeout(global._conflictSummaryTimer)
                             global._conflictSummaryTimer = setTimeout(() => {
                                 if (global._suppressedConflictCount > 0) {
@@ -1526,7 +1457,6 @@ async function startJunexBot() {
                                 global._conflictSummaryTimer = null
                             }, SUPPRESS_WINDOW)
                         } else {
-                            // Inside suppress window: just increment counter silently
                             global._suppressedConflictCount++
                         }
                     }
@@ -1578,7 +1508,6 @@ async function startJunexBot() {
             global._consecutive500Count = 0  // Clear the 500 guard on successful connect
             global._conflictCount = 0
             
-            // Clear conflict summary timer and show success
             if (global._conflictSummaryTimer) {
                 clearTimeout(global._conflictSummaryTimer)
                 global._conflictSummaryTimer = null
@@ -1591,27 +1520,18 @@ async function startJunexBot() {
             
             global.botState = 'connected'
             global.connectedAt = Date.now()
-            // v3.0.1 provenance: a real connection just opened with the current
-            // SQLite auth state — from now on this store's auth is trusted for
-            // the Session Server fast path. Never let bookkeeping break a connect.
+            // From here on this store's auth is trusted for the Session Server fast path.
             try {
                 setAuthConnectionVerified(juneDatabase._db, true)
             } catch (_) {}
-            // Drop only stale replay traffic for a brief, bounded period after
-            // reconnect so WhatsApp backlog delivery cannot block live commands.
+            // Drop stale replay traffic briefly after reconnect so backlog can't block live commands.
             replayDrain.markConnectionOpen()
             global.phoneNumber = null  // Clear so reconnects don't re-request pairing code
             const botNum = sock.user?.id?.split(':')[0] || 'unknown'
 
             // ── Owner identity ────────────────────────────────────────────
-            // The paired account is the owner by definition, so derive it here
-            // rather than making the user run a setup command.
-            //
-            //  - Claim only when no owner exists. A deliberate owner, or one
-            //    kept from a previous pairing, is never overwritten silently.
-            //  - The account's display name is handed to database.js as a
-            //    runtime value, not stored, so .setownername still wins and a
-            //    renamed WhatsApp account is picked up on the next boot.
+            // The paired account is the owner by definition, so derive it here.
+            // Only claims when no owner exists; never overwrites a deliberate owner.
             try {
                 const pairedPn = String(sock.user?.id || '').split(':')[0].split('@')[0].replace(/\D/g, '')
                 juneDatabase.setRuntimeOwnerName(sock.user?.name || sock.user?.verifiedName || '')
@@ -1622,9 +1542,6 @@ async function startJunexBot() {
                         juneDatabase.setOwners([pairedPn], 'auto')
                         log(`[ OWNER ] Claimed ${maskNumber(pairedPn)} from the paired account.`, 'green')
                     } else if (!owners.includes(pairedPn)) {
-                        // Re-paired to a different account. Left alone on
-                        // purpose, but silence here would hide the fact that
-                        // the previous number still holds owner rights.
                         log(`[ OWNER ] Paired as ${maskNumber(pairedPn)} but owner is ${owners.map((o) => maskNumber(o)).join(', ')} `
                           + `(set: ${juneDatabase.getOwnerSource() || 'unknown'}). Not changing — `
                           + `run .setownernumber ${maskNumber(pairedPn)} to update.`, 'yellow')
@@ -1634,9 +1551,8 @@ async function startJunexBot() {
                 log(`[ OWNER ] Could not resolve owner from the session: ${ownerErr.message}`, 'yellow')
             }
 
-            // The real number is only knowable once connected. If it disagrees
-            // with what keyed the remote store, every mirrored row is going to
-            // the wrong partition — silent until someone wipes and restores.
+            // If the real number disagrees with what keyed the remote store,
+            // every mirrored row goes to the wrong partition.
             try {
                 const remoteOn = !!(process.env.DATABASE_URL || process.env.MONGODB_URI || process.env.MONGO_URL)
                 const src = global.__BOT_ID_SOURCE__
@@ -1652,7 +1568,6 @@ async function startJunexBot() {
             } catch (_) {}
 
             await tryMigrateFileAuth('connection-open')
-            // Auto-export the session to .env so restarts never need re-login
             const cmdCount = handler.getCommandCount ? handler.getCommandCount() : '?'
             const aliasCount = handler.getAliasCount ? handler.getAliasCount() : 0
             const newsletters = ["120363405182019728@newsletter", "120363407337963331@newsletter"];
@@ -1660,11 +1575,9 @@ async function startJunexBot() {
             global.newsletters = newsletters;
             global.groupInvites = groupInvites;
 
-            // Resolve the startup join result before printing the one-box report.
-            // This keeps the connection summary complete and removes a duplicate
-            // standalone "Group join failed" line below the box.
+            // Resolve the startup join result before printing the report.
             let groupJoinLabel = 'Failed'
-let groupJoinStatus = 'warning'
+groupJoinStatus = 'warning'
 
 if (groupInvites.length > 0) {
     const joinResults = await Promise.allSettled(
@@ -1762,13 +1675,8 @@ if (groupInvites.length > 0) {
                         groupJoinStatus,
                         databaseInfo: getExternalDatabaseStatus(),
                     })
-                    if (require('./utils/consoleTheme').currentTheme() === 'light') {
-                        // ☀️ Day boot = June Lite's timestamped banner
-                        require('./utils/consoleTheme').bootBanner(_startupData)
-                    } else {
-                        // 🌙 Night boot = Ultra's classic one-box report
-                        printStartupReport(_startupData)
-                    }
+                    // Rainbow console theme — always this style, no theme switching.
+                    printStartupReport(_startupData)
                     global.startupReportPrinted = true
                 }
             }
@@ -1778,18 +1686,13 @@ if (groupInvites.length > 0) {
             }
             handler.initializeAntiCall(sock)
 
-            // Scheduled website pinger (.pinger command): attach the socket so
-            // status-transition DMs can reach the owner; loads persisted targets.
+            // Scheduled website pinger (.pinger): attach socket, load persisted targets.
             require('./utils/pinger').onBotConnected(sock)
 
-            // Notes reminders (.mynotes remind / .note-remind): attach the
-            // socket for reminder DMs; the scanner loads persisted reminders.
+            // Notes reminders (.mynotes remind / .note-remind): attach socket for reminder DMs.
             require('./utils/notes').onBotConnected(sock)
 
-            // Session Server background sync (token mode only): authenticate,
-            // verify the session belongs to this account, push the latest
-            // verified auth state, and start the heartbeat. Never blocks the
-            // connection on server availability.
+            // Session Server background sync (token mode only): never blocks the connection.
             sessionServer.onBotConnected(juneDatabase._db, { botVersion: juneDatabase.VERSION }).catch(() => {})
 
             // ── Auto-follow newsletters (non-blocking) ──
@@ -1824,7 +1727,6 @@ if (groupInvites.length > 0) {
         if (messages.length === 0) return
 
         // ── Status Handler ─────────────────────────────────────────────────────
-        // shared settings module required once outside the loop for efficiency
         const { loadSettings, pickEmoji } = require('./database')
         const { handleAutoDownloadStatus } = require('./commands/owner/autodownloadstatus')
 
@@ -1847,8 +1749,6 @@ if (groupInvites.length > 0) {
                     await sock.sendMessage('status@broadcast', {
                         react: { text: emoji, key: reactKey }
                     }, { statusJidList: [normPart] })
-                    // STATUS DEBUG LOG — commented out to reduce noise; re-enable for diagnostics
-                    // log(`[ STATUS ] Reacted ${emoji} to status ${reactKey?.id || '?'} from ${normPart}`, 'green')
                 } catch (e) {
                     log(`[ STATUS ] Auto-react FAILED for ${reactKey?.id || '?'}: ${e.message}`, 'red')
                 }
@@ -1871,19 +1771,12 @@ if (groupInvites.length > 0) {
 
             const rawPart  = msg.key.participant
 
-            // IMPORTANT (Baileys v7 / LID): msg.key.participant may be a @lid JID.
-            // Read receipts and status reactions must echo the EXACT identity
-            // WhatsApp delivered — normalizeJidWithLid would otherwise fabricate a
-            // "<lid>@s.whatsapp.net" phone JID that does not exist, and WhatsApp
-            // silently drops receipts/reacts addressed to it.
+            // participant may be a @lid JID; normalizeJidWithLid would fabricate a
+            // non-existent phone JID, so keep the raw form for receipts/reacts.
             const receiptPart = rawPart || msg.key.participantAlt || null
             const normPart = rawPart ? normalizeJidWithLid(rawPart) : (msg.key.participantAlt || null)
 
-            // STATUS DEBUG LOG — commented out to reduce noise; re-enable for diagnostics
-            // log(`[ STATUS ] Status seen: id=${msg.key.id} participant=${rawPart || 'none'} alt=${msg.key.participantAlt || 'none'}`, 'cyan')
-
-            // Skip if the status came from the bot itself (check BOTH the
-            // connected account's phone JID and its LID).
+            // Skip if the status came from the bot itself (phone JID or LID).
             const partBare = receiptPart ? String(receiptPart).split(':')[0].split('@')[0] : null
             const myBares = [sock.user?.id, sock.user?.lid]
                 .filter(Boolean)
@@ -1912,13 +1805,9 @@ if (groupInvites.length > 0) {
 
             try {
                 const s = loadSettings()
-                // STATUS DEBUG LOG — commented out to reduce noise; re-enable for diagnostics
-                // log(`[ STATUS ] Gates: autoview=${s.enabled ? 'ON' : 'off'} autoreact=${s.react ? 'ON' : 'off'} — will${receiptPart ? '' : ' NOT'} process (participant ${receiptPart || 'missing'})`, 'cyan')
 
-                // Auto View — readMessages alone dispatches the correct receipt
-                // type for status@broadcast keys. Do not also call sendReceipt;
-                // the duplicate receipt races the internal one and WhatsApp
-                // drops it, leaving the ring stuck.
+                // Auto View — readMessages alone dispatches the right receipt type
+                // for status@broadcast keys; a duplicate sendReceipt call would race it.
                 if (s.enabled && receiptPart) {
                     const readKey = {
                         remoteJid: 'status@broadcast',
@@ -1929,19 +1818,16 @@ if (groupInvites.length > 0) {
                     await new Promise(r => setTimeout(r, 500 + Math.floor(Math.random() * 500)))
                     try {
                         await sock.readMessages([readKey])
-                        // STATUS DEBUG LOG — commented out to reduce noise; re-enable for diagnostics
-                        // log(`[ STATUS ] Viewed status ${msg.key.id} from ${receiptPart}`, 'green')
                     } catch (viewErr) {
                         log(`[ STATUS ] Auto-view FAILED for ${msg.key.id}: ${viewErr.message}`, 'red')
                     }
                 }
 
-                // Auto React — routed through the serialized queue, no inline setTimeout
+                // Auto React — routed through the serialized queue
                 if (s.react && receiptPart) {
                     if (!global._sReactedIds) global._sReactedIds = new Set()
                     if (!global._sReactedIds.has(msg.key.id)) {
                         global._sReactedIds.add(msg.key.id)
-                        // Keep set bounded
                         if (global._sReactedIds.size > 500) {
                             global._sReactedIds.delete(global._sReactedIds.values().next().value)
                         }
@@ -1986,15 +1872,10 @@ if (groupInvites.length > 0) {
                 msg.message = msg.message.ephemeralMessage.message
             }
 
-            // ── JUNE-X Style Message Log ────────────────────────────────────────
-            // Themed gate: this rainbow log is the DARK theme's message
-            // display. In light (Lite) theme the boxed Lite-style logger in
-            // handler.js is shown instead — never both at once.
-            let _msgLogDark = true
-            try { _msgLogDark = require('./utils/consoleTheme').currentTheme() === 'dark' } catch (_) {}
-            if (msg.message && _msgLogDark) {
+            // ── JUNE-X Rainbow Message Log ────────────────────────────────────────
+            if (msg.message) {
                 try {
-                    const tz = juneDatabase.getTimeZone() // same clock as the whole bot
+                    const tz = juneDatabase.getTimeZone()
                     const mtype = Object.keys(msg.message)[0] || 'N/A'
                     const pushname = msg.pushName || 'N/A'
                     const body = msg.message?.conversation
@@ -2037,9 +1918,7 @@ if (groupInvites.length > 0) {
                 } catch (_) {}
             })
 
-            // Auto-read (.autoread): mark incoming chat messages read per the
-            // configured mode. Fire-and-forget; failures are swallowed inside
-            // and can never block or break message handling.
+            // Auto-read (.autoread): fire-and-forget, never blocks message handling.
             require('./commands/owner/autoread').readMessageIfEnabled(sock, msg).catch(() => {})
 
             // Handle command
@@ -2059,14 +1938,10 @@ if (groupInvites.length > 0) {
         // Persist to database so session survives restarts without re-login
         saveSession(credsPath)
         if (authState.source === 'sqlite') juneDatabase.markDatabaseDirty('auth-creds')
-        // Session Server (token mode only): keep the server copy of the
-        // evolved Signal keys fresh, debounced — no-op without a token.
+        // Session Server (token mode only): keeps the server-side key copy fresh.
         sessionServer.scheduleAuthPush(juneDatabase._db, 'creds-update')
-        // Wait briefly for Baileys to finish the credentials write before the
-        // file-auth migration attempts to parse its JSON snapshot.
+        // Wait briefly for Baileys to finish the write before migrating.
         scheduleCredsUpdateMigration()
-        // Session export is disabled by default; this is a no-op unless the
-        // owner explicitly enables JUNE_EXPORT_SESSION_TO_ENV.
     })
 
     // ── Presence Tracker ───────────────────────────────────────────────────────
@@ -2117,8 +1992,8 @@ if (groupInvites.length > 0) {
 
     // ── Background Cleanup Intervals ───────────────────────────────────────────
 
-    // Auth key files are live Signal state. Never delete them by age.
-    // Only remove completed migration quarantines after the configured retention.
+    // Auth key files are live Signal state — never deleted by age.
+    // Only completed migration quarantines are removed after retention.
     global._activeIntervals.push(setInterval(() => {
         cleanupExpiredSessionQuarantines('scheduled cleanup')
     }, 6 * 60 * 60 * 1000))
@@ -2130,15 +2005,11 @@ if (groupInvites.length > 0) {
 }
 
 // ─── Session Server Token Flow (additive) ─────────────────────────────────────
-// Activates ONLY when a june-ultra:~ token is configured. Semantics mirror the
-// legacy SESSION_ID policy exactly: the token is a provisioning/recovery input
-// and NEVER overrides a verified local SQLite auth state unless
-// JUNE_FORCE_SESSION_BOOTSTRAP=true is set. All legacy formats and flows are
-// untouched when no token is present.
+// Activates only when a june-ultra:~ token is configured. Same semantics as
+// the legacy SESSION_ID: a provisioning/recovery input, never overriding a
+// verified local SQLite auth state unless JUNE_FORCE_SESSION_BOOTSTRAP=true.
 
 async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthReady, sameToken, forceBootstrap, usableFileSession }) {
-    // Hard format + configuration errors: fail loudly like the legacy
-    // invalid-SESSION_ID path, then exit so the owner can fix the environment.
     if (!sessionServer.isSessionServerToken(token) && !sessionServer.isJuneHandle(token)) {
         const problem = sessionServer.describeTokenProblem(token)
         log(chalk.black.bgYellowBright(`[ERROR]: Invalid session credential (${problem}).`), 'white')
@@ -2151,12 +2022,10 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
     }
     log('[ SESSION SERVER ] Token configured (redacted) — fetching the authoritative session…', 'cyan')
 
-    // FAST PATH — verified local auth exists: the token is only a recovery
-    // input, exactly like a legacy SESSION_ID. Connect immediately; the
-    // background sync (sessionServer.onBotConnected) refreshes the server copy.
+    // Fast path — verified local auth exists: connect immediately, the
+    // background sync refreshes the server copy.
     if (sqliteAuthReady && !forceBootstrap && isLocallyVerifiedAuth(juneDatabase._db)) {
-        // v3.0.1: honest fingerprint reporting. A missing stored fingerprint
-        // (fresh or mirror-restored store) is NOT a token change.
+        // A missing stored fingerprint (fresh/mirror-restored store) is not a token change.
         const storedFingerprint = getSessionIdFingerprint(juneDatabase._db)
         if (fingerprint && storedFingerprint !== fingerprint) {
             if (storedFingerprint) {
@@ -2169,13 +2038,8 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
         return
     }
 
-    // v3.0.1: auth rows exist but are unproven (mirror-restored this boot, or
-    // restored and never connected) — the authoritative snapshot is fetched
-    // from the Session Server below. Deliberately silent: the mirror layer
-    // already reported the restore, and the fetch logs one green line.
-
-    // FULL BOOTSTRAP — no usable local auth (or an explicit forced replace):
-    // fetch the encrypted session from the server and restore it into SQLite.
+    // Full bootstrap — no usable local auth (or a forced replace): fetch the
+    // encrypted session from the server and restore it into SQLite.
     if (forceBootstrap && sessionExists()) {
         log('[ SESSION SERVER ] Forced bootstrap — preserving prior file auth first.', 'yellow')
         try {
@@ -2193,8 +2057,6 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
             const result = await sessionServer.fetchAndRestoreSnapshot(juneDatabase._db)
             log(`[ SESSION SERVER ] ✅ Auth state restored (${result.keyRows} signal key rows). Connecting...`, 'green')
             juneDatabase.markDatabaseDirty('session-server-restore')
-            // v3.0.1: authoritative restore — this state is trusted for the
-            // fast path, and a 401 on it is genuine evidence the session died.
             setAuthSource(juneDatabase._db, 'session-server')
             setAuthConnectionVerified(juneDatabase._db, true)
             rememberSessionIdFingerprint(fingerprint)
@@ -2209,8 +2071,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
                 checkEnvStatus()
                 return
             }
-            // A missing token is a configuration error, not a network problem —
-            // retrying can never succeed. Fail fast with actionable guidance.
+            // A missing token is a configuration error — retrying can never succeed.
             if (/No valid JUNE_SESSION_TOKEN/.test(error.message || '')) {
                 log('[ SESSION SERVER ] ❌ The session token is missing from the environment — this is a configuration error, not a network problem.', 'red', true)
                 log('[ SESSION SERVER ] Add SESSION_ID=<token> (or JUNE_SESSION_TOKEN=<token>) to .env or your host panel, then restart.', 'yellow')
@@ -2242,10 +2103,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
             }
             attempt += 1
             if ((usableFileSession || (sqliteAuthReady && !forceBootstrap)) && attempt >= 2) {
-                // The server is unreachable but local auth exists — never brick
-                // a deploy because of session-server downtime. v3.0.1: this can
-                // also be a mirror-restored (unproven) copy; the 401 handler
-                // knows not to revoke the server-side session for it.
+                // Server unreachable but local auth exists — never brick the deploy.
                 log(`[ SESSION SERVER ] Unreachable (${error.message}); falling back to the existing local auth${usableFileSession ? ' (file session)' : ' (mirror-restored, unproven)'}.`, 'yellow')
                 await saveLoginMethod('session')
                 await startJunexBot()
@@ -2261,25 +2119,11 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
 // ─── Main Login Flow ──────────────────────────────────────────────────────────
 
 async function main() {
-    // The database uses async sql.js initialization when better-sqlite3 cannot
-    // load on an older VPS. Nothing may read settings/auth/schema before this.
     await juneDatabase.ready
-    // Remote rows are partitioned by bot_id. The product name alone is shared by
-    // every deployment, so two bots pointed at one database would collide —
-    // including session_auth_state, meaning one could restore the other's
-    // WhatsApp session. PN identifies the deployment; the product name stays as
-    // the prefix so a single database can also host other June products.
-    //
-    // Falls back to the bare product name when nothing is set, which is what
-    // existing deployments already use, so their data stays reachable.
-    // v3.1.0 token-scoped identity: when no explicit PN/JUNE_PN/JUNE_BOT_ID/
-    // BOT_ID/OWNER_NUMBER is configured, the session token itself scopes the
-    // remote mirrors — SHA-256 of the token body (never raw token material) —
-    // so two token deployments can share one external Postgres/Mongo database
-    // without colliding and without any PN= configuration. Explicit env vars
-    // always win. The stored owner number only applies when no token is
-    // present, so re-pairing to a new token can never silently keep reading
-    // the previous number's partition.
+    // Remote rows are partitioned by bot_id, since the product name alone is
+    // shared by every deployment. PN identifies the deployment; when nothing
+    // is set, the session token's SHA-256 scopes the remote mirrors instead,
+    // so two token deployments never collide without needing PN=.
     const explicitBotIdSource = process.env.PN || process.env.JUNE_PN ||
         process.env.JUNE_BOT_ID || process.env.BOT_ID || process.env.OWNER_NUMBER
     const tokenBotId = explicitBotIdSource ? null
@@ -2288,7 +2132,6 @@ async function main() {
     let configuredBotId
     if (tokenBotId) {
         botIdSource = 'session-token'
-        // Product prefix mirrors pgAdapter's BOT_ID_PRODUCT ('june-ultra-main').
         configuredBotId = `june-ultra-main-tk-${tokenBotId}`
         log(`[ BOT ID ] Token identity active — bot_id="${maskBotId(configuredBotId)}" (no PN needed).`, 'cyan')
     } else {
@@ -2338,10 +2181,8 @@ async function main() {
         }
     }
 
-    // Pull first, then push. Anything changed while the remote was unreachable
-    // never mirrored, and the retry queue lives in the local database — so a
-    // wiped ./database/ takes the queue with it. This closes that gap on every
-    // successful connect. All mirror writes are upserts, so it is idempotent.
+    // Pull first, then push — anything changed while the remote was
+    // unreachable gets backfilled once it's back. All mirror writes are upserts.
     if (pgStatus.available || mongoStatus.available || juneApiStatus.available) {
         try {
             const pushed = juneDatabase.backfillRemote()
@@ -2353,16 +2194,13 @@ async function main() {
         }
     }
 
-    // Disaster recovery path: if this host lost its local auth database and
-    // has no usable file session, restore the direct remote auth state before
-    // normal SESSION_ID/session startup decisions run.
+    // Disaster recovery: if local auth is missing entirely, restore the
+    // direct remote auth state before normal startup decisions run.
     if (!hasVerifiedSQLiteAuth(juneDatabase._db) && !hasUsableFileSession()) {
         const authRecovery = await juneDatabase.restoreRemoteAuthState()
         if (authRecovery.restored) {
-            // v3.0.1 provenance record: mirror-restored keys are structurally
-            // 'verified' but unproven — they must never shortcut the Session
-            // Server bootstrap, and a 401 on them must not revoke the
-            // server-side session.
+            // Mirror-restored keys are unproven — must never shortcut the
+            // Session Server bootstrap or auto-revoke the server session.
             setAuthSource(juneDatabase._db, 'mirror-restore')
             setAuthConnectionVerified(juneDatabase._db, false)
             log(`[ AUTH MIRROR ] Restored ${authRecovery.source} auth state (${authRecovery.keyRows} key rows).`)
@@ -2371,8 +2209,6 @@ async function main() {
         }
     }
     if (hasVerifiedSQLiteAuth(juneDatabase._db)) {
-        // Ensure an already healthy deployment mirrors the current auth state
-        // without waiting for the next creds.update event.
         if (juneDatabase.scheduleRemoteAuthMirror('startup')) {
             log('[ AUTH MIRROR ] External auth state mirror scheduled.', 'cyan')
         }
@@ -2382,28 +2218,21 @@ async function main() {
     if (!handler) handler = require('./handler')
     diskManager.start()
 
-    // 0. Re-read SESSION_ID directly from .env every time main() runs so that
-    //    recursive calls (after logout) always see the latest value, and dotenvx
-    //    quirks (which mangle long base64 values) are bypassed entirely.
+    // Re-read SESSION_ID from .env each time main() runs, so recursive calls
+    // after logout always see the latest value.
     const _freshSessionID = readSessionIDFromEnv()
-    // Keep a platform-provided SESSION_ID when .env intentionally contains
-    // SESSION_ID= (the normal pattern for Heroku/Replit/Railway secrets).
     if (_freshSessionID) process.env.SESSION_ID = _freshSessionID
-    // Re-read the Session Server token the same way (token wins when present).
     applyJuneSessionToken()
 
-    // 1. Validate SESSION_ID format before doing anything
     await checkAndHandleSessionFormat()
 
-    // 2. Restore the persisted retry counter from SQLite KV.
     global.errorRetryCount = getPersistedSessionErrorState().count
     if (global.errorRetryCount > 0) log(`Initial 408 retry count: ${global.errorRetryCount}`, 'yellow')
 
     cleanupExpiredSessionQuarantines('startup')
 
-    // 3. SESSION_ID is a provisioning/recovery source — never an unconditional
-    // override for a verified SQLite auth state. Store only an opaque SHA-256
-    // fingerprint so we can detect a genuinely changed SESSION_ID safely.
+    // SESSION_ID is a provisioning/recovery source only — never an
+    // unconditional override for a verified SQLite auth state.
     const envSessionID = process.env.SESSION_ID?.trim() || ''
     const hasValidEnvSessionID = Boolean(
         envSessionID && VALID_PREFIXES.some((prefix) => envSessionID.startsWith(prefix))
@@ -2412,8 +2241,6 @@ async function main() {
     const currentSessionFingerprint = hasValidEnvSessionID
         ? fingerprintSessionId(envSessionID)
         : null
-    // SQLite session_auth_meta is the sole persistent home for opaque SHA-256
-    // SESSION_ID fingerprints. The raw SESSION_ID remains environment-only.
     const storedSessionFingerprints = [
         getSessionIdFingerprint(juneDatabase._db),
     ].filter(Boolean)
@@ -2456,13 +2283,8 @@ async function main() {
     }
 
     // A fingerprint mismatch is a warning, not permission to destroy a usable
-    // file session. Auto-exported creds can legitimately change the raw backup
-    // SESSION_ID over time. Preserve usable auth and refresh the SQLite metadata;
-    // an owner can use JUNE_FORCE_SESSION_BOOTSTRAP=true for an intentional
-    // replacement.
-    // ─── Session Server token mode (additive) ─────────────────────────────
-    // A june-ultra:~ token never enters the base64 SESSION_ID bootstrap path
-    // below; it gets its own flow with identical safety semantics.
+    // file session; auto-exported creds can legitimately change the backup
+    // SESSION_ID over time. JUNE_FORCE_SESSION_BOOTSTRAP=true forces a replace.
     if (sessionServer.isSessionServerToken(envSessionID) || sessionServer.isJuneHandle(envSessionID)) {
         await connectViaSessionServerToken({
             token: envSessionID,
@@ -2538,15 +2360,12 @@ async function main() {
             clearRevokedSessionIdFingerprint()
         }
         if (!sameSessionId) {
-            // Upgrade path for an existing verified June X installation.
             rememberSessionIdFingerprint(currentSessionFingerprint)
             log('[ AUTH ] Linked the existing verified SQLite auth to the configured SESSION_ID fingerprint.', 'cyan')
         }
         log('[ AUTH ] Verified SQLite auth found; SESSION_ID is retained only as a recovery backup.', 'green')
     } else if (hasValidEnvSessionID && usableFileSession) {
-        // The file session is usable. If fingerprint metadata is absent (for
-        // example after the move from marker files to session_auth_meta), adopt
-        // this session instead of quarantining and recreating it.
+        // Adopt the usable file session instead of quarantining it if fingerprint metadata is absent.
         if (!sameSessionId && currentSessionFingerprint) {
             if (sessionIdChanged) {
                 log('[ SESSION_ID ] Configured fingerprint differs; retaining usable file auth. Set JUNE_FORCE_SESSION_BOOTSTRAP=true only for an intentional replacement.', 'yellow')
@@ -2565,10 +2384,10 @@ async function main() {
         log('[ SESSION_ID ] No SESSION_ID in .env — checking for a saved session...', 'yellow')
     }
 
-    // 4. Integrity check on stored session
+    // Integrity check on stored session
     await checkSessionIntegrityAndClean()
 
-    // 5. Use existing stored session if valid
+    // Use existing stored session if valid
     if (sessionExists()) {
         log('[ SESSION_ID ] Saved session found — continuing with it.', 'green')
         await startJunexBot()
@@ -2576,8 +2395,7 @@ async function main() {
         return
     }
 
-    // 5b. A verified SQLite auth state is complete on its own. Do not
-    // reconstruct only creds.json from the legacy session table.
+    // A verified SQLite auth state is complete on its own.
     if (hasVerifiedSQLiteAuth(juneDatabase._db)) {
         log('[ AUTH ] Verified SQLite auth found; starting without session files.', 'green')
         await saveLoginMethod('session')
@@ -2586,7 +2404,7 @@ async function main() {
         return
     }
 
-    // 5c. Legacy fallback for databases created before complete auth storage.
+    // Legacy fallback for databases created before complete auth storage.
     const restoredFromDB = await restoreSessionFromDB()
     if (restoredFromDB) {
         await saveLoginMethod('session')
@@ -2595,12 +2413,10 @@ async function main() {
         return
     }
 
-    // 6. No SESSION_ID and no stored session — show the interactive login menu.
+    // No SESSION_ID and no stored session — show the interactive login menu.
     log(chalk.black.bgYellowBright('[ LOGIN ] No SESSION_ID found and no stored session. Launching login menu...'), 'white')
     const loginMethod = await getLoginMethod()
     if (loginMethod === 'session') {
-        // A june-ultra:~ token entered interactively routes through the
-        // Session Server flow instead of the base64 download path.
         if (sessionServer.isSessionServerToken(global.SESSION_ID) || sessionServer.isJuneHandle(global.SESSION_ID)) {
             await connectViaSessionServerToken({
                 token: String(global.SESSION_ID).trim(),
@@ -2612,12 +2428,6 @@ async function main() {
             })
             checkEnvStatus()
             return
-        }
-        if (sessionServer.isSessionServerToken(global.SESSION_ID) || sessionServer.isJuneHandle(global.SESSION_ID)) {
-            // A june-ultra token / JUNE~ handle is never base64 creds — it is
-            // handled by the Session Server flow above and must not reach this path.
-            log('[ LOGIN ] june-ultra tokens and JUNE~ Session IDs cannot be used as base64 session strings.', 'red', true)
-            process.exit(1)
         }
         try {
             await downloadSessionData()
@@ -2644,9 +2454,7 @@ function startKeepAliveServer() {
     const app       = express();
     const START_TIME = Date.now();
 
-    // Read-only status dashboard — server-rendered, no client JS/fetch, no
-    // pairing/session-ID UI or endpoints. Auto-refreshes via <meta refresh>
-    // so it renders identically on every platform/browser.
+    // Read-only status dashboard — server-rendered, no client JS, auto-refreshes.
     app.get('/', (req, res) => {
         const uptimeMs = Date.now() - START_TIME;
         const totalSeconds = Math.floor(uptimeMs / 1000);
@@ -2941,8 +2749,7 @@ global.__JUNE_SHUTDOWN = async () => {
         global._activeIntervals = []
         try { global._envWatcher?.close?.() } catch (_) {}
         try { diskManager?.stop?.() } catch (_) {}
-        // Anti-delete and group stats keep small in-memory debounce queues.
-        // Persist both before shutdownDatabase closes SQLite.
+        // Anti-delete and group stats keep small in-memory debounce queues; flush both before closing SQLite.
         try { global.__JUNE_FLUSH_ANTIDELETE?.() } catch (_) {}
         try { global.__JUNE_FLUSH_GROUP_STATS?.() } catch (_) {}
         try {
