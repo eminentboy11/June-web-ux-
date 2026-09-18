@@ -535,7 +535,7 @@ function applyJuneSessionToken() {
     }
     if (!process.env.JUNE_SESSION_TOKEN_NOTICE_SHOWN) {
         process.env.JUNE_SESSION_TOKEN_NOTICE_SHOWN = '1'
-        log('[ SESSION SERVER ] JUNE_SESSION_TOKEN is set but not a valid june-ultra:~ token or JUNE~ Session ID — ignoring it.', 'yellow')
+        log('[ SESSION SERVER ] JUNE_SESSION_TOKEN is set but not a valid june-ultra:~ token or JUNE-X~ Session ID — ignoring it.', 'yellow')
     }
     return false
 }
@@ -767,7 +767,7 @@ function quarantineCurrentSessionForReplacement() {
 // Only accepted format: june-ultra:~<24 chars> or june-ultra:<id>:~<24 chars>.
 // Legacy raw-session prefixes were retired.
 
-const VALID_PREFIXES = ['june-ultra:~', 'june-ultra:', 'JUNE~', 'june~']
+const VALID_PREFIXES = ['june-ultra:~', 'june-ultra:', 'JUNE-X~', 'june-x~', 'JUNE~', 'june~']
 const LEGACY_SESSION_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~']
 
 async function checkAndHandleSessionFormat() {
@@ -785,7 +785,7 @@ async function checkAndHandleSessionFormat() {
         }
         if (!VALID_PREFIXES.some(p => sessionId.trim().startsWith(p))) {
             log(chalk.black.bgYellowBright('[ERROR]: Invalid SESSION_ID format.'), 'white')
-            log(chalk.black.bgYellowBright('[SESSION ID] Must be a JUNE~ Session ID or a june-ultra:~ Session Server token.'), 'white')
+            log(chalk.black.bgYellowBright('[SESSION ID] Must be a JUNE-X~ Session ID or a june-ultra:~ Session Server token.'), 'white')
             log(chalk.black.bgYellowBright(`Get one at ${sessionServer.getServerUrl()}/pair — then restart. Exiting in 20 seconds...`), 'white')
             await delay(20000)
             process.exit(1)
@@ -854,7 +854,7 @@ async function getLoginMethod() {
 
     if (choice === '1') {
         log(`\nEnter your Session ID — get it at ${sessionServer.getServerUrl()}/pair`, 'yellow')
-        log('Accepted format: JUNE~xxxxxx or june-ultra:~<token>', 'yellow')
+        log('Accepted format: JUNE-X~xxxxxx (legacy JUNE~ still works) or june-ultra:~<token>', 'yellow')
         let sessionId = await question(chalk.greenBright('\nYour session token: '))
         sessionId = sessionId.trim()
         if (!VALID_PREFIXES.some(p => sessionId.startsWith(p))) {
@@ -2013,7 +2013,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
     if (!sessionServer.isSessionServerToken(token) && !sessionServer.isJuneHandle(token)) {
         const problem = sessionServer.describeTokenProblem(token)
         log(chalk.black.bgYellowBright(`[ERROR]: Invalid session credential (${problem}).`), 'white')
-        log(chalk.black.bgYellowBright('A Session ID looks like: JUNE~ab12cd — or a legacy june-ultra:~ token.'), 'white')
+        log(chalk.black.bgYellowBright('A Session ID looks like: JUNE-X~ab12cd — or a legacy june-ultra:~ token.'), 'white')
         if (problem === 'legacy-string-in-token-var') {
             log(chalk.black.bgYellowBright('That value is a legacy base64 session string — put it in SESSION_ID instead.'), 'white')
         }
@@ -2268,7 +2268,7 @@ async function main() {
         const _ssValid = sessionServer.isSessionServerToken(_ssToken) || sessionServer.isJuneHandle(_ssToken)
         const _ssFlag = /^(1|true|yes|on)$/i.test(String(process.env.JUNE_FORCE_SESSION_BOOTSTRAP || ''))
         if (_ssToken) {
-            if (!_ssValid) log('[ SESSION SERVER ] token: INVALID FORMAT (must be JUNE~xxxxxx or june-ultra:~ + 24 letters/digits — check quotes/spaces)', 'yellow')
+            if (!_ssValid) log('[ SESSION SERVER ] token: INVALID FORMAT (must be JUNE-X~xxxxxx or june-ultra:~ + 24 letters/digits — check quotes/spaces)', 'yellow')
         } else if (_ssFlag) {
             log('[ SESSION SERVER ] JUNE_FORCE_SESSION_BOOTSTRAP is set but no JUNE_SESSION_TOKEN is configured — the flag has no effect.', 'yellow')
         } else if (String(process.env.JUNE_SESSION_SERVER_URL || '').trim()) {

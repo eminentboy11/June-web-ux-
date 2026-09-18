@@ -78,15 +78,19 @@ function isSessionServerToken(value) {
   return parseSessionServerToken(value) !== null;
 }
 
-// ─── JUNE~ handles (lite vault, 2026-09) ────────────────────────────────────
-// New short Session IDs: JUNE~ab12cd. The handle IS the credential — the bot
-// fetches the full auth blob from GET /v1/session/:handle and re-exports it
-// into SQLite exactly like a token-restored snapshot.
-const HANDLE_PATTERN = /^JUNE~[A-Za-z0-9]{4,12}$/i; // case-insensitive: users may type june~; the server normalizes
+// ─── JUNE-X~ handles (lite vault, 2026-09) ──────────────────────────────────
+// Short Session IDs: JUNE-X~ab12cd (current) and legacy JUNE~ab12cd (still
+// valid). The handle IS the credential — the bot fetches the full auth blob
+// from GET /v1/session/:handle and re-exports it into SQLite exactly like a
+// token-restored snapshot. The IDENTITY is the 6-char body after the prefix.
+const HANDLE_PATTERN = /^JUNE(?:-X)?~[A-Za-z0-9]{4,12}$/i; // case-insensitive: users may type june~ / june-x~; the server normalizes
+const HANDLE_BODY_STRIP = /^june(?:-x)?~/i;
 
 function isJuneHandle(value) {
   return HANDLE_PATTERN.test(String(value || '').trim());
 }
+
+const handleBody = (value) => String(value || '').trim().replace(HANDLE_BODY_STRIP, '').toLowerCase();
 
 /** Distinguish predictable user mistakes for a clear error message. */
 function describeTokenProblem(value) {
@@ -95,11 +99,11 @@ function describeTokenProblem(value) {
   if (raw.startsWith('June-Ultra:~') || raw.startsWith('Ultra-X:~') || raw.startsWith('JUNE-MD:~')) {
     return 'legacy-string-in-token-var';
   }
-  if (/^june~/i.test(raw)) {
-    const body = raw.replace(/^june~/i, '');
-    if (!body) return 'june-handle-empty (expected JUNE~ + 6 letters/digits)';
+  if (/^june(?:-x)?~/i.test(raw)) {
+    const body = raw.replace(HANDLE_BODY_STRIP, '');
+    if (!body) return 'june-handle-empty (expected JUNE-X~ + 6 letters/digits)';
     if (body.length < 4 || body.length > 12) return `june-handle-bad-length (${body.length} after ~, expected 6)`;
-    return 'june-handle-charset (only letters/digits after JUNE~)';
+    return 'june-handle-charset (only letters/digits after JUNE-X~)';
   }
   if (!raw.startsWith(TOKEN_PREFIX)) {
     if (raw.toLowerCase().startsWith(TOKEN_PREFIX)) return 'wrong-case';
@@ -128,7 +132,7 @@ function describeTokenProblem(value) {
  */
 function tokenBotIdSuffix(value) {
   const raw = String(value || '').trim();
-  if (isJuneHandle(raw)) return sha256Hex(raw.slice(5).toLowerCase()).slice(0, 12);
+  if (isJuneHandle(raw)) return sha256Hex(handleBody(raw)).slice(0, 12);
   const parsed = parseSessionServerToken(value);
   if (!parsed) return null;
   return sha256Hex(parsed.body).slice(0, 12);
