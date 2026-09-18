@@ -2,15 +2,16 @@
 *{box-sizing:border-box}html,body{margin:0;width:100%;background:transparent;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow:hidden}
 body{padding:10px}.card{max-width:310px;margin:0 auto;padding:12px;border-radius:16px;background:#080d0b;color:#d9fbe6;box-shadow:0 6px 18px #0008;border:1px solid #123b25;text-align:center}
 h1{margin:0 0 4px;font-size:16px;letter-spacing:.5px;color:#39e889}.status{margin:0 0 8px;min-height:15px;color:#9ed8b4;font-size:12px}
-#c{width:240px;height:240px;display:block;margin:auto;border:1px solid #1d7347;border-radius:8px;background:#0b130f;touch-action:none}
-.row{display:flex;gap:8px;justify-content:center;margin-top:10px}
+.board-wrap{display:flex;justify-content:center;width:100%}
+#c{width:240px;height:240px;display:block;border:1px solid #1d7347;border-radius:8px;background:#0b130f;touch-action:none}
+.row{display:flex;gap:8px;justify-content:center;margin-top:10px;width:100%}
 button{flex:1;max-width:64px;padding:10px 0;font-size:15px;border:0;border-radius:10px;background:#123b25;color:#c9f7dd;cursor:pointer}
 button:active{background:#1d7347}.wide{max-width:none;flex:0 0 60%}
 .hint{margin:8px 0 0;font-size:11px;color:#6fae8c}
 </style></head><body><div class="card">
 <h1>🐍 SNAKE</h1>
 <p class="status" id="st">Tap a control to start</p>
-<canvas id="c" width="240" height="240"></canvas>
+<div class="board-wrap"><canvas id="c" width="240" height="240"></canvas></div>
 <div class="row"><button id="bl">◀</button><button id="bu">▲</button><button id="br">▶</button><button id="bd">▼</button></div>
 <div class="row"><button class="wide" id="rs">Restart</button></div>
 <p class="hint">Swipe the board or use arrow keys · eat 🍎, don't bite yourself</p>
