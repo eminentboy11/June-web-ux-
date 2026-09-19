@@ -47,11 +47,15 @@ h1{margin:0;font-size:15px;letter-spacing:.5px;background:linear-gradient(90deg,
 .dur b{color:#2dd4bf}
 .div{height:1px;margin:10px 6px;background:linear-gradient(90deg,transparent,#0e6e63,transparent)}
 .vs{display:flex;justify-content:space-between;font-size:11px;font-weight:700;margin:0 2px 8px}
+.vs span{max-width:108px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vs .px{color:#2dd4bf}.vs .po{color:#fbbf24}
 #bd{width:216px;height:216px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.cell{border-radius:14px;background:#06272b;border:1px solid #0e5f57;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;color:#2a5f57}
+.cell{cursor:pointer;border-radius:14px;background:#06272b;border:1px solid #0e5f57;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;color:#2a5f57}
 .cell.x{color:#2dd4bf}.cell.o{color:#fbbf24}
 .cell.win{background:#0e5f57;box-shadow:0 0 16px #2dd4b788}
+.cell:active{transform:scale(.95);background:#0a3d38}
+@keyframes ttpulse{0%,100%{box-shadow:0 0 0 0 #2dd4b755}50%{box-shadow:0 0 0 6px #2dd4b71f}}
+.turn{animation:ttpulse 1.8s infinite}
 .turn{margin:10px 0 2px;font-size:13px;font-weight:700;color:#a7e8de;background:#06272b;border:1px solid #0e5f57;border-radius:10px;padding:8px}
 .fin{margin:10px 0 2px;font-size:14px;font-weight:800;border-radius:10px;padding:9px}
 .fin.win{color:#04262b;background:linear-gradient(135deg,#2dd4bf,#0d9488)}
@@ -60,13 +64,36 @@ h1{margin:0;font-size:15px;letter-spacing:.5px;background:linear-gradient(90deg,
 .hint{margin:8px 0 0;font-size:10px;color:#5da99d}
 .hint b{color:#a7e8de}`;
 
-function shell(badge, inner) {
+function shell(badge, inner, extra) {
     return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${CARD_CSS}</style></head><body><div class="card">
 <h1>🎮 TIC-TAC-TOE 2</h1>
 <p class="mode">${badge}</p>
 ${inner}
+${extra || ''}
 </div></body></html>`;
 }
+
+// PvP cards can't send taps back to the bot — so every tap answers with a
+// coach bubble telling the player exactly what to type instead.
+const COACH_JS = `<script>
+(function(){
+var tip=document.createElement('div');
+tip.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(20px);background:#0e5f57;color:#d7fbf6;font-size:12px;font-weight:700;padding:9px 14px;border-radius:999px;border:1px solid #2dd4bf;opacity:0;transition:all .25s;white-space:nowrap;z-index:9;box-shadow:0 4px 14px #000a;pointer-events:none';
+document.body.appendChild(tip);
+var tm=null;
+function show(m){tip.textContent=m;tip.style.opacity='1';tip.style.transform='translateX(-50%) translateY(0)';if(tm)clearTimeout(tm);tm=setTimeout(function(){tip.style.opacity='0';tip.style.transform='translateX(-50%) translateY(20px)';},2200);}
+var cells=document.querySelectorAll('.cell');
+for(var i=0;i<cells.length;i++){(function(el){
+ el.addEventListener('click',function(){
+  if(el.className.indexOf('win')>=0){show('🎉 game over — .ttt2 start for a rematch');return;}
+  var t=el.textContent;
+  if(t==='\u2716'||t==='\u25C9'){show('taken — pick an empty number');return;}
+  show('\u270D type '+t+' in the chat to play it');
+  el.style.transform='scale(.94)';setTimeout(function(){el.style.transform='';},160);
+ });
+})(cells[i]);}
+})();
+</script>`;
 
 function boardHtml(game) {
     const line = winLine(game.board);
@@ -98,10 +125,10 @@ function stateCard(room, bannerOverride) {
     const over = g.winner || g.turns >= 9;
     const hint = over
         ? `<p class="hint">run <b>.ttt2 start</b> for a rematch</p>`
-        : `<p class="hint">type <b>1-9</b> to move · <b>surrender</b> to give up</p>`;
+        : `<p class="hint">⌨️ cards can't tap in PvP — <b>type</b> <b>1-9</b> in chat · <b>surrender</b> to give up</p>`;
 
     return shell(over ? 'GAME OVER' : (room.name ? 'ROOM · ' + esc(room.name) : 'PvP ROOM'),
-        players + boardHtml(g) + banner + hint);
+        players + boardHtml(g) + banner + hint, COACH_JS);
 }
 
 function waitingCard() {
