@@ -1286,6 +1286,9 @@ async function startJunexBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        // Ping every 15s (Baileys default 30s) — keeps idle sockets warm
+        // through NAT/carrier timeouts so WhatsApp drops them less (408s).
+        keepAliveIntervalMs: 15_000,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' }))
