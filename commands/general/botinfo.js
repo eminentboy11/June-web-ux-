@@ -85,7 +85,6 @@ const getDatabaseLines = () => {
             backup,
             postgres: remoteLabel(health.postgres),
             mongo: remoteLabel(health.mongo),
-            juneApi: remoteLabel(health.juneApi),
             session,
         };
     } catch (_) {
@@ -94,7 +93,6 @@ const getDatabaseLines = () => {
             backup: 'unknown',
             postgres: 'unknown',
             mongo: 'unknown',
-            juneApi: 'unknown',
             session: 'unknown',
         };
     }
@@ -155,7 +153,6 @@ module.exports = {
             `➥ Backup    ➜ ${dbInfo.backup}\n` +
             `➥ Postgres  ➜ ${dbInfo.postgres}\n` +
             `➥ Mongo     ➜ ${dbInfo.mongo}\n` +
-            `➥ June API  ➜ ${dbInfo.juneApi}\n` +
             `➥ Session   ➜ ${dbInfo.session}\n\n` +
 
             `┗━━━━━━━━━━━━━━━━`

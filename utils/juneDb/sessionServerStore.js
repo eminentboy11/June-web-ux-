@@ -9,7 +9,7 @@
  * single secret string; no separate DB credential exists.
  *
  * This client is deliberately independent from the legacy June API client
- * code (juneApiAdapter/automaticJuneApi) — it speaks the same storage
+ * cloud record-mirror code — it speaks the same storage
  * protocol but only ever talks to the configured session server.
  */
 

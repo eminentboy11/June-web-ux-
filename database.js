@@ -12,7 +12,6 @@ const { spawnSync } = require('child_process');
 const crypto   = require('crypto');
 const pgAdapter = require('./utils/juneDb/pgAdapter');
 const mongoAdapter = require('./utils/juneDb/mongoAdapter');
-const juneApiAdapter = require('./utils/juneDb/juneApiMirror');
 
 const DB_DIR  = path.resolve(process.env.JUNE_DB_DIR || path.join(__dirname, 'database'));
 const DB_FILE = path.resolve(process.env.JUNE_DB_FILE || path.join(DB_DIR, 'june-ultra.db'));
@@ -241,9 +240,7 @@ function getRemoteAdapter(name) {
     ? pgAdapter
     : name === 'mongo'
       ? mongoAdapter
-      : name === 'june-api'
-        ? juneApiAdapter
-        : null;
+      : null;
 }
 
 function remoteDedupeKey(adapter, method, args) {
@@ -314,7 +311,6 @@ function invokeRemote(adapterName, adapter, method, args) {
 function mirrorRemote(method, ...args) {
   invokeRemote('postgres', pgAdapter, method, args);
   invokeRemote('mongo', mongoAdapter, method, args);
-  invokeRemote('june-api', juneApiAdapter, method, args);
 }
 
 function deleteRemoteKV(namespace, key) {
@@ -464,7 +460,7 @@ function validateRemoteAuthSnapshot(snapshot) {
 }
 
 function hasConfiguredRemoteAuthMirror() {
-  return [pgAdapter, mongoAdapter, juneApiAdapter]
+  return [pgAdapter, mongoAdapter]
     .some((adapter) => Boolean(adapter?.getStatus?.().configured));
 }
 
@@ -544,7 +540,6 @@ async function restoreRemoteAuthState() {
     const candidates = (await Promise.all([
       typeof pgAdapter.fetchAuthState === 'function' ? pgAdapter.fetchAuthState() : null,
       typeof mongoAdapter.fetchAuthState === 'function' ? mongoAdapter.fetchAuthState() : null,
-      typeof juneApiAdapter.fetchAuthState === 'function' ? juneApiAdapter.fetchAuthState() : null,
     ])).filter((candidate) => candidate?.snapshot);
     if (!candidates.length) return { restored: false, skipped: 'no-remote-auth-state' };
 
@@ -1448,7 +1443,6 @@ const API_KEYS = {
 };
 
 const TELEGRAM_TOKEN = "8316875590:AAGXXYbt2OIn_hORS0s9RlW5n3e5W5-0YPQ";
-const JUNE_API_URL = "https://june-ultra-ai-test-model.onrender.com";
 const JUNE_BOT_ID = "june-ultra-main";
 const UPDATE_ZIP_URL = "https://github.com/supreme-Lord2/xjx/archive/refs/heads/main.zip";
 // single source of truth — config.js said 2.9.0 while package.json said 2.8.8
@@ -2483,7 +2477,6 @@ function getDatabaseHealth() {
       authMirror: getRemoteAuthMirrorStatus(),
       postgres: pgAdapter.getStatus(),
        mongo: mongoAdapter.getStatus(),
-       juneApi: juneApiAdapter.getStatus(),
 
       // Stable diagnostics API consumed by index.js /health/details.
       databaseSizeBytes: stats.size,
@@ -2509,7 +2502,6 @@ function getDatabaseHealth() {
       authMirror: getRemoteAuthMirrorStatus(),
       postgres: pgAdapter.getStatus(),
        mongo: mongoAdapter.getStatus(),
-       juneApi: juneApiAdapter.getStatus(),
       databaseSizeBytes: 0,
       backupSizeBytes,
       backupExists,
@@ -2684,7 +2676,7 @@ module.exports = {
   getStoredGroupSettings,
   // static application constants — never stored in bot_settings
   MESSAGES, DEFAULT_GROUP_SETTINGS, getDefaultGroupSettings, ANTICALL_PRESETS, SOCIAL, API_KEYS,
-  TELEGRAM_TOKEN, JUNE_API_URL, JUNE_BOT_ID, UPDATE_ZIP_URL, VERSION,
+  TELEGRAM_TOKEN, JUNE_BOT_ID, UPDATE_ZIP_URL, VERSION,
   getBotMode, setBotMode, VALID_BOT_MODES,
   getStoredLoginMethod, setStoredLoginMethod, clearStoredLoginMethod, LOGIN_METHOD_VALUES,
   getMenuSettings, updateMenuSettings, MENU_STYLE_VALUES, MENU_SETTINGS_DEFAULTS,
@@ -2715,7 +2707,6 @@ module.exports = {
   restoreFromPostgres, restoreFromMongo, backfillRemote,
   resetDatabase,
   getPostgresStatus: pgAdapter.getStatus, getMongoStatus: mongoAdapter.getStatus,
-  getJuneApiStatus: juneApiAdapter.getStatus,
   getBotId: pgAdapter.getBotId,
 };
 

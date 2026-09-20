@@ -7,8 +7,8 @@
  *   JUNE_SESSION_TOKEN=june-ultra:~<24 chars>  +  JUNE_SESSION_SERVER_URL=<url>
  *
  * ⚠️ INDEPENDENCE RULE: this module is completely separate from the June API
- * (dbapi) mirror infrastructure. It must NOT import or call juneApiAdapter,
- * juneApiRestore, automaticJuneApi, juneApiMirror, or storageSelector.
+ * session vending infrastructure. It must NOT import or call the cloud
+ * mirror adapters (pgAdapter/mongoAdapter) or any record-mirror layer.
  *
  * Nothing here ever destroys local auth state. Terminal token errors are
  * surfaced to the caller; network errors retry. The only destructive call is
