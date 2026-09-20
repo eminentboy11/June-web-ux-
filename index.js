@@ -972,9 +972,18 @@ while keys rebuild. Then: instant ⚡`
 }
 
 // ─── 408 Timeout Error Handler ────────────────────────────────────────────────
-
+// FIXED:
+//  1) No more double-wait — this function no longer sleeps itself; it just
+//     reports whether the retry cap was hit, and the caller (connection.update)
+//     performs a single wait. Previously this function slept 60s internally
+//     AND the caller slept again right after, ~65s+ per max-retry cycle.
+//  2) Refreshes the cached Baileys version once the retry cap is hit. A stale
+//     cached protocol version is a common real-world cause of a 408 that keeps
+//     recurring no matter how long you back off — refetching gives the
+//     reconnect a chance to actually succeed instead of retrying forever
+//     against a version WhatsApp may have stopped accepting cleanly.
 async function handle408Error(statusCode) {
-    if (statusCode !== DisconnectReason.connectionTimeout) return false
+    if (statusCode !== DisconnectReason.connectionTimeout) return { is408: false }
 
     global.errorRetryCount++
     const MAX_RETRIES = 10
@@ -985,13 +994,17 @@ async function handle408Error(statusCode) {
 
     log(`Connection Timeout (408). Retry ${global.errorRetryCount}/${MAX_RETRIES}`, 'yellow')
 
-    if (global.errorRetryCount >= MAX_RETRIES) {
-        log(chalk.black.bgYellowBright(`[MAX TIMEOUTS] ${MAX_RETRIES} reached. Waiting 60s before next attempt...`), 'white')
+    const maxReached = global.errorRetryCount >= MAX_RETRIES
+    if (maxReached) {
+        log(chalk.black.bgYellowBright(`[MAX TIMEOUTS] ${MAX_RETRIES} reached. Refreshing Baileys version and waiting 60s...`), 'white')
         clearPersistedSessionErrorState()
         global.errorRetryCount = 0
-        await delay(60000)
+        // Force a refetch on the next getBaileysVersion() call instead of
+        // reusing whatever was cached at process start.
+        _baileysVersionCache = null
     }
-    return true
+
+    return { is408: true, maxReached }
 }
 
 // ─── Session Integrity Check ──────────────────────────────────────────────────
@@ -1132,7 +1145,8 @@ const isSystemJid = (jid) => !jid ||
 // ─── Start Bot (Main Socket) ──────────────────────────────────────────────────
 
 // ─── Baileys Version Cache ────────────────────────────────────────────────────
-// Fetched once per process; reconnects reuse the cached value.
+// Fetched once per process; reconnects reuse the cached value, unless it was
+// cleared by handle408Error() after the retry cap was reached (see above).
 let _baileysVersionCache = null
 async function getBaileysVersion() {
     if (_baileysVersionCache) return _baileysVersionCache
@@ -1286,9 +1300,6 @@ async function startJunexBot() {
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
-        // Ping every 15s (Baileys default 30s) — keeps idle sockets warm
-        // through NAT/carrier timeouts so WhatsApp drops them less (408s).
-        keepAliveIntervalMs: 15_000,
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' }))
@@ -1299,6 +1310,10 @@ async function startJunexBot() {
         syncFullHistory: false,
         downloadHistory: false,
         msgRetryCounterCache,
+        // Give the socket more breathing room before a 408 fires — the
+        // default is tight for slower VPS/network conditions.
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 20000,
         getMessage: async (key) => {
             // LID-based DMs store remoteJid as @lid — try both JID forms.
             const primaryJid = key.remoteJid?.endsWith('@lid')
@@ -1396,14 +1411,21 @@ async function startJunexBot() {
                 }
                 global.isReconnecting = true
 
-                const is408 = await handle408Error(statusCode)
+                const { is408, maxReached } = await handle408Error(statusCode)
 
                 let waitMs
                 // Conflict branches already log a throttled message.
                 let showConnectionClosedLog = true
                 if (is408) {
-                    // 408 timeout — exponential backoff capped at 60s
-                    waitMs = Math.min(5000 * Math.pow(2, Math.min(global.errorRetryCount, 3)), 60000)
+                    // 408 timeout — exponential backoff with jitter, capped at 60s.
+                    // A single wait happens here now; handle408Error() no longer
+                    // sleeps internally, so this replaces the old double-wait.
+                    if (maxReached) {
+                        waitMs = 60000
+                    } else {
+                        const base = 5000 * Math.pow(2, Math.min(global.errorRetryCount, 3))
+                        waitMs = Math.min(base + Math.floor(Math.random() * 1000), 60000)
+                    }
                 } else if (statusCode === 503) {
                     // 503 — WhatsApp servers overloaded.
                     global.errorRetryCount++
@@ -1468,7 +1490,7 @@ async function startJunexBot() {
                 }
 
                 if (showConnectionClosedLog) {
-                    log(`Connection closed (${statusCode}). Reconnecting in ${waitMs / 1000}s...`, 'yellow')
+                    log(`Connection closed (${statusCode}). Reconnecting in ${Math.round(waitMs / 1000)}s...`, 'yellow')
                 }
                 await new Promise(resolve => {
                     global._reconnectTimer = setTimeout(resolve, waitMs)
