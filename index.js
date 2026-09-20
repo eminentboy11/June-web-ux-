@@ -1304,8 +1304,15 @@ async function startJunexBot() {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' }))
         },
-        // Stealth mode: connect without the "online" mark while stealth is on.
-        markOnlineOnConnect: (() => { try { return !require('./utils/stealthMode').isEnabled(); } catch (_) { return true; } })(),
+        // Notification fix: WhatsApp suppresses phone notifications while
+        // another linked device is marked "online" — so a bot paired to a
+        // personal number was silencing the owner's phone. Default: connect
+        // offline-marked (notifications work). Opt back in with
+        // JUNE_STAY_ONLINE=true. Stealth mode also forces offline-marked.
+        markOnlineOnConnect: (() => {
+            if (String(process.env.JUNE_STAY_ONLINE || '').trim().toLowerCase() === 'true') return true;
+            return false;
+        })(),
         generateHighQualityLinkPreview: false,
         syncFullHistory: false,
         downloadHistory: false,
