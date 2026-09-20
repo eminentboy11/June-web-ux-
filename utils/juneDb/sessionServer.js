@@ -17,6 +17,7 @@
  */
 
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 // Baileys' canonical auth JSON codec — Buffer fields must round-trip through
 // its replacer/reviver forms (see filesToSnapshot for why this matters).
@@ -151,6 +152,7 @@ function getConfiguredToken() {
 }
 
 function isTokenModeActive() {
+  if (state.offlineMode) return false; // one-shot handle mode: no live lane
   const token = getConfiguredToken();
   return isSessionServerToken(token) || isJuneHandle(token);
 }
@@ -484,19 +486,42 @@ async function fetchAndRestoreSnapshot(db) {
   // files in plain JSON. Convert to SQLite rows and restore.
   const configuredCredential = getConfiguredToken();
   if (isJuneHandle(configuredCredential)) {
-    if (!state.leaseToken || Date.now() >= state.leaseExpiresAt - 60000) {
-      await authenticate({ db });
-    }
+    // ONE-SHOT HANDLE MODE (server is a simple session vending machine):
+    // GET /session/:id → plain text "PREFIX~<gzip+base64 creds>" → strip the
+    // prefix, gunzip → restore into local SQLite → run entirely on local auth.
+    // No leases, no auth-state pushes, no heartbeats — exactly like every
+    // Gifted-style bot consumes a session server.
     const serverUrl = getServerUrl();
-    const data = await rawRequest(`${serverUrl}/v1/session/${encodeURIComponent(configuredCredential)}`);
-    if (!data || data.success !== true) {
-      throw new SessionServerError('This Session ID is unknown or was revoked', { code: 'session_revoked' });
+    let response;
+    try {
+      response = await fetch(`${serverUrl}/session/${encodeURIComponent(configuredCredential)}`, {
+        headers: { Accept: 'text/plain' },
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+      });
+    } catch (cause) {
+      throw new SessionServerError(`Session Server unreachable: ${cause.message}`);
     }
-    const snapshot = filesToSnapshot(data.files);
+    const text = (await response.text()).trim();
+    if (!response.ok) {
+      throw new SessionServerError('This Session ID is unknown or was revoked', { code: 'session_revoked', status: response.status });
+    }
+    let blob = text;
+    const tilde = blob.indexOf('~');
+    if (tilde >= 0) blob = blob.slice(tilde + 1);
+    let creds;
+    try {
+      creds = JSON.parse(zlib.gunzipSync(Buffer.from(blob, 'base64')).toString('utf8'));
+    } catch (_) {
+      throw new SessionServerError('Session Server returned an invalid session blob', { code: 'session_state_missing' });
+    }
+    const snapshot = filesToSnapshot({ 'creds.json': creds });
     if (!snapshot) {
       throw new SessionServerError('Session Server returned an invalid session blob', { code: 'session_state_missing' });
     }
-    state.version = null; // fresh mirror; the next push adopts the server version
+    state.offlineMode = true;  // fetched once — the bot now runs on local auth
+    state.version = null;
+    state.leaseToken = null;
+    state.leaseExpiresAt = 0;
     const restored = restoreSnapshotIntoSQLite(db, snapshot);
     return { ...restored, version: null, sessionId: null };
   }
