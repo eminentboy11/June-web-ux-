@@ -1157,6 +1157,9 @@ async function getBaileysVersion() {
 
 async function startJunexBot() {
     if (global._shutdownRequested) return null
+    // Every boot path funnels here already running on local auth (SQLite or
+    // files). Per the one-shot vending architecture, the live lane never arms.
+    sessionServer.markOfflineMode()
     // A reconnect must not leave the previous socket alive.
     const previousSock = global.currentSock
     if (previousSock) {

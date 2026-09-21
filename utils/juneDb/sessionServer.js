@@ -157,6 +157,12 @@ function isTokenModeActive() {
   return isSessionServerToken(token) || isJuneHandle(token);
 }
 
+// One-shot vending decree: once the bot runs on local auth, the live lane
+// (auth-state pushes, leases, heartbeats) stays dead for this process.
+function markOfflineMode() {
+  state.offlineMode = true;
+}
+
 function sha256Hex(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
