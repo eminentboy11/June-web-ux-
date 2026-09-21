@@ -1,19 +1,3 @@
-/**
- * AutoRead Command — Owner only
- * Automatically marks incoming chat messages as read (blue ticks).
- *
- *   .autoread            → show the current mode
- *   .autoread off        → disabled (default; nothing is auto-read)
- *   .autoread pm         → read incoming private messages only
- *   .autoread gc         → read incoming group messages only
- *   .autoread all        → read every incoming chat message
- *   .autoread contacts   → read only messages from known contacts
- *
- * Persists in bot_settings under 'autoReadMode' (the pre-existing setting
- * key, default 'off'). Status/broadcast messages are NOT touched here —
- * the status auto-view flow owns those receipts.
- */
-
 const db = require('../../database');
 
 const KEY = 'autoReadMode';
@@ -27,45 +11,30 @@ const LABELS = {
     contacts: '👥 Auto-read: contacts',
 };
 
-/** Current persisted mode (always a valid value). */
+const USAGE = 'Usage: .autoread <off|pm|gc|all|contacts>';
+
 function currentMode() {
     const value = db.getBotSetting(KEY);
     return MODES.includes(value) ? value : 'off';
 }
 
-/**
- * Pure gate — should this incoming message be auto-read?
- * Exported for index.js (and tests); no side effects.
- *
- *   - 'off'      → never
- *   - 'all'      → every normal chat message
- *   - 'contacts' → only when the sender resolves to a known contact
- * Never: own messages (fromMe), status@broadcast (the status auto-view
- * owns those receipts), newsletters, and protocol JIDs.
- */
 function shouldAutoRead(mode, msg, isContact = () => true) {
     if (!['all', 'contacts', 'pm', 'gc'].includes(mode)) return false;
     if (!msg || !msg.key || !msg.key.remoteJid) return false;
     const jid = String(msg.key.remoteJid);
     if (msg.key.fromMe) return false;
-    if (jid === 'status@broadcast') return false; // status auto-view owns these
+    if (jid === 'status@broadcast') return false;
     if (jid.endsWith('@newsletter')) return false;
     const isPrivate = jid.endsWith('@s.whatsapp.net') || jid.endsWith('@broadcast');
     const isGroup = jid.endsWith('@g.us');
     if (mode === 'pm') return isPrivate;
     if (mode === 'gc') return isGroup;
     if (mode === 'all') return isPrivate || isGroup;
-    // contacts mode: private chats → the peer; groups → the sender
     const sender = isGroup ? (msg.key.participant || null) : jid;
     if (!sender) return false;
     return Boolean(isContact(sender));
 }
 
-/**
- * Hook used by index.js on every incoming message. Reads the mode from
- * settings, applies the gate, and fire-and-forget marks the message read.
- * Never throws, never blocks message handling.
- */
 async function readMessageIfEnabled(sock, msg) {
     try {
         const mode = currentMode();
@@ -79,7 +48,7 @@ async function readMessageIfEnabled(sock, msg) {
         await sock.readMessages([msg.key]);
         return true;
     } catch (_) {
-        return false; // a failed read receipt must never break message flow
+        return false;
     }
 }
 
@@ -99,11 +68,11 @@ module.exports = {
             const opt = (args[0] || '').toLowerCase();
 
             if (!opt) {
-                return extra.reply(LABELS[currentMode()]);
+                return extra.reply(`${LABELS[currentMode()]}\n${USAGE}`);
             }
 
             if (!MODES.includes(opt)) {
-                return extra.reply(`Usage: .autoread <off|pm|gc|all|contacts>`);
+                return extra.reply(USAGE);
             }
 
             db.setBotSetting(KEY, opt);
@@ -116,7 +85,6 @@ module.exports = {
         }
     },
 
-    // Exposed for index.js and tests
     shouldAutoRead,
     readMessageIfEnabled,
     currentMode,
