@@ -2046,11 +2046,10 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
         await delay(10000)
         process.exit(1)
     }
-    log('[ SESSION SERVER ] Token configured (redacted) — fetching the authoritative session…', 'cyan')
-
     // Fast path — verified local auth exists: connect immediately, the
-    // background sync refreshes the server copy.
+    // background sync refreshes the server copy. No fetch happens here.
     if (sqliteAuthReady && !forceBootstrap && isLocallyVerifiedAuth(juneDatabase._db)) {
+        log('[ SESSION SERVER ] Verified local auth — connecting from SQLite; token kept only as recovery backup.', 'green')
         // A missing stored fingerprint (fresh/mirror-restored store) is not a token change.
         const storedFingerprint = getSessionIdFingerprint(juneDatabase._db)
         if (fingerprint && storedFingerprint !== fingerprint) {
@@ -2063,6 +2062,8 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
         await startJunexBot()
         return
     }
+
+    log('[ SESSION SERVER ] Token configured (redacted) — fetching the authoritative session…', 'cyan')
 
     // Full bootstrap — no usable local auth (or a forced replace): fetch the
     // encrypted session from the server and restore it into SQLite.
