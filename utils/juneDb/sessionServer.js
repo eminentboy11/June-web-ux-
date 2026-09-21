@@ -780,6 +780,7 @@ module.exports = {
   getServerUrl,
   getConfiguredToken,
   isTokenModeActive,
+  markOfflineMode,
   sha256Hex,
   authenticate,
   isAuthenticated,

@@ -2046,8 +2046,8 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
         await delay(10000)
         process.exit(1)
     }
-    // Fast path — verified local auth exists: connect immediately, the
-    // background sync refreshes the server copy. No fetch happens here.
+    // Fast path — verified local auth exists: connect immediately from
+    // SQLite. No fetch, no background sync; the token is a recovery backup.
     if (sqliteAuthReady && !forceBootstrap && isLocallyVerifiedAuth(juneDatabase._db)) {
         log('[ SESSION SERVER ] Verified local auth — connecting from SQLite; token kept only as recovery backup.', 'green')
         // A missing stored fingerprint (fresh/mirror-restored store) is not a token change.
@@ -2803,6 +2803,13 @@ process.on('unhandledRejection', (err) => {
     if (err?.message?.includes('AUTH_STARTUP_VALIDATION_FAILED')) {
         log(`[ AUTH ] Startup recovery stopped safely: ${err.message.replace(/^AUTH_STARTUP_VALIDATION_FAILED:\s*/, '')}`, 'yellow')
         log('[ AUTH ] No auth data was cleared. Restore a known-good backup or explicitly re-pair.', 'yellow')
+        return
+    }
+    log(`Unhandled Rejection: ${err?.message}`, 'red', true)
+})
+
+module.exports = { store }
+was cleared. Restore a known-good backup or explicitly re-pair.', 'yellow')
         return
     }
     log(`Unhandled Rejection: ${err?.message}`, 'red', true)
