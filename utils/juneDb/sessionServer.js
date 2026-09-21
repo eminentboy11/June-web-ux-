@@ -1,38 +1,25 @@
 'use strict';
 
-/**
- * June Ultra ↔ June Session Server client.
- *
- * Implements the approved centralized remote-session system:
- *   JUNE_SESSION_TOKEN=june-ultra:~<24 chars>  +  JUNE_SESSION_SERVER_URL=<url>
- *
- * ⚠️ INDEPENDENCE RULE: this module is completely separate from the June API
- * session vending infrastructure. It must NOT import or call the cloud
- * mirror adapters (pgAdapter/mongoAdapter) or any record-mirror layer.
- *
- * Nothing here ever destroys local auth state. Terminal token errors are
- * surfaced to the caller; network errors retry. The only destructive call is
- * revokeSession(), which index.js invokes exclusively on a genuine WhatsApp
- * logout or an explicit user request (.resetbot --session).
- */
-
 const crypto = require('crypto');
 const zlib = require('zlib');
 
-// Baileys' canonical auth JSON codec — Buffer fields must round-trip through
-// its replacer/reviver forms (see filesToSnapshot for why this matters).
 let BufferJSON = null;
-try { ({ BufferJSON } = require('@whiskeysockets/baileys/lib/Utils/generics')); } catch (_) { /* optional */ }
+try { ({ BufferJSON } = require('@whiskeysockets/baileys/lib/Utils/generics')); } catch (_) {}
 
 const TOKEN_PREFIX = 'june-ultra:';
 const TOKEN_LABEL_PATTERN = /^[A-Za-z0-9_-]{3,24}$/;
 const TOKEN_BODY_PATTERN = /^[A-Za-z0-9]{24}$/;
-// Built-in session server — users only paste the token, nothing else.
-// JUNE_SESSION_SERVER_URL remains as an undocumented override for testing.
 const DEFAULT_SESSION_SERVER_URL = 'https://burning-lorena-eminentbo-ede53cc1.koyeb.app';
 const DEFAULT_TIMEOUT_MS = 20000;
 const PUSH_DEBOUNCE_MS = 2000;
 const HEARTBEAT_INTERVAL_MS = 60000;
+const HANDLE_PATTERN = /^JUNE(?:-X)?~[A-Za-z0-9]{4,12}$/i;
+const HANDLE_BODY_STRIP = /^june(?:-x)?~/i;
+const AUTH_KEY_TYPES = [
+  'app-state-sync-version', 'app-state-sync-key', 'sender-key-memory',
+  'sender-key', 'identity-key', 'device-list', 'lid-mapping',
+  'pre-key', 'session', 'tctoken',
+];
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
@@ -42,9 +29,7 @@ class SessionServerError extends Error {
     this.name = 'SessionServerError';
     this.status = status;
     this.code = code;
-    // Retryable transport/server failures.
     this.retryable = status === 0 || status === 408 || status === 429 || status >= 500;
-    // Terminal authentication failures — retrying can never succeed.
     this.terminal = [
       'token_invalid', 'token_revoked', 'token_expired',
       'session_revoked', 'session_expired', 'session_state_missing',
@@ -54,20 +39,12 @@ class SessionServerError extends Error {
 
 // ─── Format helpers ─────────────────────────────────────────────────────────
 
-/**
- * Parse both canonical forms:
- *   june-ultra:~<24 random chars>                (no custom id)
- *   june-ultra:<custom-id>:~<24 random chars>    (with custom id)
- * Returns { label, body } or null. ALL entropy lives in the random body —
- * the custom id is a visible label only.
- */
 function parseSessionServerToken(value) {
   const raw = String(value || '').trim();
   if (!raw.startsWith(TOKEN_PREFIX)) return null;
   const rest = raw.slice(TOKEN_PREFIX.length);
   const tilde = rest.indexOf('~');
   if (tilde === -1) return null;
-  // '<label>:~<body>' — strip the ':' that separates the label from '~'.
   const label = tilde === 0 ? '' : rest.slice(0, tilde).replace(/:$/, '');
   const body = rest.slice(tilde + 1);
   if (label !== '' && !TOKEN_LABEL_PATTERN.test(label)) return null;
@@ -79,21 +56,12 @@ function isSessionServerToken(value) {
   return parseSessionServerToken(value) !== null;
 }
 
-// ─── JUNE-X~ handles (lite vault, 2026-09) ──────────────────────────────────
-// Short Session IDs: JUNE-X~ab12cd (current) and legacy JUNE~ab12cd (still
-// valid). The handle IS the credential — the bot fetches the full auth blob
-// from GET /v1/session/:handle and re-exports it into SQLite exactly like a
-// token-restored snapshot. The IDENTITY is the 6-char body after the prefix.
-const HANDLE_PATTERN = /^JUNE(?:-X)?~[A-Za-z0-9]{4,12}$/i; // case-insensitive: users may type june~ / june-x~; the server normalizes
-const HANDLE_BODY_STRIP = /^june(?:-x)?~/i;
-
 function isJuneHandle(value) {
   return HANDLE_PATTERN.test(String(value || '').trim());
 }
 
 const handleBody = (value) => String(value || '').trim().replace(HANDLE_BODY_STRIP, '').toLowerCase();
 
-/** Distinguish predictable user mistakes for a clear error message. */
 function describeTokenProblem(value) {
   const raw = String(value || '').trim();
   if (!raw) return 'empty';
@@ -122,15 +90,6 @@ function describeTokenProblem(value) {
   return 'bad-charset';
 }
 
-/**
- * Stable per-token bot identity for remote mirror scoping (v3.1.0+):
- * 12 hex chars of SHA-256(token body) — the body is the 24 random chars that
- * hold all the entropy, so a cosmetic custom-id label never moves the
- * namespace. index.js uses this when no explicit PN/JUNE_PN/JUNE_BOT_ID/
- * BOT_ID/OWNER_NUMBER is configured, so direct PostgreSQL/Mongo mirrors are
- * scoped per session token without any extra .env configuration. Contains no
- * reversible credential material — the same rule as SESSION_ID fingerprints.
- */
 function tokenBotIdSuffix(value) {
   const raw = String(value || '').trim();
   if (isJuneHandle(raw)) return sha256Hex(handleBody(raw)).slice(0, 12);
@@ -152,13 +111,11 @@ function getConfiguredToken() {
 }
 
 function isTokenModeActive() {
-  if (state.offlineMode) return false; // one-shot handle mode: no live lane
+  if (state.offlineMode) return false;
   const token = getConfiguredToken();
   return isSessionServerToken(token) || isJuneHandle(token);
 }
 
-// One-shot vending decree: once the bot runs on local auth, the live lane
-// (auth-state pushes, leases, heartbeats) stays dead for this process.
 function markOfflineMode() {
   state.offlineMode = true;
 }
@@ -167,15 +124,7 @@ function sha256Hex(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
-/**
- * Stable installation identity — persisted in the bot's own kv_store so every
- * restart of the same deployment presents the SAME id to the session server.
- * (The previous hostname|pid|dir hash changed on every restart, so a bot
- * could end up conflicting with its own dead lease.) Falls back to a pid-free
- * host+dir hash when kv_store is unavailable (e.g. minimal test schemas).
- */
 function getInstallationId(db) {
-  // A persisted kv id always wins once loaded.
   if (state.installationId && state.installationIdSource === 'kv') return state.installationId;
   const readDb = db || state.lastDb;
   if (readDb) {
@@ -185,10 +134,8 @@ function getInstallationId(db) {
       ).get()?.value || '').trim();
       let id;
       if (existing.length >= 8) {
-        id = existing; // stable across restarts — reuse it
+        id = existing;
       } else {
-        // Nothing persisted yet: keep the current id if one was already
-        // issued this process (never change identity mid-run), else mint one.
         id = state.installationId || crypto.randomUUID();
         readDb.prepare(
           "INSERT OR REPLACE INTO kv_store (namespace, key, value) VALUES ('session-server', 'installation-id', ?)"
@@ -197,7 +144,7 @@ function getInstallationId(db) {
       state.installationId = id;
       state.installationIdSource = 'kv';
       return id;
-    } catch (_) { /* kv_store unavailable — use the fallback below */ }
+    } catch (_) {}
   }
   if (!state.installationId) {
     const os = require('os');
@@ -221,10 +168,10 @@ const state = {
   leaseExpiresAt: 0,
   leaseId: null,
   sessionId: null,
-  sessionMeta: null,       // { phoneLast4, pairedAt, expiresAt, status }
-  version: null,           // last known auth-state version on the server
-  installationId: null,    // stable across restarts (persisted in kv_store)
-  installationIdSource: null, // 'kv' | 'fallback'
+  sessionMeta: null,
+  version: null,
+  installationId: null,
+  installationIdSource: null,
   everAuthenticated: false,
   lastDb: null,
   authPromise: null,
@@ -232,8 +179,9 @@ const state = {
   pushing: false,
   heartbeatTimer: null,
   lastLogAt: Object.create(null),
-  terminalFailure: null,   // remembered terminal error (never retried again)
-  revoked: false,          // set once revokeSession() has been issued
+  terminalFailure: null,
+  revoked: false,
+  offlineMode: false,
 };
 
 function resetLease() {
@@ -296,9 +244,6 @@ async function request(path, { method = 'GET', body, idempotencyKey, allowReauth
     return await rawRequest(`${serverUrl}${path}`, { method, body, idempotencyKey });
   } catch (error) {
     if (error.status === 401 && allowReauth && !error.terminal) {
-      // Lease expired mid-flight — re-authenticate once and replay.
-      // Deliberately NOT takeover: if another instance preempted our lease,
-      // taking it back here would ping-pong between two live bots forever.
       resetLease();
       await authenticate({ db: state.lastDb, takeover: false });
       return rawRequest(`${serverUrl}${path}`, { method, body, idempotencyKey });
@@ -331,11 +276,7 @@ async function authenticate({ takeover = false, db = null } = {}) {
   }
   if (!serverUrl) throw new SessionServerError('JUNE_SESSION_SERVER_URL is not configured');
 
-  // HANDLE MODE: the handle itself is the bearer credential — the server
-  // accepts it on every protected route, so there is nothing to exchange.
-  // No HTTP round trip; refresh the local lease window and return.
   if (isJuneHandle(token)) {
-    if (state.authPromise) return state.authPromise;
     state.authPromise = Promise.resolve().then(() => {
       state.leaseToken = token;
       state.leaseExpiresAt = Date.now() + 20 * 60 * 1000;
@@ -369,7 +310,7 @@ async function authenticate({ takeover = false, db = null } = {}) {
           rememberTerminalFailure(error);
           throw error;
         }
-        if (error.code === 'session_in_use') throw error; // caller decides on takeover
+        if (error.code === 'session_in_use') throw error;
         lastError = error;
         await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
       }
@@ -385,8 +326,6 @@ function isAuthenticated() {
 }
 
 // ─── Snapshot validation + SQLite restore ───────────────────────────────────
-// Same invariants the existing remote-mirror restore applies. Implemented
-// standalone on purpose — no database.js / June API dependencies.
 
 function validateSnapshot(statePayload) {
   if (!statePayload || typeof statePayload !== 'object') return null;
@@ -395,8 +334,6 @@ function validateSnapshot(statePayload) {
   const meta = Array.isArray(statePayload.sessionAuthMeta) ? statePayload.sessionAuthMeta : null;
   if (!creds || !keys || !meta) return null;
   if (!creds.some((row) => row?.key === 'creds' && typeof row.value === 'string')) return null;
-  // CREDS-ONLY VAULT: the server stores just the identity — an empty
-  // sessionKeys array is valid now (keys regenerate after reconnect).
   if (meta.find((row) => row?.key === 'status')?.value !== 'verified') return null;
   if (!creds.every((row) => typeof row?.key === 'string' && typeof row?.value === 'string')) return null;
   if (!keys.every((row) => typeof row?.type === 'string' && typeof row?.id === 'string' && typeof row?.value === 'string')) return null;
@@ -404,7 +341,6 @@ function validateSnapshot(statePayload) {
   return { creds, keys, meta };
 }
 
-/** Insert a validated snapshot into the local SQLite auth tables (replace). */
 function restoreSnapshotIntoSQLite(db, snapshot) {
   const now = Date.now();
   const insertCred = db.prepare(`
@@ -432,13 +368,6 @@ function restoreSnapshotIntoSQLite(db, snapshot) {
 }
 
 // ─── JUNE~ handle restore (lite vault) ──────────────────────────────────────
-// Same key-type list as the SQLite auth-state layer — the server names files
-// with the exact same convention the bot writes them.
-const AUTH_KEY_TYPES = [
-  'app-state-sync-version', 'app-state-sync-key', 'sender-key-memory',
-  'sender-key', 'identity-key', 'device-list', 'lid-mapping',
-  'pre-key', 'session', 'tctoken',
-];
 
 function parseAuthKeyFilename(name) {
   if (!name.endsWith('.json') || name === 'creds.json') return null;
@@ -449,16 +378,8 @@ function parseAuthKeyFilename(name) {
   return id ? { type, id } : null;
 }
 
-/** Lite blob { 'creds.json': obj, '<type>-<id>.json': obj } → SQLite row snapshot. */
 function filesToSnapshot(files) {
   const now = Date.now();
-  // Canonicalize every file: whatever Buffer shape the payload carries (real
-  // Buffers, PocketBase array form { type:'Buffer', data:[…] }, or Baileys'
-  // canonical base64 form), revive→replacer re-encodes it to the exact
-  // base64 shape Baileys' reviver accepts. Without this, an array-form
-  // routingInfo/noiseKey survives as a plain object and makeNoiseHandler
-  // throws RangeError: Buffer.alloc(NaN) on the next connect (the restore
-  // retry loop on fresh deploys).
   const canonicalAuthJson = (value) => {
     try {
       const revived = JSON.parse(JSON.stringify(value), BufferJSON.reviver);
@@ -477,8 +398,6 @@ function filesToSnapshot(files) {
     if (!parsed || !value || typeof value !== 'object') continue;
     sessionKeys.push({ type: parsed.type, id: parsed.id, value: JSON.stringify(canonicalAuthJson(value)), updated_at: now });
   }
-  // CREDS-ONLY VAULT: a blob with just creds.json is valid — Baileys
-  // regenerates every key file when the restored bot reconnects.
   const sessionAuthMeta = [
     { key: 'status', value: 'verified' },
     { key: 'source', value: 'june-session-server' },
@@ -486,17 +405,9 @@ function filesToSnapshot(files) {
   return { creds: sessionCreds, keys: sessionKeys, meta: sessionAuthMeta };
 }
 
-/** Authenticate + fetch + validate + restore. Used by the index.js token branch. */
 async function fetchAndRestoreSnapshot(db) {
-  // HANDLE MODE: one GET returns the complete session blob — creds + key
-  // files in plain JSON. Convert to SQLite rows and restore.
   const configuredCredential = getConfiguredToken();
   if (isJuneHandle(configuredCredential)) {
-    // ONE-SHOT HANDLE MODE (server is a simple session vending machine):
-    // GET /session/:id → plain text "PREFIX~<gzip+base64 creds>" → strip the
-    // prefix, gunzip → restore into local SQLite → run entirely on local auth.
-    // No leases, no auth-state pushes, no heartbeats — exactly like every
-    // Gifted-style bot consumes a session server.
     const serverUrl = getServerUrl();
     let response;
     try {
@@ -524,16 +435,13 @@ async function fetchAndRestoreSnapshot(db) {
     if (!snapshot) {
       throw new SessionServerError('Session Server returned an invalid session blob', { code: 'session_state_missing' });
     }
-    state.offlineMode = true;  // fetched once — the bot now runs on local auth
+    state.offlineMode = true;
     state.version = null;
     state.leaseToken = null;
     state.leaseExpiresAt = 0;
     const restored = restoreSnapshotIntoSQLite(db, snapshot);
     return { ...restored, version: null, sessionId: null };
   }
-  // Only (re)authenticate when no valid lease is held. FIRST acquisition in
-  // this process takes over (a booting bot is by definition the new owner);
-  // later refreshes are same-installation and allowed without takeover.
   if (!state.leaseToken || Date.now() >= state.leaseExpiresAt - 60000) {
     await authenticate({ takeover: !state.everAuthenticated, db });
   }
@@ -546,7 +454,6 @@ async function fetchAndRestoreSnapshot(db) {
   return { ...restored, version: state.version, sessionId: state.sessionId };
 }
 
-/** Build a mirror snapshot from the local SQLite (verified state only). */
 function buildAuthSnapshot(db) {
   try {
     const sessionCreds = db.prepare('SELECT key, value, updated_at FROM session_creds ORDER BY key ASC').all();
@@ -562,7 +469,7 @@ function buildAuthSnapshot(db) {
   }
 }
 
-// ─── Runtime push (creds.update → server stays current) ────────────────────
+// ─── Runtime push ───────────────────────────────────────────────────────────
 
 async function pushAuthStateNow(db, reason = 'scheduled') {
   if (!isTokenModeActive() || state.revoked || state.terminalFailure) return false;
@@ -586,9 +493,6 @@ async function pushAuthStateNow(db, reason = 'scheduled') {
       return true;
     } catch (error) {
       if (error.code === 'version_conflict') {
-        // Server moved ahead (e.g. re-pair elsewhere). Adopt its version and
-        // push our verified local state once more — the connected bot is the
-        // live source of truth for this session.
         const current = await request('/v1/session/auth-state');
         state.version = Number(current?.version) || null;
         const retryBody = { state: snapshot };
@@ -602,7 +506,7 @@ async function pushAuthStateNow(db, reason = 'scheduled') {
     }
   } catch (error) {
     if (error.code === 'session_in_use') {
-      throttleLog('[ SESSION SERVER ] Another deployment is actively syncing this session — key pushes paused on this instance (they resume automatically if the other instance stops).', 3600000);
+      throttleLog('[ SESSION SERVER ] Another deployment is actively syncing this session — key pushes paused on this instance.', 3600000);
       return false;
     }
     if (error.terminal) {
@@ -646,11 +550,10 @@ async function sendHeartbeat(botState, botVersion) {
       return;
     }
     if (error.code === 'session_in_use') {
-      throttleLog('[ SESSION SERVER ] Another deployment holds the session lease — remote sync stopped on this instance. Two bots on one token will also conflict in WhatsApp.', 3600000);
+      throttleLog('[ SESSION SERVER ] Another deployment holds the session lease — remote sync stopped on this instance.', 3600000);
       stopHeartbeat();
       return;
     }
-    // Transient heartbeat failures are non-fatal; the lease window absorbs them.
   }
 }
 
@@ -670,45 +573,30 @@ function stopHeartbeat() {
   }
 }
 
-// ─── Connection lifecycle hooks (called from index.js) ──────────────────────
+// ─── Connection lifecycle ───────────────────────────────────────────────────
 
-/**
- * Called on every Baileys connection.open while token mode is active.
- * Best-effort background sync — NEVER blocks or breaks the connection:
- *   1. authenticate (unless already leased)
- *   2. verify the server session belongs to the connected WhatsApp account
- *   3. push the verified local auth state + start the heartbeat
- */
 async function onBotConnected(db, { botVersion } = {}) {
   if (!isTokenModeActive()) return;
   try {
-    // Runs on EVERY connection.open (including reconnects) — only obtain a
-    // fresh lease when the current one is missing or expiring. FIRST
-    // acquisition takes over: a booting bot is the new owner of the session.
     if (!state.leaseToken || Date.now() >= state.leaseExpiresAt - 60000) {
       await authenticate({ takeover: !state.everAuthenticated, db });
     }
   } catch (error) {
     if (error.terminal) {
-      throttleLog(`[ SESSION SERVER ] ${error.code} — token rejected by the server. Keeping the verified local auth and continuing without remote sync.`, 300000);
+      throttleLog(`[ SESSION SERVER ] ${error.code} — token rejected by the server. Continuing without remote sync.`, 300000);
     } else if (error.code === 'session_in_use') {
-      throttleLog('[ SESSION SERVER ] Another deployment is actively syncing this session — remote sync disabled on this instance. Two bots on one token will also conflict in WhatsApp.', 3600000);
+      throttleLog('[ SESSION SERVER ] Another deployment is actively syncing this session — remote sync disabled on this instance.', 3600000);
     } else {
       throttleLog(`[ SESSION SERVER ] Background authenticate deferred (${error.message}).`, 120000);
     }
     return;
   }
 
-  // Phone guard: never push local auth for account A into session of account B.
-  // IMPORTANT: extract the phone from the JID BEFORE the colon — a JID like
-  // 2547xxxxxx7465:12@s.whatsapp.net includes the device suffix (:12), and a
-  // bare \D-strip over the whole JID glues those digits onto the phone number,
-  // corrupting the last-4 comparison (false mismatch on every device > 0).
   const sock = global.currentSock;
   if (sock?.user?.id && state.sessionMeta?.phoneLast4) {
     const pairedLast4 = String(sock.user.id).split(':')[0].split('@')[0].replace(/\D/g, '').slice(-4);
     if (pairedLast4 && pairedLast4 !== String(state.sessionMeta.phoneLast4)) {
-      throttleLog(`[ SESSION SERVER ] Token session belongs to account …${state.sessionMeta.phoneLast4} but this bot is connected as …${pairedLast4} — remote sync disabled. If you want to run the token's account, set JUNE_FORCE_SESSION_BOOTSTRAP=true and restart.`, 300000);
+      throttleLog(`[ SESSION SERVER ] Token session belongs to account …${state.sessionMeta.phoneLast4} but this bot is connected as …${pairedLast4} — remote sync disabled. Set JUNE_FORCE_SESSION_BOOTSTRAP=true and restart to override.`, 300000);
       return;
     }
   }
@@ -717,23 +605,14 @@ async function onBotConnected(db, { botVersion } = {}) {
   startHeartbeat(botVersion);
 }
 
-// ─── Revocation (destructive — genuine logout / explicit request ONLY) ──────
+// ─── Revocation ─────────────────────────────────────────────────────────────
 
-/**
- * Revoke + destroy the server-side session. Fire-and-forget by design.
- * index.js calls this ONLY when WhatsApp confirmed a genuine logout
- * (DisconnectReason.loggedOut / non-conflict 401 / 403 ban-out) or when the
- * owner explicitly requests it (.resetbot --session). Conflicts, timeouts,
- * server failures and plain restarts never reach this function.
- */
 async function revokeSession(reason = 'whatsapp-logout') {
   if (!isTokenModeActive() || state.revoked) return { revoked: false, skipped: 'already-revoked-or-not-active' };
   state.revoked = true;
   stopHeartbeat();
   if (state.pushTimer) { clearTimeout(state.pushTimer); state.pushTimer = null; }
   try {
-    // A lease may or may not exist at this point; the manage endpoint accepts
-    // the token itself, so revocation works even when the lease is gone.
     const token = getConfiguredToken();
     const serverUrl = getServerUrl();
     if (!token || !serverUrl) return { revoked: false, skipped: 'not-configured' };
@@ -741,15 +620,12 @@ async function revokeSession(reason = 'whatsapp-logout') {
     (global.log || console.log)('[ SESSION SERVER ] Server-side session revoked.', 'green');
     return { revoked: true };
   } catch (error) {
-    // Even if the server is unreachable, the local side has already cleared
-    // auth; the token stays valid server-side and the owner can revoke it at
-    // the manage page. Never crash the logout flow because of this.
-    (global.log || console.log)(`[ SESSION SERVER ] Could not reach the server for revocation (${error.message}). Revoke the token at the manage page if needed.`, 'yellow');
+    (global.log || console.log)(`[ SESSION SERVER ] Could not reach the server for revocation (${error.message}).`, 'yellow');
     return { revoked: false, error: error.code || 'revoke-failed' };
   }
 }
 
-// ─── Manage (getsession command) ────────────────────────────────────────────
+// ─── Manage ─────────────────────────────────────────────────────────────────
 
 async function checkTokenStatus() {
   const token = getConfiguredToken();
