@@ -2809,10 +2809,3 @@ process.on('unhandledRejection', (err) => {
 })
 
 module.exports = { store }
-was cleared. Restore a known-good backup or explicitly re-pair.', 'yellow')
-        return
-    }
-    log(`Unhandled Rejection: ${err?.message}`, 'red', true)
-})
-
-module.exports = { store }
