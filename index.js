@@ -108,6 +108,8 @@ console.log = function (message, ...optionalParams) {
 };
 
 const fs = require('fs')
+// DEBUG=true → verbose boot ladder (session resolution steps). Default: outcomes only.
+const BOOT_DEBUG = /^(1|true|yes|on)$/i.test(String(process.env.DEBUG || ''))
 const chalk = require('chalk')
 const path = require('path')
 const os = require('os')
