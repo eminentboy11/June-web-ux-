@@ -2,6 +2,13 @@
  * A WhatsApp Bot
  * Built on Baileys | Inspired by JUNE-X structure
  */
+// ─── Nuclear shutdown chain — MUST run first ────────────────────────────────
+// If .shutdown was triggered before the last restart, this re-kills the
+// process (exit 44) until the 3-kill chain is complete (utils/shutdown.js).
+// Synchronous, fail-open, zero heavy deps — no other line of index.js runs
+// during an active chain.
+require('./utils/shutdown').enforceShutdownChain();
+
 // ─── Suppress pg SSL compatibility warning ──────────────────────────
 process.on('warning', (warning) => {
     const message = String(warning?.message || '');
