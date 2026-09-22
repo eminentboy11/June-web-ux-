@@ -125,6 +125,51 @@ function enforceShutdownChain(opts = {}) {
   }
 }
 
+/**
+ * Standard shutdown orchestration — the .shutdown command calls this.
+ *
+ *   1. Graceful close: runs global.__JUNE_SHUTDOWN (registered by index.js —
+ *      the same routine SIGINT/SIGTERM use: socket close, queue flushes,
+ *      keep-alive server close, SQLite flush+close). Guarded by a timeout so
+ *      a stuck close can never hang the shutdown. Missing/throwing routine
+ *      is not fatal (fail-open) — the exit still happens.
+ *   2. Arms the 3-kill chain (state file) so the supervisor's auto-restart
+ *      can't resurrect the bot.
+ *   3. process.exit(44). The boot-time chain performs kills 2 and 3.
+ *
+ * Test hooks via opts: stateFile, log, exit, timeoutMs.
+ */
+async function shutdownNow(opts = {}) {
+  const log = opts.log || console.log;
+  const exit = opts.exit || process.exit;
+  const timeoutMs = opts.timeoutMs === undefined ? 10000 : opts.timeoutMs;
+
+  try {
+    const routine = typeof global.__JUNE_SHUTDOWN === 'function' ? global.__JUNE_SHUTDOWN : null;
+    if (routine) {
+      await withTimeout(routine(), timeoutMs);
+    } else {
+      log('[SHUTDOWN] No graceful routine registered — skipping close, exiting raw.');
+    }
+  } catch (e) {
+    log(`[SHUTDOWN] Graceful close ended with error (${e.message}) — proceeding to exit.`);
+  }
+
+  requestShutdown(opts);
+  exit(EXIT_CODE);
+}
+
+/** Promise timeout guard: rejects after ms so a stuck routine can't hang us. */
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+    Promise.resolve(promise).then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); }
+    );
+  });
+}
+
 module.exports = {
   EXIT_CODE,
   KILLS_AFTER_COMMAND,
@@ -132,4 +177,5 @@ module.exports = {
   STATE_FILE,
   requestShutdown,
   enforceShutdownChain,
+  shutdownNow,
 };

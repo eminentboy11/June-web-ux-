@@ -1,4 +1,5 @@
-// NUCLEAR SHUTDOWN TEST — verifies the 3-kill chain in utils/shutdown.js:
+// NUCLEAR SHUTDOWN TEST — verifies the 3-kill chain + standard shutdown in
+// utils/shutdown.js:
 //   1. requestShutdown writes { killsLeft: 2 } into the state file
 //   2. no state file → enforceShutdownChain returns (normal boot, no exit)
 //   3. state 2 → exit(44), state rewritten to 1
@@ -6,8 +7,14 @@
 //   5. after the chain → boot normally and stay alive
 //   6. full simulation: command + boots → exactly 3 kills total, then alive
 //   7. fail-open: corrupt JSON / spent count / stateFile-is-a-dir → no exit
-//   8. exit code is always 44
-// Uses a real temp dir via mkdtemp — never touches the bot's actual state file.
+//   8. default state file lives in database/ (loader SKIP_DIRS-safe)
+//   9. requestShutdown to a non-writable location → false, no throw
+//  10. shutdownNow runs the registered graceful routine (SIGTERM path),
+//      arms the chain, exits 44
+//  11. shutdownNow with no routine registered → fail-open, still exits
+//  12. shutdownNow with a throwing routine → fail-open, still exits
+//  13. shutdownNow with a hanging routine → timeout guard, still exits
+// Uses a real temp dir via mkdtemp — never touches the bot's actual state.
 
 const fs = require('fs');
 const os = require('os');
@@ -144,11 +151,69 @@ function writeState(killsLeft) {
 
 // 9. requestShutdown to a non-writable location → returns false, no throw
 {
-  const bad = path.join(tmp, 'shutdown-state.json', 'nested', 'x.json'); // parent is a file, later
   fs.writeFileSync(path.join(tmp, 'shutdown-state.json'), 'x', 'utf8');
+  const bad = path.join(tmp, 'shutdown-state.json', 'nested', 'x.json');
   const ok = shutdown.requestShutdown({ stateFile: bad, log: () => {} });
   assert.strictEqual(ok, false, 'non-writable state path must return false');
+  fs.unlinkSync(path.join(tmp, 'shutdown-state.json'));
 }
 
-fs.rmSync(tmp, { recursive: true, force: true });
-console.log('SHUTDOWN TEST: all assertions passed');
+// ── shutdownNow: standard graceful shutdown + chain arming ───────────────────
+
+const savedRoutine = global.__JUNE_SHUTDOWN;
+
+(async () => {
+  // 10. registered routine runs, then chain armed, then exit 44
+  {
+    let routineRan = false;
+    global.__JUNE_SHUTDOWN = async () => { routineRan = true; };
+    const codes = [];
+    await shutdown.shutdownNow({ stateFile, codes, log: () => {}, exit: (c) => codes.push(c) });
+    assert.strictEqual(routineRan, true, 'graceful routine must run');
+    assert.deepStrictEqual(codes, [44], 'must exit 44 after the graceful close');
+    const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    assert.strictEqual(st.killsLeft, 2, 'chain state must be armed after graceful close');
+  }
+
+  // 11. no routine registered → fail-open, still arms + exits
+  {
+    fs.unlinkSync(stateFile);
+    global.__JUNE_SHUTDOWN = undefined;
+    const codes = [];
+    await shutdown.shutdownNow({ stateFile, codes, log: () => {}, exit: (c) => codes.push(c) });
+    assert.deepStrictEqual(codes, [44], 'must exit even without a routine');
+    assert.strictEqual(fs.existsSync(stateFile), true, 'chain state must still be armed');
+  }
+
+  // 12. routine throws → fail-open, still arms + exits
+  {
+    fs.unlinkSync(stateFile);
+    global.__JUNE_SHUTDOWN = async () => { throw new Error('db close exploded'); };
+    const codes = [];
+    await shutdown.shutdownNow({ stateFile, codes, log: () => {}, exit: (c) => codes.push(c) });
+    assert.deepStrictEqual(codes, [44], 'must exit even if the routine throws');
+    assert.strictEqual(fs.existsSync(stateFile), true, 'chain state must still be armed');
+  }
+
+  // 13. routine hangs → timeout guard fires, still arms + exits (no hang)
+  {
+    fs.unlinkSync(stateFile);
+    global.__JUNE_SHUTDOWN = () => new Promise(() => {}); // never settles
+    const codes = [];
+    const t0 = Date.now();
+    await shutdown.shutdownNow({ stateFile, codes, log: () => {}, exit: (c) => codes.push(c), timeoutMs: 30 });
+    const elapsed = Date.now() - t0;
+    assert.ok(elapsed < 2000, `timeout guard must fire quickly (took ${elapsed}ms)`);
+    assert.deepStrictEqual(codes, [44], 'must exit even if the routine hangs');
+    assert.strictEqual(fs.existsSync(stateFile), true, 'chain state must still be armed');
+  }
+
+  global.__JUNE_SHUTDOWN = savedRoutine;
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+  console.log('SHUTDOWN TEST: all assertions passed');
+})().catch((e) => {
+  try { global.__JUNE_SHUTDOWN = savedRoutine; fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  console.error('SHUTDOWN TEST FAILED:', e);
+  process.exit(1);
+});

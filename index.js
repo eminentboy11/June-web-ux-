@@ -2711,6 +2711,17 @@ global.__JUNE_SHUTDOWN = async () => {
     return global._shutdownPromise
 }
 
+// ─── Standard stop signals ───────────────────────────────────────────────────
+// SIGTERM (panel "Stop") / SIGINT (Ctrl-C) → run the same graceful routine
+// above, then exit 0 (clean stop: no "crashed state", DB properly closed).
+for (const juneSignal of ['SIGINT', 'SIGTERM']) {
+    process.on(juneSignal, () => {
+        global.__JUNE_SHUTDOWN()
+            .then(() => process.exit(0))
+            .catch(() => process.exit(0));
+    });
+}
+
 keepAliveServer = startKeepAliveServer();
 
 // ─── Boot ──────────────────────────────────────────────────────────────────────
