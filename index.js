@@ -22,21 +22,14 @@ process.on('warning', (warning) => {
 require('dotenv').config();
 
 // ─── Uptime Synchronization ──────────────────────────────────────────────────
-// If JUNE_START_TIME is set (passed by the supervisor), monkey-patch 
-// process.uptime() to reflect the total system uptime instead of just 
-// the current process uptime.
+// JUNE_START_TIME (from supervisor) makes process.uptime() reflect total system uptime, not just this process.
 if (process.env.JUNE_START_TIME) {
     const startTime = parseInt(process.env.JUNE_START_TIME);
     process.uptime = () => (Date.now() - startTime) / 1000;
 }
 
-/*************************************
- * Raw Output Suppression
- *
- * Baileys/libsignal may print recoverable old-session decrypt noise directly
- * to stdout/stderr, bypassing the configured Pino logger. Filter only the
- * known Bad MAC / SessionEntry chatter at stream level; ordinary errors remain.
- *************************************/
+// ─── Raw Output Suppression ───────────────────────────────────────────────────
+// Filters recoverable Bad MAC / SessionEntry noise that libsignal prints directly to stdout/stderr, bypassing Pino.
 const originalWrite = process.stdout.write;
 const originalWriteError = process.stderr.write;
 const originalLog = console.log;
@@ -64,8 +57,7 @@ function shouldSuppressSignalNoise(chunk) {
     const isKnownNoise = SIGNAL_NOISE_PATTERNS.some((pattern) => lower.includes(pattern));
 
     if (isKnownNoise) {
-        // libsignal often prints the error header and stack trace as separate
-        // writes. Suppress only its immediately following frames as well.
+        // Also suppress the following stack frames libsignal prints as separate writes.
         suppressSignalStackUntil = Date.now() + 2500;
         return true;
     }
@@ -497,13 +489,11 @@ function readSessionIDFromEnv() {
 
 // Inject the directly-read value into process.env so the rest of the code sees it
 const _rawSessionID = readSessionIDFromEnv()
-// A non-empty local .env value overrides the platform value; an empty local
-// value leaves Heroku/Replit/Railway environment secrets intact.
+// A non-empty local .env value overrides the platform value; empty leaves platform secrets intact.
 if (_rawSessionID) process.env.SESSION_ID = _rawSessionID
 
 // ─── Direct .env JUNE_SESSION_TOKEN reader (Session Server token) ───────────
-// A june-ultra:~ token takes priority over a legacy SESSION_ID, routed through
-// process.env.SESSION_ID so existing fingerprint/revocation logic works unchanged.
+// A june-ultra:~ token takes priority over a legacy SESSION_ID, routed through process.env.SESSION_ID.
 function readJuneSessionTokenFromEnv() {
     try {
         if (!fs.existsSync(envPath)) return ''
@@ -542,7 +532,6 @@ function applyJuneSessionToken() {
 }
 applyJuneSessionToken()
 
-// ─── Session Error Counter Helpers ───────────────────────────────────────────
 // Retry state is stored in SQLite KV through database.js.
 
 function getPersistedSessionErrorState() {
@@ -765,8 +754,7 @@ function quarantineCurrentSessionForReplacement() {
 }
 
 // ─── Session Format Validator ─────────────────────────────────────────────────
-// Only accepted format: june-ultra:~<24 chars> or june-ultra:<id>:~<24 chars>.
-// Legacy raw-session prefixes were retired.
+// Only accepted format: june-ultra:~<24 chars> or june-ultra:<id>:~<24 chars>. Legacy prefixes were retired.
 
 const VALID_PREFIXES = ['june-ultra:~', 'june-ultra:', 'JUNE-X~', 'june-x~', 'JUNE~', 'june~']
 const LEGACY_SESSION_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~']
@@ -800,8 +788,7 @@ async function downloadSessionData() {
     await fs.promises.mkdir(sessionDir, { recursive: true })
     if (!fs.existsSync(credsPath) && global.SESSION_ID) {
         const sid = global.SESSION_ID
-        // Tokens restore through the Session Server flow only; the legacy
-        // raw-session download path was retired.
+        // Tokens restore through the Session Server flow only; the legacy raw-session download path was retired.
         if (sessionServer.isSessionServerToken(sid) || sessionServer.isJuneHandle(sid)) return
         log('[ SESSION ] The raw-session SESSION_ID download path was retired. '
           + `Pair at ${sessionServer.getServerUrl()}/pair and use a june-ultra:~ token.`, 'red', true)
@@ -943,8 +930,7 @@ async function sendWelcomeMessage(sock) {
 ┃✧ Repo: https://github.com/Vinpink2
 ┗━━━━━━━━━━━━━━━` )
 
-        // Fold warm-up info under the CONNECTED banner behind WhatsApp's
-        // "Read more" fold. Only a session-server restore warms up.
+        // Fold warm-up info under the CONNECTED banner. Only a session-server restore warms up.
         let outgoingText = welcomeText
         if (global._credsOnlyWarmStart) {
             global._credsOnlyWarmStart = false
@@ -973,16 +959,7 @@ while keys rebuild. Then: instant ⚡`
 }
 
 // ─── 408 Timeout Error Handler ────────────────────────────────────────────────
-// FIXED:
-//  1) No more double-wait — this function no longer sleeps itself; it just
-//     reports whether the retry cap was hit, and the caller (connection.update)
-//     performs a single wait. Previously this function slept 60s internally
-//     AND the caller slept again right after, ~65s+ per max-retry cycle.
-//  2) Refreshes the cached Baileys version once the retry cap is hit. A stale
-//     cached protocol version is a common real-world cause of a 408 that keeps
-//     recurring no matter how long you back off — refetching gives the
-//     reconnect a chance to actually succeed instead of retrying forever
-//     against a version WhatsApp may have stopped accepting cleanly.
+// Caller sleeps once (no double-wait). Refreshes the cached Baileys version once the retry cap is hit.
 async function handle408Error(statusCode) {
     if (statusCode !== DisconnectReason.connectionTimeout) return { is408: false }
 
@@ -1000,8 +977,7 @@ async function handle408Error(statusCode) {
         log(chalk.black.bgYellowBright(`[MAX TIMEOUTS] ${MAX_RETRIES} reached. Refreshing Baileys version and waiting 60s...`), 'white')
         clearPersistedSessionErrorState()
         global.errorRetryCount = 0
-        // Force a refetch on the next getBaileysVersion() call instead of
-        // reusing whatever was cached at process start.
+        // Force a refetch on the next getBaileysVersion() call.
         _baileysVersionCache = null
     }
 
@@ -1037,8 +1013,7 @@ function checkEnvStatus() {
     try {
         global._envWatcher = fs.watch(envPath, { persistent: false }, (eventType, filename) => {
             if (filename && eventType === 'change') {
-                // Use a time window, not a one-shot flag: fs.watch fires multiple
-                // events per write on Linux/Replit.
+                // Use a time window, not a one-shot flag — fs.watch fires multiple events per write on Linux/Replit.
                 if (global._suppressEnvWatcherUntil && Date.now() < global._suppressEnvWatcherUntil) {
                     return
                 }
@@ -1139,8 +1114,7 @@ const isSystemJid = (jid) => !jid ||
 // ─── Start Bot (Main Socket) ──────────────────────────────────────────────────
 
 // ─── Baileys Version Cache ────────────────────────────────────────────────────
-// Fetched once per process; reconnects reuse the cached value, unless it was
-// cleared by handle408Error() after the retry cap was reached (see above).
+// Fetched once; cleared by handle408Error() after the retry cap is hit.
 let _baileysVersionCache = null
 async function getBaileysVersion() {
     if (_baileysVersionCache) return _baileysVersionCache
@@ -1157,8 +1131,7 @@ async function getBaileysVersion() {
 
 async function startJunexBot() {
     if (global._shutdownRequested) return null
-    // Every boot path funnels here already running on local auth (SQLite or
-    // files). Per the one-shot vending architecture, the live lane never arms.
+    // Every boot path funnels here already running on local auth (SQLite or files); the live lane never arms.
     sessionServer.markOfflineMode()
     // A reconnect must not leave the previous socket alive.
     const previousSock = global.currentSock
@@ -1196,8 +1169,7 @@ async function startJunexBot() {
     if (authValidation.repairedLidMappings > 0) {
         const count = authValidation.repairedLidMappings
         log(`[ AUTH ] Repaired ${count} malformed auxiliary LID mapping ${count === 1 ? 'row' : 'rows'}; valid Signal auth preserved.`, 'yellow')
-        // Flush immediately so a crash before the debounce window can't
-        // restore the old bad LID row from backup on next boot.
+        // Flush immediately so a crash before the debounce window can't restore the old bad LID row from backup.
         try {
             await juneDatabase.createBackup?.()
         } catch (backupError) {
@@ -1230,8 +1202,7 @@ async function startJunexBot() {
         authState = { ...fileState, source: 'files', stats: getSQLiteAuthStats(juneDatabase._db) }
     }
     const { state, saveCreds } = authState
-    // Only a session-server restore triggers a warm start: keys regenerate
-    // after connecting, so first messages may be slow for a few minutes.
+    // Only a session-server restore triggers a warm start: keys regenerate after connecting, so first messages may be slow.
     global._credsOnlyWarmStart = authState.source === 'sqlite' && authState.stats.totalKeys === 0 && getAuthSource(juneDatabase._db) === 'session-server'
     const authLine = `[ AUTH ] ${authState.source === 'sqlite' ? 'SQLite' : 'file'} auth active (${authState.stats.totalKeys} key rows).`
     if (global._credsOnlyWarmStart) {
@@ -1301,11 +1272,7 @@ async function startJunexBot() {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' }))
         },
-        // Notification fix: WhatsApp suppresses phone notifications while
-        // another linked device is marked "online" — so a bot paired to a
-        // personal number was silencing the owner's phone. Default: connect
-        // offline-marked (notifications work). Opt back in with
-        // JUNE_STAY_ONLINE=true. Stealth mode also forces offline-marked.
+        // Default: connect offline-marked so phone notifications keep working. Opt in with JUNE_STAY_ONLINE=true.
         markOnlineOnConnect: (() => {
             if (String(process.env.JUNE_STAY_ONLINE || '').trim().toLowerCase() === 'true') return true;
             return false;
@@ -1314,8 +1281,7 @@ async function startJunexBot() {
         syncFullHistory: false,
         downloadHistory: false,
         msgRetryCounterCache,
-        // Give the socket more breathing room before a 408 fires — the
-        // default is tight for slower VPS/network conditions.
+        // Extra breathing room before a 408 fires on slower VPS/network conditions.
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 20000,
         getMessage: async (key) => {
@@ -1362,7 +1328,6 @@ async function startJunexBot() {
             const isConflict401 = statusCode === 401 && disconnectMessage.includes('conflict')
 
             // 403 means WhatsApp refused the account outright — almost always a ban.
-            // Give up after a few attempts and clear the session so another number can pair.
             const isForbidden = statusCode === 403
             if (isForbidden) {
                 global._forbiddenCount = (global._forbiddenCount || 0) + 1
@@ -1385,15 +1350,12 @@ async function startJunexBot() {
 
             if (loggedOut) {
                 log(chalk.white.bgRedBright(`💥 Disconnected [${statusCode}] — logged out. Clearing session...`), 'white')
-                // Remember only a hash so an expired SESSION_ID can't cause an
-                // endless relogin loop on the next startup.
+                // Remember only a hash so an expired SESSION_ID can't cause an endless relogin loop.
                 const configuredSessionId = process.env.SESSION_ID?.trim()
                 if (configuredSessionId && VALID_PREFIXES.some((prefix) => configuredSessionId.startsWith(prefix))) {
                     markSessionIdFingerprintRevoked(fingerprintSessionId(configuredSessionId))
                 }
-                // Only a genuine logout/ban revokes the server-side session.
-                // A mirror-only restore that never connected here is not proof
-                // the server session died, so keep it revocable instead.
+                // Only a genuine logout/ban revokes the server-side session; a mirror-only restore keeps it revocable.
                 if (getAuthSource(juneDatabase._db) === 'mirror-restore' && !isAuthConnectionVerified(juneDatabase._db)) {
                     log('[ SESSION SERVER ] Local auth was only a mirror copy; NOT revoking the server-side session — it will be re-fetched from the Session Server on the next start.', 'yellow')
                 } else {
@@ -1422,8 +1384,6 @@ async function startJunexBot() {
                 let showConnectionClosedLog = true
                 if (is408) {
                     // 408 timeout — exponential backoff with jitter, capped at 60s.
-                    // A single wait happens here now; handle408Error() no longer
-                    // sleeps internally, so this replaces the old double-wait.
                     if (maxReached) {
                         waitMs = 60000
                     } else {
@@ -1559,8 +1519,7 @@ async function startJunexBot() {
             const botNum = sock.user?.id?.split(':')[0] || 'unknown'
 
             // ── Owner identity ────────────────────────────────────────────
-            // The paired account is the owner by definition, so derive it here.
-            // Only claims when no owner exists; never overwrites a deliberate owner.
+            // The paired account is the owner by definition; only claims when no owner exists.
             try {
                 const pairedPn = String(sock.user?.id || '').split(':')[0].split('@')[0].replace(/\D/g, '')
                 juneDatabase.setRuntimeOwnerName(sock.user?.name || sock.user?.verifiedName || '')
@@ -1580,8 +1539,7 @@ async function startJunexBot() {
                 log(`[ OWNER ] Could not resolve owner from the session: ${ownerErr.message}`, 'yellow')
             }
 
-            // If the real number disagrees with what keyed the remote store,
-            // every mirrored row goes to the wrong partition.
+            // If the real number disagrees with what keyed the remote store, mirrored rows go to the wrong partition.
             try {
                 const remoteOn = !!(process.env.DATABASE_URL || process.env.MONGODB_URI || process.env.MONGO_URL)
                 const src = global.__BOT_ID_SOURCE__
@@ -1800,8 +1758,7 @@ if (groupInvites.length > 0) {
 
             const rawPart  = msg.key.participant
 
-            // participant may be a @lid JID; normalizeJidWithLid would fabricate a
-            // non-existent phone JID, so keep the raw form for receipts/reacts.
+            // participant may be a @lid JID; normalizeJidWithLid would fabricate a non-existent phone JID.
             const receiptPart = rawPart || msg.key.participantAlt || null
             const normPart = rawPart ? normalizeJidWithLid(rawPart) : (msg.key.participantAlt || null)
 
@@ -1835,8 +1792,7 @@ if (groupInvites.length > 0) {
             try {
                 const s = loadSettings()
 
-                // Auto View — readMessages alone dispatches the right receipt type
-                // for status@broadcast keys; a duplicate sendReceipt call would race it.
+                // Auto View — readMessages alone dispatches the right receipt type for status@broadcast keys.
                 if (s.enabled && receiptPart) {
                     const readKey = {
                         remoteJid: 'status@broadcast',
@@ -2021,8 +1977,7 @@ if (groupInvites.length > 0) {
 
     // ── Background Cleanup Intervals ───────────────────────────────────────────
 
-    // Auth key files are live Signal state — never deleted by age.
-    // Only completed migration quarantines are removed after retention.
+    // Auth key files are live Signal state — never deleted by age; only completed migration quarantines expire.
     global._activeIntervals.push(setInterval(() => {
         cleanupExpiredSessionQuarantines('scheduled cleanup')
     }, 6 * 60 * 60 * 1000))
@@ -2034,9 +1989,7 @@ if (groupInvites.length > 0) {
 }
 
 // ─── Session Server Token Flow (additive) ─────────────────────────────────────
-// Activates only when a june-ultra:~ token is configured. Same semantics as
-// the legacy SESSION_ID: a provisioning/recovery input, never overriding a
-// verified local SQLite auth state unless JUNE_FORCE_SESSION_BOOTSTRAP=true.
+// Activates only when a june-ultra:~ token is configured; never overrides verified local SQLite auth unless JUNE_FORCE_SESSION_BOOTSTRAP=true.
 
 async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthReady, sameToken, forceBootstrap, usableFileSession }) {
     if (!sessionServer.isSessionServerToken(token) && !sessionServer.isJuneHandle(token)) {
@@ -2049,8 +2002,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
         await delay(10000)
         process.exit(1)
     }
-    // Fast path — verified local auth exists: connect immediately from
-    // SQLite. No fetch, no background sync; the token is a recovery backup.
+    // Fast path — verified local auth exists: connect from SQLite, token kept only as recovery backup.
     if (sqliteAuthReady && !forceBootstrap && isLocallyVerifiedAuth(juneDatabase._db)) {
         log('[ SESSION SERVER ] Verified local auth — connecting from SQLite; token kept only as recovery backup.', 'green')
         // A missing stored fingerprint (fresh/mirror-restored store) is not a token change.
@@ -2068,8 +2020,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
 
     log('[ SESSION SERVER ] Token configured (redacted) — fetching the authoritative session…', 'cyan')
 
-    // Full bootstrap — no usable local auth (or a forced replace): fetch the
-    // encrypted session from the server and restore it into SQLite.
+    // Full bootstrap — no usable local auth (or a forced replace): fetch the encrypted session and restore it into SQLite.
     if (forceBootstrap && sessionExists()) {
         log('[ SESSION SERVER ] Forced bootstrap — preserving prior file auth first.', 'yellow')
         try {
@@ -2150,10 +2101,7 @@ async function connectViaSessionServerToken({ token, fingerprint, sqliteAuthRead
 
 async function main() {
     await juneDatabase.ready
-    // Remote rows are partitioned by bot_id, since the product name alone is
-    // shared by every deployment. PN identifies the deployment; when nothing
-    // is set, the session token's SHA-256 scopes the remote mirrors instead,
-    // so two token deployments never collide without needing PN=.
+    // Remote rows are partitioned by bot_id: PN identifies the deployment, or the token's hash when unset.
     const explicitBotIdSource = process.env.PN || process.env.JUNE_PN ||
         process.env.JUNE_BOT_ID || process.env.BOT_ID || process.env.OWNER_NUMBER
     const tokenBotId = explicitBotIdSource ? null
@@ -2198,8 +2146,7 @@ async function main() {
         }
     }
 
-    // Pull first, then push — anything changed while the remote was
-    // unreachable gets backfilled once it's back. All mirror writes are upserts.
+    // Pull first, then push — anything changed while the remote was unreachable gets backfilled. All mirror writes are upserts.
     if (pgStatus.available || mongoStatus.available) {
         try {
             const pushed = juneDatabase.backfillRemote()
@@ -2211,13 +2158,11 @@ async function main() {
         }
     }
 
-    // Disaster recovery: if local auth is missing entirely, restore the
-    // direct remote auth state before normal startup decisions run.
+    // Disaster recovery: if local auth is missing entirely, restore the direct remote auth state first.
     if (!hasVerifiedSQLiteAuth(juneDatabase._db) && !hasUsableFileSession()) {
         const authRecovery = await juneDatabase.restoreRemoteAuthState()
         if (authRecovery.restored) {
-            // Mirror-restored keys are unproven — must never shortcut the
-            // Session Server bootstrap or auto-revoke the server session.
+            // Mirror-restored keys are unproven — must never shortcut Session Server bootstrap or auto-revoke.
             setAuthSource(juneDatabase._db, 'mirror-restore')
             setAuthConnectionVerified(juneDatabase._db, false)
             log(`[ AUTH MIRROR ] Restored ${authRecovery.source} auth state (${authRecovery.keyRows} key rows).`)
@@ -2235,8 +2180,7 @@ async function main() {
     if (!handler) handler = require('./handler')
     diskManager.start()
 
-    // Re-read SESSION_ID from .env each time main() runs, so recursive calls
-    // after logout always see the latest value.
+    // Re-read SESSION_ID from .env each time main() runs, so recursive calls after logout see the latest value.
     const _freshSessionID = readSessionIDFromEnv()
     if (_freshSessionID) process.env.SESSION_ID = _freshSessionID
     applyJuneSessionToken()
@@ -2248,8 +2192,7 @@ async function main() {
 
     cleanupExpiredSessionQuarantines('startup')
 
-    // SESSION_ID is a provisioning/recovery source only — never an
-    // unconditional override for a verified SQLite auth state.
+    // SESSION_ID is a provisioning/recovery source only — never an unconditional override for verified SQLite auth.
     const envSessionID = process.env.SESSION_ID?.trim() || ''
     const hasValidEnvSessionID = Boolean(
         envSessionID && VALID_PREFIXES.some((prefix) => envSessionID.startsWith(prefix))
@@ -2299,9 +2242,7 @@ async function main() {
         return
     }
 
-    // A fingerprint mismatch is a warning, not permission to destroy a usable
-    // file session; auto-exported creds can legitimately change the backup
-    // SESSION_ID over time. JUNE_FORCE_SESSION_BOOTSTRAP=true forces a replace.
+    // A fingerprint mismatch is a warning, not permission to destroy a usable file session; JUNE_FORCE_SESSION_BOOTSTRAP=true forces a replace.
     if (sessionServer.isSessionServerToken(envSessionID) || sessionServer.isJuneHandle(envSessionID)) {
         await connectViaSessionServerToken({
             token: envSessionID,
