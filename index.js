@@ -124,6 +124,7 @@ const { rmSync } = require('fs')
 const moment = require('moment-timezone')
 const lolcatjs = require('lolcatjs')
 const { normalizeJidWithLid } = require('./utils/jidHelper')
+const { runFileSweep, startScheduledCleanups, stopScheduledCleanups } = require('./utils/cleanup')
 const { applyFont } = require('./utils/fontConverter')
 const {
     atomicWriteFile,
@@ -592,53 +593,23 @@ function clearSessionFiles() {
     }
 }
 
-const ROOT_TEMP_FILE_PATTERN = /^(?:tmp|temp|download|converted|upload|media|sticker)[._-]/i
-const ROOT_TEMP_EXTENSIONS = new Set(['.gif', '.png', '.mp3', '.mp4', '.opus', '.jpg', '.jpeg', '.webp', '.webm', '.zip'])
-const ROOT_TEMP_MAX_AGE_MS = 60 * 60 * 1000
-
-function cleanupJunkFiles(sock) {
-    const dir = path.join(__dirname)
-    fs.readdir(dir, { withFileTypes: true }, (err, entries) => {
-        if (err) return log(`[Junk Cleanup] Error reading dir: ${err}`, 'red', true)
-        const cutoff = Date.now() - ROOT_TEMP_MAX_AGE_MS
-        const junk = entries.filter((entry) => {
-            if (!entry.isFile()) return false
-            const ext = path.extname(entry.name).toLowerCase()
-            if (!ROOT_TEMP_EXTENSIONS.has(ext) || !ROOT_TEMP_FILE_PATTERN.test(entry.name)) return false
-            try {
-                return fs.statSync(path.join(dir, entry.name)).mtimeMs < cutoff
-            } catch (_) {
-                return false
-            }
-        }).map((entry) => entry.name)
-
-        if (junk.length === 0) return
-        if (sock?.user?.id) {
-            sock.sendMessage(sock.user.id.split(':')[0] + '@s.whatsapp.net', {
-                text: `🧹 Removed ${junk.length} expired temporary file(s).`
-            }).catch(() => {})
-        }
-        for (const file of junk) {
-            try { fs.unlinkSync(path.join(dir, file)) } catch (_) {}
-        }
-        log(`[Junk Cleanup] Removed ${junk.length} expired temporary root file(s).`, 'yellow')
-    })
-}
+// Filesystem sweeps (root junk + temp/) live in utils/cleanup.js — the janitor.
+// runFileSweep() is the entry point used by the 10-min schedule, the low-disk
+// emergency path and the ENOSPC handler.
 
 let diskManager = null
-function runEmergencyCleanup({ aggressive = false } = {}) {
+function runEmergencyCleanup() {
     // Anti-delete records are SQLite-backed and bounded by database maintenance.
     try { juneDatabase.pruneAntideleteData?.() } catch (_) {}
-    try { cleanupJunkFiles(null) } catch (_) {}
+    try { runFileSweep(null) } catch (_) {}
     try { cleanupExpiredSessionQuarantines('low-disk cleanup') } catch (_) {}
-    try { handler?.cleanupRuntimeCaches?.(aggressive) } catch (_) {}
     try { Promise.resolve(juneDatabase.flushBackup?.()).catch(() => {}) } catch (_) {}
 }
 
 diskManager = createDiskManager({
     root: __dirname,
     cleanup: ({ aggressive }) => {
-        runEmergencyCleanup({ aggressive })
+        runEmergencyCleanup()
         log(`[ DISK ] Low storage detected; ${aggressive ? 'emergency ' : ''}cleanup completed.`, 'yellow')
     },
 })
@@ -1982,8 +1953,8 @@ if (groupInvites.length > 0) {
         cleanupExpiredSessionQuarantines('scheduled cleanup')
     }, 6 * 60 * 60 * 1000))
 
-    // Junk file cleanup (every 10 minutes)
-    global._activeIntervals.push(setInterval(() => cleanupJunkFiles(sock), 10 * 60 * 1000))
+    // File cleanup — janitor: root junk + temp/ sweep, every 10 minutes
+    startScheduledCleanups(sock)
 
     return sock
 }
@@ -2706,6 +2677,7 @@ global.__JUNE_SHUTDOWN = async () => {
         global._activeIntervals = []
         try { global._envWatcher?.close?.() } catch (_) {}
         try { diskManager?.stop?.() } catch (_) {}
+        try { stopScheduledCleanups() } catch (_) {}
         // Anti-delete and group stats keep small in-memory debounce queues; flush both before closing SQLite.
         try { global.__JUNE_FLUSH_ANTIDELETE?.() } catch (_) {}
         try { global.__JUNE_FLUSH_GROUP_STATS?.() } catch (_) {}
@@ -2732,7 +2704,7 @@ main().catch(err => log(`Fatal error: ${err.message}`, 'red', true))
 process.on('uncaughtException', (err) => {
     if (err.code === 'ENOSPC' || err.errno === -28) {
         log('⚠️ ENOSPC: No space left on device. Attempting cleanup...', 'yellow')
-        cleanupJunkFiles(null)
+        runFileSweep(null)
         return
     }
     log(`Uncaught Exception: ${err.message}`, 'red', true)
