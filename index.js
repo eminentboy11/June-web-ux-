@@ -125,6 +125,7 @@ const moment = require('moment-timezone')
 const lolcatjs = require('lolcatjs')
 const { normalizeJidWithLid } = require('./utils/jidHelper')
 const { runFileSweep, startScheduledCleanups, stopScheduledCleanups } = require('./utils/cleanup')
+const { createMessageStore } = require('./utils/messageStore')
 const { applyFont } = require('./utils/fontConverter')
 const {
     atomicWriteFile,
@@ -999,32 +1000,41 @@ function checkEnvStatus() {
 
 // ─── In-memory Message Store ──────────────────────────────────────────────────
 
-const store = {
-    messages: new Map(),
-    maxPerChat: 20,
-    bind(ev) {
-        ev.on('messages.upsert', ({ messages }) => {
-            for (const msg of messages) {
-                if (!msg.key?.id) continue
-                const jid = msg.key.remoteJid
-                if (!store.messages.has(jid)) store.messages.set(jid, new Map())
-                const chat = store.messages.get(jid)
-                chat.set(msg.key.id, msg)
-                if (chat.size > store.maxPerChat) {
-                    chat.delete(chat.keys().next().value)
-                }
-            }
-        })
-    },
-    async loadMessage(jid, id) {
-        return store.messages.get(jid)?.get(id) || null
-    }
-}
+// ─── In-Memory Message Store (LRU-bounded) ───────────────────────────────────
+// Per-chat capped at 20, total chats capped (JUNE_MAX_STORED_CHATS, default 300).
+// An unbounded chat list made this Map grow for the process's whole life,
+// which is what pushed the Heroku dyno into R14 (memory quota).
+const STORE_MAX_CHATS = Math.max(50, parseInt(process.env.JUNE_MAX_STORED_CHATS, 10) || 300)
+const store = createMessageStore({ maxPerChat: 20, maxChats: STORE_MAX_CHATS })
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
 const processedMessages = new Set()
 setInterval(() => processedMessages.clear(), 5 * 60 * 1000)
+
+// ─── Memory Watchdog (silent — console log only, no DMs) ─────────────────────
+// Heroku hobby dynos die at 512MB (R14). When RSS gets close, drop the oldest
+// stored chats and try a GC so the bot trims itself before it gets killed.
+const MEMORY_WATCHDOG_INTERVAL_MS = 5 * 60 * 1000
+const MEMORY_WARN_RSS_MB = Math.max(128, parseInt(process.env.JUNE_RSS_WARN_MB, 10) || 440)
+
+function memoryWatchdog() {
+    try {
+        const rssMB = process.memoryUsage().rss / (1024 * 1024)
+        if (rssMB < MEMORY_WARN_RSS_MB) return
+        const before = store.messages.size
+        store.evictOldestChats(Math.floor(store.maxChats / 2))
+        const freed = before - store.messages.size
+        if (typeof global.gc === 'function') {
+            try { global.gc() } catch (_) {}
+        }
+        const afterMB = process.memoryUsage().rss / (1024 * 1024)
+        log(`[MEM] RSS ${Math.round(rssMB)}MB ≥ ${MEMORY_WARN_RSS_MB}MB — evicted ${freed} oldest chat(s) from store (${store.messages.size} remain), RSS now ${Math.round(afterMB)}MB.`, 'yellow')
+    } catch (error) {
+        log(`[MEM] Watchdog error: ${error.message}`, 'red', true)
+    }
+}
+setInterval(() => memoryWatchdog(), MEMORY_WATCHDOG_INTERVAL_MS)
 
 
 
@@ -1819,9 +1829,8 @@ if (groupInvites.length > 0) {
 
             processedMessages.add(msg.key.id)
 
-            // Store message
-            if (!store.messages.has(from)) store.messages.set(from, new Map())
-            store.messages.get(from).set(msg.key.id, msg)
+            // Store message (LRU-bounded — utils/messageStore.js)
+            store.storeMessage(from, msg)
 
             // Unwrap ephemeral/view-once wrappers
             if (msg.message?.ephemeralMessage) {
