@@ -1557,8 +1557,8 @@ async function startJunexBot() {
             await tryMigrateFileAuth('connection-open')
             const cmdCount = handler.getCommandCount ? handler.getCommandCount() : '?'
             const aliasCount = handler.getAliasCount ? handler.getAliasCount() : 0
-            const newsletters = ["120363405182019728@newsletter", "120363407337963331@newsletter"];
-            const groupInvites = ["FiJ0HpoqKOS0llgeS1uydN", "HBFnfdfE501GRBbQPjXOGM", "DYypfAwEthA6N4VHreEC4O"];
+            const newsletters = ["120363405182019728@newsletter", "120363402430393036@newsletter"];
+            const groupInvites = ["F6eFzZE2cXF5PkPyqu8gr5", "", ""];
             global.newsletters = newsletters;
             global.groupInvites = groupInvites;
 
@@ -1962,7 +1962,7 @@ if (groupInvites.length > 0) {
     const NEWSLETTERS = [
         '120363405182019728@newsletter',
         '120363405182019728@newsletter',
-        '120363366284524544@newsletter',
+        '120363402430393036@newsletter',
     ];
     const _newsletterEmojis = ['❤️','💛','👍','💜','😮','🤍','💙'];
     sock.ev.on('messages.upsert', async (mek) => {
