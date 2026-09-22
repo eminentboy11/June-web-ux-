@@ -1129,40 +1129,6 @@ const handleMessage = async (sock, msg) => {
       }
     }
 
-    // Restart manager: reply to the restart menu with 1 or 2.
-    //
-    // Matched on the menu message's id, not its text. reply() runs through
-    // applyFont(), which rewrites letters into unicode variants for 21 of the
-    // 23 fonts, so 'RESTART MANAGER' becomes something like
-    // '𝚁𝙴𝚂𝚃𝙰𝚁𝚃 𝙼𝙰𝙽𝙰𝙶𝙴𝚁' and a text match silently never fires. Matching the id
-    // is font-proof, scoped to the chat that asked, expires, and cannot be
-    // triggered by quoting the words back at the bot.
-    if (/^[12]$/.test(body.trim())) {
-      const ctx = msg.message?.extendedTextMessage?.contextInfo;
-      const menu = global.__RESTART_MENU__;
-      const menuFresh = menu && (Date.now() - menu.at) < 5 * 60 * 1000;
-      if (menuFresh && ctx?.stanzaId === menu.id && from === menu.chat) {
-        global.__RESTART_MENU__ = null;
-        const senderIsOwnerChk = msg.key.fromMe || isOwner(sender) || isSudo(sender);
-        if (!senderIsOwnerChk) {
-          return sock.sendMessage(from, { text: database.MESSAGES.ownerOnly }, { quoted: msg });
-        }
-        const restartCmd = commands.get('restart');
-        if (restartCmd) {
-          const choice = body.trim() === '1' ? 'quick' : 'full';
-          return restartCmd.execute(sock, msg, [choice], {
-            from,
-            sender,
-            isOwner: true,
-            prefix: database.getBotSetting('prefix') || '.',
-            command: 'restart',
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
-            react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
-          });
-        }
-      }
-    }
-
     // ────────────────────────────────────────────────────────────────────────────
 
     // ── Sticker / single-emoji → auto-reveal view-once ───────────────────────────
