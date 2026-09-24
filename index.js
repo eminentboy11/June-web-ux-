@@ -36,8 +36,16 @@ require('dotenv').config();
 // confusing "ffmpeg: not found" (e.g. Heroku without the ffmpeg buildpack).
 const FFMPEG_PATH = require('./utils/ffmpegPath');
 require('fluent-ffmpeg').setFfmpegPath(FFMPEG_PATH);
+const { ensureFfmpegRuntime } = require('./utils/ffmpegRuntime');
+const fsSync = require('fs');
+if (FFMPEG_PATH === 'ffmpeg' || !fsSync.existsSync(FFMPEG_PATH)) {
+    // No usable binary at boot — self-provision in the background (never
+    // blocks startup). Conversions meanwhile use whatever fallback the
+    // resolver found; the runtime binary is picked up from the next boot.
+    ensureFfmpegRuntime();
+}
 if (FFMPEG_PATH === 'ffmpeg') {
-    console.warn('[ BOOT ] WARNING: no ffmpeg binary found (PATH, /usr/bin, /usr/local/bin, ffmpeg-static). Sticker/media conversion will fail until ffmpeg is installed (Heroku: add the ffmpeg buildpack).');
+    console.warn('[ BOOT ] WARNING: no ffmpeg binary found (PATH, /usr/bin, /usr/local/bin, data/ffmpeg, ffmpeg-static). Sticker/media conversion may fail until the runtime binary finishes downloading.');
 } else {
     console.log(`[ BOOT ] ffmpeg resolved: ${FFMPEG_PATH}`);
 }

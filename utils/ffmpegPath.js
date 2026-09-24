@@ -5,6 +5,7 @@
  */
 const { execSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 const CANDIDATES = [
     // 1. Whatever `which ffmpeg` finds in PATH (works on Replit, most Linux)
@@ -12,9 +13,13 @@ const CANDIDATES = [
     // 2. Common system locations
     '/usr/bin/ffmpeg',
     '/usr/local/bin/ffmpeg',
-    // 3. ffmpeg-static package path (only if the binary actually exists)
+    // 3. Runtime-provisioned binary (utils/ffmpegRuntime.js downloads it from
+    //    iqbal-rashed/ytdlp-nodejs on hosts without a system ffmpeg). Lives in
+    //    data/ so the loader's mirror-clean never wipes it.
+    path.join(__dirname, '..', 'data', 'ffmpeg', 'ffmpeg'),
+    // 4. ffmpeg-static package path (only if the binary actually exists)
     (() => { try { const p = require('ffmpeg-static'); return (p && fs.existsSync(p)) ? p : null; } catch { return null; } })(),
-    // 4. Bare command name — last resort (relies on PATH at spawn time)
+    // 5. Bare command name — last resort (relies on PATH at spawn time)
     'ffmpeg',
 ];
 
