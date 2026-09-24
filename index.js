@@ -185,6 +185,7 @@ const {
     invalidateSQLiteAuth,
 } = require('./utils/juneDb/auth-state')
 const sessionServer = require('./utils/juneDb/sessionServer')
+const { wrapSockSanitized } = require('./utils/sanitizeUserText')
 
 process.env.PUPPETEER_SKIP_DOWNLOAD = 'true'
 process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = 'true'

@@ -18,7 +18,14 @@ const { getTempDir, deleteTempFile } = require('./tempManager');
 function run(cmd) {
     return new Promise((resolve, reject) => {
         exec(cmd, { maxBuffer: 100 * 1024 * 1024 }, (err, _stdout, stderr) => {
-            if (err) { err.ffmpegStderr = stderr || ''; return reject(err); }
+            if (err) {
+                // Full details (the whole command line, which embeds our
+                // deployment paths) go to the server console ONLY — user-
+                // facing errors get a generic message instead.
+                console.error('[ffmpeg] conversion failed:', err.message);
+                if (stderr) console.error('[ffmpeg] stderr tail:', String(stderr).slice(-2000));
+                reject(new Error('ffmpeg conversion failed'));
+            }
             resolve();
         });
     });
