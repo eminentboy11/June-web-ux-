@@ -28,6 +28,20 @@ process.on('warning', (warning) => {
 // --- Environment Setup ---
 require('dotenv').config();
 
+// ─── ffmpeg wiring ───────────────────────────────────────────────────────────
+// fluent-ffmpeg (utils/sticker.js, commands/owner/groupstatus.js) invokes a
+// bare "ffmpeg" by default. Point it at the same resolved binary every other
+// call site uses, and warn loudly at boot if no binary was found at all —
+// otherwise sticker/media conversion fails deep inside a command with a
+// confusing "ffmpeg: not found" (e.g. Heroku without the ffmpeg buildpack).
+const FFMPEG_PATH = require('./utils/ffmpegPath');
+require('fluent-ffmpeg').setFfmpegPath(FFMPEG_PATH);
+if (FFMPEG_PATH === 'ffmpeg') {
+    console.warn('[ BOOT ] WARNING: no ffmpeg binary found (PATH, /usr/bin, /usr/local/bin, ffmpeg-static). Sticker/media conversion will fail until ffmpeg is installed (Heroku: add the ffmpeg buildpack).');
+} else {
+    console.log(`[ BOOT ] ffmpeg resolved: ${FFMPEG_PATH}`);
+}
+
 // ─── Uptime Synchronization ──────────────────────────────────────────────────
 // JUNE_START_TIME (from supervisor) makes process.uptime() reflect total system uptime, not just this process.
 if (process.env.JUNE_START_TIME) {

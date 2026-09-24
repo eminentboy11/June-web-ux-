@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { exec } = require('child_process');
+const ffmpegPath = require('../../utils/ffmpegPath');
 const axios = require('axios');
 const webp = require('node-webpmux');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
@@ -54,7 +55,7 @@ module.exports = {
       fs.writeFileSync(tempInput, response.data);
 
       // Convert GIF to animated WebP sticker
-      const ffmpegCommand = `ffmpeg -i "${tempInput}" -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 80 -compression_level 6 "${tempOutput}"`;
+      const ffmpegCommand = `"${ffmpegPath}" -i "${tempInput}" -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 80 -compression_level 6 "${tempOutput}"`;
 
       await new Promise((resolve, reject) => {
         exec(ffmpegCommand, (error, stdout, stderr) => {
