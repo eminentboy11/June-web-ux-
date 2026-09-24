@@ -344,11 +344,11 @@ const APIs = {
 
   getEliteProTechVideoByUrl: async (youtubeUrl) => {
     const res = await tryRequest(() =>
-      axios.get(`https://apissupreme.vercel.app/media/ytmp4?apikey=supreme&url=${encodeURIComponent(youtubeUrl)}&format=mp4`, DOWNLOAD_HEADERS)
+      axios.get(`https://apiskeith2-production-3679.up.railway.app/download/video?url=${encodeURIComponent(youtubeUrl)}&format=mp4`, DOWNLOAD_HEADERS)
     );
-    if (res?.data?.status && res?.data?.downloadUrl) {
+    if (res?.data?.status && res?.data?.result) {
       return {
-        download: res.data.downloadUrl,
+        download: res.data.result,
         title: res.data.title
       };
     }
