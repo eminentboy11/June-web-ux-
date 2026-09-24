@@ -177,7 +177,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Keith AI (custom model) a question',
         usage: '.ai <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/keithai',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/keithai',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .ai How does the internet work?');
@@ -200,7 +200,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask GPT AI a question',
         usage: '.chatgpt <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/gpt',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/gpt',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .chatgpt What is JavaScript?');
@@ -223,7 +223,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask GPT-4 a question',
         usage: '.gpt4o <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/chatgpt4',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/chatgpt4',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .gpt4o How does a black hole form?');
@@ -246,7 +246,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Claude AI a question',
         usage: '.claude <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/claudeai',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/claudeai',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .claude Explain recursion');
@@ -269,7 +269,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Google Gemini a question',
         usage: '.gemini <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/gemini',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/gemini',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .gemini Explain quantum physics');
@@ -292,7 +292,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Mistral AI a question',
         usage: '.mistral <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/mistral',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/mistral',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .mistral What is machine learning?');
@@ -315,7 +315,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Microsoft Copilot a question',
         usage: '.copilot <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/copilot',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/copilot',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .copilot How are you?');
@@ -338,7 +338,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Meta AI a question',
         usage: '.metaai <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/metai',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/metai',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .metaai Hello, how are you?');
@@ -361,7 +361,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Llama AI a question',
         usage: '.llama <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/ilama',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/ilama',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .llama What is deep learning?');
@@ -384,7 +384,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Blackbox AI a question',
         usage: '.blackbox <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/blackbox',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/blackbox',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .blackbox Explain recursion');
@@ -407,7 +407,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Google Bard a question',
         usage: '.bard <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/bard',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/bard',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .bard Explain black holes');
@@ -430,7 +430,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Perplexity AI a question',
         usage: '.perplexity <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/perplexity',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/perplexity',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .perplexity What is quantum computing?');
@@ -453,7 +453,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask Venice AI a question',
         usage: '.venice <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/venice',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/venice',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .venice What is life?');
@@ -476,7 +476,7 @@ module.exports = [
         category: 'ai',
         description: 'Ask O3 AI a question',
         usage: '.o3 <question>',
-        apiUrl: 'https://apiskeith2-production-3020.up.railway.app/ai/o3',
+        apiUrl: 'https://apiskeith2-production-3679.up.railway.app/ai/o3',
         async execute(sock, msg, args, extra) {
             const query = args.join(' ').trim();
             if (!query) return extra.reply('❌ Please provide a question\n\nExample: .o3 What is consciousness?');
