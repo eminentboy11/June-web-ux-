@@ -37,7 +37,7 @@ async function toWebp(inputPath, outputPath, isAnimated) {
           ];
 
     await new Promise((resolve, reject) => {
-        const ff = spawn(ffmpegPath, args);
+        const ff = spawn(ffmpegPath(), args);
         const errs = [];
         ff.stderr.on('data', d => errs.push(d));
         ff.on('error', reject);

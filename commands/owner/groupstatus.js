@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { PassThrough } = require('stream');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('../../utils/ffmpegPath');
-ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfmpegPath(ffmpegPath()); // fluent-ffmpeg wants a fixed string
 
 const PURPLE_COLOR = '#9C27B0';
 

@@ -106,7 +106,7 @@ async function webp2png(webpBuffer) {
     const outPath = tmp('_out.png', ts);
     try {
         fs.writeFileSync(inPath, webpBuffer);
-        await run(`"${ffmpegPath}" -y -i "${inPath}" -frames:v 1 "${outPath}"`);
+        await run(`"${ffmpegPath()}" -y -i "${inPath}" -frames:v 1 "${outPath}"`);
         if (!fs.existsSync(outPath)) throw new Error('PNG output not produced');
         return fs.readFileSync(outPath);
     } catch (err) {
@@ -159,7 +159,7 @@ async function webp2mp4(webpBuffer) {
         }
 
         await run(
-            `"${ffmpegPath}" -y ` +
+            `"${ffmpegPath()}" -y ` +
             `-f rawvideo -pix_fmt rgba -video_size ${w}x${h} -framerate ${fps} -i "${rawPath}" ` +
             `-vf "scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,` +
             `pad=512:512:(ow-iw)/2:(oh-ih)/2:color=black" ` +
@@ -205,7 +205,7 @@ async function webp2gif(webpBuffer) {
 
         // Generate palette
         await run(
-            `"${ffmpegPath}" -y ` +
+            `"${ffmpegPath()}" -y ` +
             `-f rawvideo -pix_fmt rgba -video_size ${w}x${h} -framerate ${fps} -i "${rawPath}" ` +
             `-vf "scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,` +
             `pad=512:512:(ow-iw)/2:(oh-ih)/2,palettegen" "${palPath}"`
@@ -213,7 +213,7 @@ async function webp2gif(webpBuffer) {
 
         // Encode GIF
         await run(
-            `"${ffmpegPath}" -y ` +
+            `"${ffmpegPath()}" -y ` +
             `-f rawvideo -pix_fmt rgba -video_size ${w}x${h} -framerate ${fps} -i "${rawPath}" ` +
             `-i "${palPath}" ` +
             `-filter_complex "scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,` +

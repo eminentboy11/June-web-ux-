@@ -14,7 +14,7 @@ const webpmux = require('node-webpmux');
 const { fileTypeFromBuffer } = require('file-type');
 const database = require('../database');
 
-ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfmpegPath(ffmpegPath()); // fluent-ffmpeg wants a fixed string
 
 const tmpFile = (ext) =>
   path.join(os.tmpdir(), `stk_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`);

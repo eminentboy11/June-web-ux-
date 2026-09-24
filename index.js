@@ -34,20 +34,23 @@ require('dotenv').config();
 // call site uses, and warn loudly at boot if no binary was found at all —
 // otherwise sticker/media conversion fails deep inside a command with a
 // confusing "ffmpeg: not found" (e.g. Heroku without the ffmpeg buildpack).
+// ffmpegPath is a FUNCTION: it resolves per call and self-heals — once the
+// runtime provisioner finishes, the next conversion picks up the binary with
+// no restart. fluent-ffmpeg (this version) only accepts a fixed string, so it
+// gets the boot-time resolution; the direct exec/spawn paths all re-resolve.
 const FFMPEG_PATH = require('./utils/ffmpegPath');
-require('fluent-ffmpeg').setFfmpegPath(FFMPEG_PATH);
+require('fluent-ffmpeg').setFfmpegPath(FFMPEG_PATH());
 const { ensureFfmpegRuntime } = require('./utils/ffmpegRuntime');
-const fsSync = require('fs');
-if (FFMPEG_PATH === 'ffmpeg' || !fsSync.existsSync(FFMPEG_PATH)) {
+if (FFMPEG_PATH() === 'ffmpeg') {
     // No usable binary at boot — self-provision in the background (never
-    // blocks startup). Conversions meanwhile use whatever fallback the
-    // resolver found; the runtime binary is picked up from the next boot.
+    // blocks startup). The resolver re-checks on every call, so the freshly
+    // downloaded data/ffmpeg/ffmpeg binary is picked up mid-process.
     ensureFfmpegRuntime();
 }
-if (FFMPEG_PATH === 'ffmpeg') {
+if (FFMPEG_PATH() === 'ffmpeg') {
     console.log('[ BOOT ] WARNING: no ffmpeg binary found (PATH, /usr/bin, /usr/local/bin, data/ffmpeg, ffmpeg-static). Sticker/media conversion may fail until the runtime binary finishes downloading.');
 } else {
-    console.log(`[ BOOT ] ffmpeg resolved: ${FFMPEG_PATH}`);
+    console.log(`[ BOOT ] ffmpeg resolved: ${FFMPEG_PATH()}`);
 }
 
 // ─── Uptime Synchronization ──────────────────────────────────────────────────

@@ -128,14 +128,14 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
       const isLargeVideo = inputBuffer.length > (3 * 1024 * 1024); // >3MB threshold
       // Use max 2 seconds, fps=6, moderate quality
       if (cropSquare) {
-        ffmpegCommand = `"${ffmpegPath}" -y -i "${tempInput}" -t 2 -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${size}:${size},fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
+        ffmpegCommand = `"${ffmpegPath()}" -y -i "${tempInput}" -t 2 -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${size}:${size},fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
       } else {
-        ffmpegCommand = `"${ffmpegPath}" -y -i "${tempInput}" -t 2 -vf "scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
+        ffmpegCommand = `"${ffmpegPath()}" -y -i "${tempInput}" -t 2 -vf "scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
       }
     } else {
       // For images – higher quality, larger size
       const vf = `${cropSquare ? vfCropSquareImg : vfPadSquareImg},format=rgba`;
-      ffmpegCommand = `"${ffmpegPath}" -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 70 -compression_level 6 "${tempOutput}"`;
+      ffmpegCommand = `"${ffmpegPath()}" -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 70 -compression_level 6 "${tempOutput}"`;
     }
 
     await new Promise((resolve, reject) => {
@@ -171,9 +171,9 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
           const duration = Math.max(1, 2 - (attempts * 0.2));
           
           if (cropSquare) {
-            harsherCmd = `"${ffmpegPath}" -y -i "${tempInput}" -t ${duration} -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${currentSize}:${currentSize},fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
+            harsherCmd = `"${ffmpegPath()}" -y -i "${tempInput}" -t ${duration} -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${currentSize}:${currentSize},fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
           } else {
-            harsherCmd = `"${ffmpegPath}" -y -i "${tempInput}" -t ${duration} -vf "scale=${currentSize}:${currentSize}:force_original_aspect_ratio=decrease,pad=${currentSize}:${currentSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
+            harsherCmd = `"${ffmpegPath()}" -y -i "${tempInput}" -t ${duration} -vf "scale=${currentSize}:${currentSize}:force_original_aspect_ratio=decrease,pad=${currentSize}:${currentSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
           }
         } else {
           // For images: reduce quality and resolution progressively
@@ -181,7 +181,7 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
           const vf = cropSquare
             ? `crop=min(iw\\,ih):min(iw\\,ih),scale=${currentSize}:${currentSize},format=rgba`
             : `scale=${currentSize}:${currentSize}:force_original_aspect_ratio=decrease,pad=${currentSize}:${currentSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba`;
-          harsherCmd = `"${ffmpegPath}" -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 "${tempOutput2}"`;
+          harsherCmd = `"${ffmpegPath()}" -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 "${tempOutput2}"`;
         }
         
         await new Promise((resolve, reject) => {
@@ -375,7 +375,7 @@ async function forceMiniSticker(inputBuffer, isVideo, cropSquare) {
           ? `crop=min(iw\\,ih):min(iw\\,ih),scale=${size}:${size}${isVideo ? ',fps=3' : ''}`
           : `scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=#00000000${isVideo ? ',fps=3' : ''}`;
 
-        const cmd = `"${ffmpegPath}" -y -i "${tempInput}" ${isVideo ? '-t 0.5' : ''} -vf "${vf}" -c:v libwebp -preset default -loop 0 -pix_fmt yuva420p -quality ${isVideo ? 15 : 30} -compression_level 6 -b:v 30k "${tempOutput}"`;
+        const cmd = `"${ffmpegPath()}" -y -i "${tempInput}" ${isVideo ? '-t 0.5' : ''} -vf "${vf}" -c:v libwebp -preset default -loop 0 -pix_fmt yuva420p -quality ${isVideo ? 15 : 30} -compression_level 6 -b:v 30k "${tempOutput}"`;
         
         await new Promise((resolve, reject) => {
           exec(cmd, (error) => error ? reject(error) : resolve());
@@ -505,7 +505,7 @@ async function igsCommand(sock, msg, args, extra, crop = false) {
             const vfUltra = crop
               ? `crop=min(iw\\,ih):min(iw\\,ih),scale=${ultraSize}:${ultraSize}${isVideo ? ',fps=3' : ''}`
               : `scale=${ultraSize}:${ultraSize}:force_original_aspect_ratio=decrease,pad=${ultraSize}:${ultraSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000${isVideo ? ',fps=3' : ''}`;
-            const ultraCmd = `"${ffmpegPath}" -y -i "${tempInput2}" ${isVideo ? '-t 0.5' : ''} -vf "${vfUltra}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${isVideo ? 12 : 25} -compression_level 6 -b:v 25k -max_muxing_queue_size 1024 "${tempOutputUltra}"`;
+            const ultraCmd = `"${ffmpegPath()}" -y -i "${tempInput2}" ${isVideo ? '-t 0.5' : ''} -vf "${vfUltra}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${isVideo ? 12 : 25} -compression_level 6 -b:v 25k -max_muxing_queue_size 1024 "${tempOutputUltra}"`;
             
             await new Promise((resolve, reject) => {
               exec(ultraCmd, (error) => error ? reject(error) : resolve());

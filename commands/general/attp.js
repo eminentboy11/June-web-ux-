@@ -84,7 +84,7 @@ function renderBlinkingVideoWithFfmpeg(text) {
       'pipe:1'
     ];
 
-    const ff = spawn(ffmpegPath, args);
+    const ff = spawn(ffmpegPath(), args);
     const chunks = [];
     const errors = [];
     ff.stdout.on('data', d => chunks.push(d));

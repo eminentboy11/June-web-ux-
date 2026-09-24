@@ -74,7 +74,7 @@ module.exports = {
           fs.writeFileSync(gifPath, mediaBuffer);
           
           // Convert GIF to MP4 using FFmpeg
-          const ffmpegCmd = `"${ffmpegPath}" -i "${gifPath}" -vf "fps=15,scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000" -c:v libx264 -pix_fmt yuv420p -movflags +faststart -fps_mode vfr -y "${mp4Path}"`;
+          const ffmpegCmd = `"${ffmpegPath()}" -i "${gifPath}" -vf "fps=15,scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000" -c:v libx264 -pix_fmt yuv420p -movflags +faststart -fps_mode vfr -y "${mp4Path}"`;
           
           await new Promise((resolve, reject) => {
             exec(ffmpegCmd, { maxBuffer: 10 * 1024 * 1024 }, (error) => {
