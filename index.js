@@ -45,7 +45,7 @@ if (FFMPEG_PATH === 'ffmpeg' || !fsSync.existsSync(FFMPEG_PATH)) {
     ensureFfmpegRuntime();
 }
 if (FFMPEG_PATH === 'ffmpeg') {
-    console.warn('[ BOOT ] WARNING: no ffmpeg binary found (PATH, /usr/bin, /usr/local/bin, data/ffmpeg, ffmpeg-static). Sticker/media conversion may fail until the runtime binary finishes downloading.');
+    console.log('[ BOOT ] WARNING: no ffmpeg binary found (PATH, /usr/bin, /usr/local/bin, data/ffmpeg, ffmpeg-static). Sticker/media conversion may fail until the runtime binary finishes downloading.');
 } else {
     console.log(`[ BOOT ] ffmpeg resolved: ${FFMPEG_PATH}`);
 }

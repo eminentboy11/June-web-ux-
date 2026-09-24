@@ -81,7 +81,7 @@ function isDownloadInFlight() {
  * resolves true when a usable runtime binary is in place (pre-existing or
  * freshly downloaded), false otherwise (fall back to other candidates).
  */
-async function ensureFfmpegRuntime({ log = console.log, warn = console.warn } = {}) {
+async function ensureFfmpegRuntime({ log = console.log, warn = console.log } = {}) {
     try {
         if (cacheIsValid()) {
             log(`[ BOOT ] ffmpeg runtime cache ready: ${CACHE_BIN}`);

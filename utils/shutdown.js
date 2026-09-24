@@ -45,12 +45,13 @@ const TOTAL_KILLS = KILLS_AFTER_COMMAND + 1;
 const STATE_FILE = path.join(__dirname, '..', 'database', 'shutdown-state.json');
 
 /**
- * Kill-path logger: synchronous write to stderr. Safe to call immediately
+ * Kill-path logger: synchronous write to stdout (fd 1) — the channel
+    console views reliably show. Safe to call immediately
  * before a same-tick process.exit() even when stderr is a pipe.
  */
 function defaultFatalLog(line) {
   try {
-    fs.writeSync(2, line + '\n');
+    fs.writeSync(1, line + '\n');
   } catch (_) {
     /* stderr unavailable — the exit still happens */
   }

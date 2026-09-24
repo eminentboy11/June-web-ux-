@@ -15,16 +15,62 @@ const { exec }   = require('child_process');
 const ffmpegPath = require('./ffmpegPath');
 const { getTempDir, deleteTempFile } = require('./tempManager');
 
+// ─── Failure diagnostics ─────────────────────────────────────────────────────
+// Three channels, because the user must ALWAYS be able to find out WHY a
+// conversion failed:
+//   1. console.log (stdout — the channel every visible themed log uses;
+//      console.error went to stderr, which some console views never show)
+//   2. database/ffmpeg-errors.log — persistent file (database/ is a loader
+//      SKIP_DIR), readable from the hosting panel's Files tab
+//   3. the meaningful reason line, attached to the user-facing error itself
+//      (the central text sanitizer scrubs any paths out of it)
+const DIAG_LOG = path.join(__dirname, '..', 'database', 'ffmpeg-errors.log');
+
+function diagLog(detail, file = DIAG_LOG) {
+    const line = `[${new Date().toISOString()}] ${detail}`;
+    try { console.log('[FFMPEG-ERR]', line); } catch (_) {}
+    try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.appendFileSync(file, line + '\n');
+    } catch (_) {}
+}
+
+/** First meaningful ffmpeg reason (for user display, post-sanitization). */
+function ffmpegReasonLine(stderr, limit = 160) {
+    const lines = String(stderr || '').split(/\r?\n/);
+    const PATTERNS = [
+        /Invalid data found when processing input/i,
+        /Could not find codec parameters[^\n]*/i,
+        /Cannot determine format[^\n]*/i,
+        /Error opening (?:input|output) file[^\n]*/i,
+        /No such file or directory[^\n]*/i,
+        /not found/i,
+    ];
+    for (const re of PATTERNS) {
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i];
+            const m = line.match(re);
+            if (m) {
+                // Slice from the match start so ffmpeg's [tag @ 0x…] prefix
+                // (which usually contains a temp path) is dropped.
+                const start = line.indexOf(m[0]);
+                return line.slice(start, start + limit).replace(/[)\s]+$/, '');
+            }
+        }
+    }
+    return '';
+}
+
 function run(cmd) {
     return new Promise((resolve, reject) => {
         exec(cmd, { maxBuffer: 100 * 1024 * 1024 }, (err, _stdout, stderr) => {
             if (err) {
-                // Full details (the whole command line, which embeds our
-                // deployment paths) go to the server console ONLY — user-
-                // facing errors get a generic message instead.
-                console.error('[ffmpeg] conversion failed:', err.message);
-                if (stderr) console.error('[ffmpeg] stderr tail:', String(stderr).slice(-2000));
-                reject(new Error('ffmpeg conversion failed'));
+                // A missing binary reports as 'sh: 1: …: not found' — say so plainly.
+                const reason = /not found/i.test(String(err.message)) && /ffmpeg/.test(String(err.message))
+                    ? 'ffmpeg binary not found on this host'
+                    : ffmpegReasonLine(stderr);
+                diagLog(`conversion failed: ${err.message} | stderr tail: ${String(stderr || '').slice(-2000)}`);
+                reject(new Error('ffmpeg conversion failed' + (reason ? ` — ${reason}` : '')));
             }
             resolve();
         });
@@ -64,8 +110,7 @@ async function webp2png(webpBuffer) {
         if (!fs.existsSync(outPath)) throw new Error('PNG output not produced');
         return fs.readFileSync(outPath);
     } catch (err) {
-        console.error('[webp2png] error:', err.message);
-        if (err.ffmpegStderr) console.error('[webp2png] ffmpeg:', err.ffmpegStderr.slice(0, 400));
+        console.log('[FFMPEG-ERR] webp2png:', err.message);
         throw err;
     } finally {
         try { fs.unlinkSync(inPath); } catch {}
@@ -126,8 +171,7 @@ async function webp2mp4(webpBuffer) {
         if (!buf || buf.length === 0) throw new Error('MP4 buffer is empty');
         return buf;
     } catch (err) {
-        console.error('[webp2mp4] error:', err.message);
-        if (err.ffmpegStderr) console.error('[webp2mp4] ffmpeg:', err.ffmpegStderr.slice(0, 400));
+        console.log('[FFMPEG-ERR] webp2mp4:', err.message);
         throw err;
     } finally {
         try { fs.unlinkSync(rawPath); } catch {}
@@ -182,8 +226,7 @@ async function webp2gif(webpBuffer) {
         if (!buf || buf.length === 0) throw new Error('GIF buffer is empty');
         return buf;
     } catch (err) {
-        console.error('[webp2gif] error:', err.message);
-        if (err.ffmpegStderr) console.error('[webp2gif] ffmpeg:', err.ffmpegStderr.slice(0, 400));
+        console.log('[FFMPEG-ERR] webp2gif:', err.message);
         throw err;
     } finally {
         try { fs.unlinkSync(rawPath); } catch {}
