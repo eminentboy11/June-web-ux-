@@ -25,12 +25,7 @@
   },
   "env": {
     "SESSION_ID": {
-      "description": "Official session mechanism: pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair and paste your june-ultra:~<token> here (or use JUNE_SESSION_TOKEN). Legacy base64 session strings were retired and no longer work.",
-      "required": false,
-      "value": ""
-    },
-    "JUNE_SESSION_TOKEN": {
-      "description": "Centralized session token (recommended) from the pairing website: june-ultra:~<24 chars> or june-ultra:<your-id>:~<24 chars>. Takes priority over SESSION_ID. The session server URL is built in.",
+      "description": "Official session mechanism: pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair and paste the JUNE-X~<handle> it gives you. This is the only session mechanism.",
       "required": false,
       "value": ""
     }
