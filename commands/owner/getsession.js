@@ -1,8 +1,8 @@
 /**
  * GetSession Command - Owner only
- * Shows the Session Server token status. The legacy raw-session
- * (Ultra-X:~<base64>) export was RETIRED — the token is the single
- * official session mechanism.
+ * Shows the Session ID status. Raw session export was RETIRED — the
+ * JUNE-X~ Session ID (from the pairing page) is the single official
+ * session mechanism.
  */
 
 const sessionServer = require('../../utils/juneDb/sessionServer');
@@ -11,7 +11,7 @@ module.exports = {
   name: 'getsession',
   aliases: ['sessionid', 'mysession', 'session'],
   category: 'owner',
-  description: 'Show your Session Server token status',
+  description: 'Show your Session ID status',
   usage: '.getsession',
   ownerOnly: true,
   adminOnly: false,
@@ -20,59 +20,49 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     try {
-      // ── Session Server token mode ────────────────────────────────────────
-      // The token already lives in the bot's environment; never print the raw
-      // credentials. Show a status summary from the server instead.
+      // The Session ID already lives in the bot's environment; never print
+      // the raw value. Show a masked form plus a server reachability check.
       if (sessionServer.isTokenModeActive()) {
-        const token = sessionServer.getConfiguredToken();
-        const redacted = token.slice(0, 'june-ultra:~'.length + 4) + '…' + token.slice(-4);
-        const fingerprint = sessionServer.sha256Hex(token).slice(0, 8);
+        const sessionId = sessionServer.getConfiguredToken();
+        const redacted = sessionId.slice(0, 8) + '…' + sessionId.slice(-4);
+        const fingerprint = sessionServer.sha256Hex(sessionId).slice(0, 8);
         const status = sessionServer.getStatus();
 
-        let serverLines = '';
+        let serverLine = '';
         try {
-          const check = await sessionServer.checkTokenStatus();
-          if (check && check.status === 'active') {
-            serverLines =
-              `\n📱 Account: …${check.phoneLast4 || '????'}` +
-              `\n🤖 Bot online (server view): ${check.botOnline ? 'yes' : 'no'}` +
-              `\n🗂️ Server auth state: v${check.authStateVersion || '?'} · ${check.keyRows || 0} key rows` +
-              `\n🕐 Last used: ${check.lastUsedAt ? new Date(check.lastUsedAt).toLocaleString() : '—'}`;
-          } else if (check) {
-            serverLines = `\n⚠️ Server reports the session is *${check.status}* — re-pair to get a fresh token.`;
-          }
+          const res = await fetch(`${sessionServer.getServerUrl()}/health`, {
+            signal: AbortSignal.timeout(5000),
+          });
+          serverLine = res.ok ? '\n📡 Server: reachable' : `\n📡 Server: HTTP ${res.status}`;
         } catch (error) {
-          serverLines = `\n⚠️ Could not reach the session server: ${error.message}`;
+          serverLine = `\n📡 Could not reach the session server: ${error.message}`;
         }
 
         return extra.reply(
-          `╭━━『 *Session Token (active)* 』━━╮\n\n` +
-          `🔑 Token: \`${redacted}\`\n` +
+          `╭━━『 *Session ID (active)* 』━━╮\n\n` +
+          `🔑 Session ID: \`${redacted}\`\n` +
           `🔖 Fingerprint: \`${fingerprint}\`\n` +
           `🔗 Server: ${sessionServer.getServerUrl()}\n` +
-          `📡 Lease: ${status.authenticated ? 'authenticated' : 'not authenticated'}` +
-          `${status.heartbeatRunning ? ' · heartbeat running' : ''}` +
-          `${serverLines}\n\n` +
-          `📋 The full token is in your bot environment\n` +
-          `(SESSION_ID / JUNE_SESSION_TOKEN).\n\n` +
-          `⚠️ Lost the token or suspect a leak? Revoke it at\n` +
-          `${sessionServer.getServerUrl()}/manage and re-pair.\n` +
+          `📡 Status: ${status.authenticated ? 'loaded (active)' : 'configured'}` +
+          `${serverLine}\n\n` +
+          `📋 The full Session ID is in your bot's environment\n` +
+          `(SESSION_ID).\n\n` +
+          `⚠️ Lost it or suspect a leak? Re-pair at\n` +
+          `${sessionServer.getServerUrl()}/pair and set the fresh Session ID.\n` +
           `╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`
         );
       }
 
-      // ── No token configured ─────────────────────────────────────────────
+      // ── No Session ID configured ─────────────────────────────────────────
       return extra.reply(
-        '❌ *No Session Server token configured.*\n\n' +
-        'Raw session IDs (Ultra-X:~/JUNE-MD:~) were retired —\n' +
-        'the token is now the only session mechanism.\n\n' +
+        '❌ *No Session ID configured.*\n\n' +
         `1️⃣ Pair at ${sessionServer.getServerUrl()}/pair\n` +
-        '2️⃣ Copy your june-ultra:~ token\n' +
-        '3️⃣ Set it as SESSION_ID in this bot\'s .env\n' +
+        '2️⃣ Copy your JUNE-X~ Session ID\n' +
+        "3️⃣ Set it as SESSION_ID in this bot's .env\n" +
         '4️⃣ Restart the bot'
       );
     } catch (error) {
-      console.error('GetSession command error:', error);
+      console.log('GetSession command error:', error.message);
       await extra.reply(`❌ Failed to read session status: ${error.message}`);
     }
   }
