@@ -18,6 +18,14 @@ function currentMode() {
     return MODES.includes(value) ? value : 'off';
 }
 
+function isPrivateJid(jid) {
+    return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
+}
+
+function isGroupJid(jid) {
+    return jid.endsWith('@g.us');
+}
+
 function shouldAutoRead(mode, msg, isContact = () => true) {
     if (!['all', 'contacts', 'pm', 'gc'].includes(mode)) return false;
     if (!msg || !msg.key || !msg.key.remoteJid) return false;
@@ -25,12 +33,20 @@ function shouldAutoRead(mode, msg, isContact = () => true) {
     if (msg.key.fromMe) return false;
     if (jid === 'status@broadcast') return false;
     if (jid.endsWith('@newsletter')) return false;
-    const isPrivate = jid.endsWith('@s.whatsapp.net') || jid.endsWith('@broadcast');
-    const isGroup = jid.endsWith('@g.us');
+    if (jid.endsWith('@broadcast')) return false;
+
+    const isPrivate = isPrivateJid(jid);
+    const isGroup = isGroupJid(jid);
+
     if (mode === 'pm') return isPrivate;
     if (mode === 'gc') return isGroup;
     if (mode === 'all') return isPrivate || isGroup;
-    const sender = isGroup ? (msg.key.participant || null) : jid;
+
+    // contacts mode: prefer the phone-number JID when Baileys exposes one,
+    // since sock.contacts is typically keyed by phone number, not LID
+    const sender = isGroup
+        ? (msg.key.participantAlt || msg.key.participant || null)
+        : (msg.key.remoteJidAlt || jid);
     if (!sender) return false;
     return Boolean(isContact(sender));
 }
@@ -39,11 +55,22 @@ async function readMessageIfEnabled(sock, msg) {
     try {
         const mode = currentMode();
         if (mode === 'off') return false;
+
         const contacts = sock?.contacts || {};
-        const isContact = (jid) => {
-            const bare = String(jid || '').split(':')[0];
-            return Boolean(contacts[bare] || contacts[jid]);
+        const isContact = (jidToCheck) => {
+            const bare = String(jidToCheck || '').split(':')[0];
+            if (contacts[bare] || contacts[jidToCheck]) return true;
+
+            const lidMapping = sock?.signalRepository?.lidMapping;
+            if (lidMapping && bare.endsWith('@lid')) {
+                try {
+                    const pn = lidMapping.getPNForLID(bare);
+                    if (pn && (contacts[pn] || contacts[String(pn).split(':')[0]])) return true;
+                } catch (_) {}
+            }
+            return false;
         };
+
         if (!shouldAutoRead(mode, msg, isContact)) return false;
         await sock.readMessages([msg.key]);
         return true;
