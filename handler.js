@@ -730,6 +730,22 @@ const handleMessage = async (sock, msg) => {
       } catch (_muteErr) {}
     }
 
+    // ── AntiAll master gate — deliberately FIRST ──────────────────────────────
+    // Runs before every hook, reveal and dispatch so no early-return path can
+    // bypass it (view-once media used to slip past when a later hook returned
+    // first). While .antiall master is on, EVERY message from a non-admin and
+    // non-owner member is deleted — ".antiall master off" keeps only the
+    // individual protections.
+    if (isGroup && !msg.key.fromMe && database.isAntiAllEnabled(from)) {
+      const _senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
+      if (!_senderIsAdmin && !isOwner(sender)) {
+        if (await isBotAdmin(sock, from, groupMetadata)) {
+          await sock.sendMessage(from, { delete: msg.key });
+          return;
+        }
+      }
+    }
+
     // Anti-* protection — run ALL checks in parallel so they don't queue behind each other
     if (isGroup) {
       const antispam       = commands.get('antispam');
@@ -869,20 +885,7 @@ const handleMessage = async (sock, msg) => {
     // non-admin/non-owner members before command dispatch.
     if (isGroup) {
       const groupSettings = database.getGroupSettings(from);
-      // Never moderate messages sent by the connected WhatsApp account itself.
-      // On a linked-device bot those are the owner's green "fromMe" messages.
-      if (!msg.key.fromMe && database.isAntiAllEnabled(from)) {
-        const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-        const senderIsOwner = isOwner(sender);
-
-        if (!senderIsAdmin && !senderIsOwner) {
-          const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
-          if (botIsAdmin) {
-            await sock.sendMessage(from, { delete: msg.key });
-            return;
-          }
-        }
-      }
+      // (AntiAll master gate moved to the top of the pipeline — nothing may bypass it.)
 
       // Anti-tag protection (check BEFORE text check, as tagall can have no text)
       if (groupSettings.antitag && !msg.key.fromMe) {
