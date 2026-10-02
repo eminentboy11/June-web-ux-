@@ -1479,7 +1479,7 @@ const BOT_SETTINGS_DEFAULTS = {
 
   // Menu presentation settings are SQLite-backed. The menu renderer and owner
   // commands do not use a file-based fallback.
-  menuStyle: '2',
+  menuStyle: '5',
   menuShowMemory: true,
   menuShowUptime: true,
   menuShowPluginCount: true,
