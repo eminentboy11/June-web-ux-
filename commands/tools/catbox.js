@@ -1,6 +1,6 @@
 /**
- * Catbox Command
- * Upload any file to catbox.moe via URL or quoted media (permanent hosting)
+ * ToURL Command
+ * Upload any file to pone.rs via URL or quoted media (permanent hosting)
  */
 
 const axios = require('axios');
@@ -11,12 +11,94 @@ const { sendButtons } = require('gifted-btns');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const database = require('../../database');
 
+const PONE_BASE = 'https://pone.rs';
+
+// pone.rs is a pomf-style host. Try the known endpoint shapes in order.
+const UPLOAD_ATTEMPTS = [
+    { endpoint: `${PONE_BASE}/upload.php`, field: 'files[]' },
+    { endpoint: `${PONE_BASE}/upload`,     field: 'files[]' },
+    { endpoint: `${PONE_BASE}/upload`,     field: 'file' }
+];
+
+/**
+ * Pull a hosted URL out of whatever pone.rs returns (JSON or plain text)
+ */
+function extractUrl(data) {
+    if (!data) return null;
+
+    if (typeof data === 'string') {
+        const trimmed = data.trim();
+        try {
+            return extractUrl(JSON.parse(trimmed));
+        } catch {
+            const match = trimmed.match(/https?:\/\/[^\s"'<>]+/);
+            return match ? match[0] : null;
+        }
+    }
+
+    if (Array.isArray(data)) {
+        for (const item of data) {
+            const found = extractUrl(item);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    if (typeof data === 'object') {
+        if (typeof data.url === 'string' && data.url.startsWith('http')) return data.url;
+        if (data.files) {
+            const found = extractUrl(data.files);
+            if (found) return found;
+        }
+        if (data.data) {
+            const found = extractUrl(data.data);
+            if (found) return found;
+        }
+        if (typeof data.url === 'string') return `${PONE_BASE}/${data.url.replace(/^\//, '')}`;
+    }
+
+    return null;
+}
+
+async function uploadToPone(fileBuffer, fileName, contentType) {
+    let lastError;
+
+    for (const { endpoint, field } of UPLOAD_ATTEMPTS) {
+        try {
+            const form = new FormData();
+            form.append(field, fileBuffer, {
+                filename: fileName,
+                contentType: contentType
+            });
+
+            const { data } = await axios.post(endpoint, form, {
+                headers: {
+                    ...form.getHeaders(),
+                    'User-Agent': 'Mozilla/5.0'
+                },
+                timeout: 60000,
+                maxBodyLength: Infinity,
+                maxContentLength: Infinity
+            });
+
+            const url = extractUrl(data);
+            if (url) return url;
+
+            lastError = new Error('Unexpected response from pone.rs');
+        } catch (err) {
+            lastError = err;
+        }
+    }
+
+    throw lastError || new Error('Upload failed or was rejected by pone.rs');
+}
+
 module.exports = {
-    name: 'catbox',
-    aliases: ['cbox', 'host'],
+    name: 'tourl',
+    aliases: ['pone', 'upload', 'tolink'],
     category: 'tools',
-    description: 'Upload a file to catbox.moe via URL or quoted media (permanent hosting)',
-    usage: '.catbox <file-url> or reply to media',
+    description: 'Upload a file to pone.rs via URL or quoted media (permanent hosting)',
+    usage: '.tourl <file-url> or reply to media',
 
     async execute(sock, msg, args, extra) {
         try {
@@ -56,7 +138,7 @@ module.exports = {
             } else {
                 const url = args.join(' ').trim();
                 if (!url) return extra.reply(
-                    '❌ Please provide a file URL or reply to a media message!\nExample:\n.catbox https://example.com/image.png'
+                    '❌ Please provide a file URL or reply to a media message!\nExample:\n.tourl https://example.com/image.png'
                 );
 
                 const fileResponse = await axios.get(url, {
@@ -80,35 +162,18 @@ module.exports = {
                 fileSizeKB = (fileBuffer.byteLength / 1024).toFixed(1);
             }
 
-            // ─── Upload to Catbox.moe ───────────────────────────────
-            const form = new FormData();
-            form.append('reqtype', 'fileupload');
-            form.append('fileToUpload', fileBuffer, {
-                filename: fileName,
-                contentType: contentType
-            });
+            // ─── Upload to pone.rs ──────────────────────────────────
+            const hostedUrl = await uploadToPone(fileBuffer, fileName, contentType);
 
-            const { data: hostedUrl } = await axios.post(
-                'https://catbox.moe/user/api.php',
-                form,
-                {
-                    headers: {
-                        ...form.getHeaders(),
-                        'User-Agent': 'Mozilla/5.0'
-                    },
-                    timeout: 60000
-                }
-            );
-
-            if (!hostedUrl || !hostedUrl.startsWith('https://')) {
-                throw new Error('Upload failed or was rejected by Catbox');
+            if (!hostedUrl || !hostedUrl.startsWith('http')) {
+                throw new Error('Upload failed or was rejected by pone.rs');
             }
 
             await sock.sendMessage(extra.from, { react: { text: '✅', key: msg.key } });
 
             const hostedName = hostedUrl.split('/').pop();
             const responseText =
-                ` *📦 File Hosted on Catbox*\n\n` +
+                ` *📦 File Hosted on pone.rs*\n\n` +
                 ` *File:* ${hostedName}\n` +
                 ` *Size:* ${fileSizeKB} KB\n` +
                 ` *Hosted:* ${hostedUrl}\n\n` +
@@ -136,10 +201,10 @@ module.exports = {
             }, { quoted: msg });
 
         } catch (error) {
-            console.error('CATBOX ERROR:', error);
+            console.error('TOURL ERROR:', error);
             await sock.sendMessage(extra.from, { react: { text: '❌', key: msg.key } });
 
-            let errMsg = '❌ Failed to upload to Catbox: ';
+            let errMsg = '❌ Failed to upload to pone.rs: ';
             if (error.code === 'ECONNABORTED') errMsg += 'Request timed out (file may be too large)';
             else if (error.code === 'ERR_FR_MAX_BODY_LENGTH_EXCEEDED') errMsg += 'File exceeds the 200MB limit';
             else errMsg += (error.message || 'Unknown error');
