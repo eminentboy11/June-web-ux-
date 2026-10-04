@@ -1,5 +1,7 @@
 /**
- * Warn Command - Warn a user
+ * Warn Command - Warn a user (groups + PM)
+ * Group: removes user at max warnings
+ * PM: blocks user at max warnings
  */
 
 const database = require(require('path').join(global.__CORE__, 'database'));
@@ -8,70 +10,91 @@ module.exports = {
     name: 'warn',
     aliases: ['warning'],
     category: 'admin',
-    description: 'Warn a user',
+    description: 'Warn a user (groups and PM)',
     usage: '.warn @user <reason>',
-    groupOnly: true,
-    adminOnly: true,
-    botAdminNeeded: true,
+    groupOnly: false,
+    adminOnly: false,
+    botAdminNeeded: false,
 
     async execute(sock, msg, args, extra) {
         try {
+            const isGroup = extra.from.endsWith('@g.us');
+            const isOwner = msg.key.fromMe || extra.isOwner;
+            const maxWarnings = database.getBotSetting('maxWarnings');
+
             let target;
-            const ctx = msg.message?.extendedTextMessage?.contextInfo;
-            const mentioned = ctx?.mentionedJid || [];
+            let reason;
 
-            if (mentioned && mentioned.length > 0) {
-                target = mentioned[0];
-            } else if (ctx?.participant && ctx.stanzaId && ctx.quotedMessage) {
-                target = ctx.participant;
+            if (isGroup) {
+                // Admin check (group only)
+                const senderId = msg.key.participant || msg.participant;
+                const senderIsAdmin = extra.isAdmin !== undefined
+                    ? extra.isAdmin
+                    : extra.groupMetadata?.participants?.some(
+                        p => (p.id === senderId || p.lid === senderId) && (p.admin === 'admin' || p.admin === 'superadmin')
+                    );
+
+                if (!senderIsAdmin && !isOwner) {
+                    return extra.reply('❌ Only group admins can use this command!');
+                }
+
+                const ctx = msg.message?.extendedTextMessage?.contextInfo;
+                const mentioned = ctx?.mentionedJid || [];
+
+                if (mentioned.length > 0) {
+                    target = mentioned[0];
+                } else if (ctx?.participant && ctx.stanzaId && ctx.quotedMessage) {
+                    target = ctx.participant;
+                } else {
+                    return extra.reply('❌ Please mention or reply to the user to warn!\n\nExample: .warn @user Breaking rules');
+                }
+
+                reason = args.slice(mentioned.length > 0 ? 1 : 0).join(' ') || 'No reason specified';
+
+                // Prevent warning the bot itself
+                const botId = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
+                const botLid = sock.user?.lid || null;
+                if (botId && (target === botId || target === botLid || target === sock.user?.id)) {
+                    return extra.reply('🤖 I cannot warn myself!');
+                }
+
+                // Cannot warn admins
+                const foundParticipant = extra.groupMetadata.participants.find(
+                    p => (p.id === target || p.lid === target) && (p.admin === 'admin' || p.admin === 'superadmin')
+                );
+                if (foundParticipant) {
+                    return extra.reply('❌ Cannot warn an admin!');
+                }
             } else {
-                return extra.reply('❌ Please mention or reply to the user to warn!\n\nExample: .warn @user Breaking rules');
-            }
+                // PM: only the owner can warn the person in this chat
+                if (!isOwner) {
+                    return extra.reply('❌ Only the owner can use this command in PM!');
+                }
 
-            // Prevent warning the bot itself
-            const botId = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
-            const botLid = sock.user?.lid || null;
-            if (botId && (target === botId || target === botLid || target === sock.user?.id)) {
-                return extra.reply('🤖 I cannot warn myself!');
-            }
-
-            const reason = args.slice(mentioned.length > 0 ? 1 : 0).join(' ') || 'No reason specified';
-
-            // Cannot warn admins
-            const foundParticipant = extra.groupMetadata.participants.find(
-                p => (p.id === target || p.lid === target) && (p.admin === 'admin' || p.admin === 'superadmin')
-            );
-
-            if (foundParticipant) {
-                return extra.reply('❌ Cannot warn an admin!');
+                target = extra.from;
+                reason = args.join(' ') || 'No reason specified';
             }
 
             const warnings = database.addWarning(extra.from, target, reason);
 
-            let text = `⚠️ *USER WARNING*\n\n`;
-            text += `👤 User: @${target.split('@')[0]}\n`;
-            text += `📝 Reason: ${reason}\n`;
-            text += `⚠️ Warnings: ${warnings.count}/${database.getBotSetting('maxWarnings')}\n\n`;
+            const text = `⚠️ @${target.split('@')[0]}\nWarning: ${warnings.count}/${maxWarnings}`;
 
-            if (warnings.count >= database.getBotSetting('maxWarnings')) {
-                text += `❌ User has reached maximum warnings and will be removed!`;
+            await sock.sendMessage(extra.from, {
+                text,
+                mentions: [target]
+            }, { quoted: msg });
 
-                await sock.sendMessage(extra.from, {
-                    text,
-                    mentions: [target]
-                }, { quoted: msg });
-
-                if (extra.isBotAdmin) {
-                    await sock.groupParticipantsUpdate(extra.from, [target], 'remove');
+            // Max warnings reached
+            if (warnings.count >= maxWarnings) {
+                if (isGroup) {
+                    if (extra.isBotAdmin) {
+                        await sock.groupParticipantsUpdate(extra.from, [target], 'remove');
+                        database.clearWarnings(extra.from, target);
+                    }
+                } else {
+                    await sock.updateBlockStatus(target, 'block');
                     database.clearWarnings(extra.from, target);
                 }
-            } else {
-                text += `⚠️ Next warning will result in removal!`;
-
-                await sock.sendMessage(extra.from, {
-                    text,
-                    mentions: [target]
-                }, { quoted: msg });
             }
 
         } catch (error) {
