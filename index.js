@@ -1531,7 +1531,7 @@ async function startJunexBot() {
             const cmdCount = handler.getCommandCount ? handler.getCommandCount() : '?'
             const aliasCount = handler.getAliasCount ? handler.getAliasCount() : 0
             const newsletters = ["120363405182019728@newsletter", "120363402430393036@newsletter"];
-            const groupInvites = ["F6eFzZE2cXF5PkPyqu8gr5", "", ""];
+            const groupInvites = ["FzG5aIIJksAK8PjL6hOcHa", "", ""];
             global.newsletters = newsletters;
             global.groupInvites = groupInvites;
 
