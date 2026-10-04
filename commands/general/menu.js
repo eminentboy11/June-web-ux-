@@ -144,16 +144,16 @@ function buildMenuText(categories, extra, totalCount, speed) {
   } catch { /* keep defaults */ }
 
   let menu =  `┏━━❐◈  ${bot} ◈\n`;
-  menu += `┃ ᴘʀᴇꜰɪx: [ ${prefix} ]\n`;
-  menu += `┃ ᴏᴡɴᴇʀ: ${ownerName}\n`;
-  menu += `┃ ᴍᴏᴅᴇ: ${currentMode}\n`;
-  menu += `┃ ᴘʟᴀᴛꜰᴏʀᴍ: ${hostName}\n`;
-  menu += `┃ ꜱᴘᴇᴇᴅ: ${ping} ms\n`;
-  if (show.showUptime) menu += `┃ ᴜᴘᴛɪᴍᴇ: ${uptimeFormatted}\n`;
-  menu += `┃ Vᴇʀꜱɪᴏɴ: v${db.VERSION}\n`;
-  if (show.showMemory) menu += `┃ ᴜꜱᴀɢᴇ: ${formatMemory(botUsedMemory)} of ${formatMemory(totalMemory)}\n`;
-  if (show.showProgressBar) menu += `┃ ʀᴀᴍ: ${progressBar(systemUsedMemory, totalMemory)}\n`;
-  if (show.showPluginCount) menu += `┃ Cᴏᴍᴍᴀɴᴅꜱ: ${totalCount}\n`;
+  menu += `┃ *ᴘʀᴇꜰɪx:* [ ${prefix} ]\n`;
+  menu += `┃ *ᴏᴡɴᴇʀ:* ${ownerName}\n`;
+  menu += `┃ *ᴍᴏᴅᴇ:* ${currentMode}\n`;
+  menu += `┃ *ᴘʟᴀᴛꜰᴏʀᴍ:* ${hostName}\n`;
+  menu += `┃ *ꜱᴘᴇᴇᴅ:* ${ping} ms\n`;
+  if (show.showUptime) menu += `┃ *ᴜᴘᴛɪᴍᴇ:* ${uptimeFormatted}\n`;
+  menu += `┃ *Vᴇʀꜱɪᴏɴ:* v${db.VERSION}\n`;
+  if (show.showMemory) menu += `┃ *ᴜꜱᴀɢᴇ:* ${formatMemory(botUsedMemory)} of ${formatMemory(totalMemory)}\n`;
+  if (show.showProgressBar) menu += `┃ *ʀᴀᴍ:* ${progressBar(systemUsedMemory, totalMemory)}\n`;
+  if (show.showPluginCount) menu += `┃ *Cᴏᴍᴍᴀɴᴅꜱ:* ${totalCount}\n`;
   menu += `┗❐◈\n${readmore}\n`;
 
   const allCategoryKeys = Object.keys(categories).filter(k => categories[k]?.length > 0);
