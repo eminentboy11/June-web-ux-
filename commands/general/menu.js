@@ -154,7 +154,7 @@ function buildMenuText(categories, extra, totalCount, speed) {
   if (show.showMemory) menu += `┃ *ᴜꜱᴀɢᴇ:* ${formatMemory(botUsedMemory)} of ${formatMemory(totalMemory)}\n`;
   if (show.showProgressBar) menu += `┃ *ʀᴀᴍ:* ${progressBar(systemUsedMemory, totalMemory)}\n`;
   if (show.showPluginCount) menu += `┃ *Cᴏᴍᴍᴀɴᴅꜱ:* ${totalCount}\n`;
-  menu += `┗❐◈\n${readmore}\n`;
+  menu += `┗❐\n${readmore}\n`;
 
   const allCategoryKeys = Object.keys(categories).filter(k => categories[k]?.length > 0);
   const ordered = [
@@ -171,7 +171,7 @@ function buildMenuText(categories, extra, totalCount, speed) {
     for (const cmd of cmds) {
       menu += `┃◈${cmd.name}\n`;
     }
-    menu += `┗❐◈\n`;
+    menu += `┗❐\n`;
     sectionIndex++;
     if (sectionIndex % 3 === 0) {
       menu += `${readmore}\n`;
