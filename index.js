@@ -854,6 +854,7 @@ async function requestPairingCode(socket) {
 
 // ─── Welcome Message ───────────────────────────────────────────────────────────
 function detectPlatform() {
+  if (process.env.JHP_PLATFORM) return "🚴 JHP";
   if (process.env.DYNO) return '☁️ Heroku';
   if (process.env.RENDER) return '⚡ Render';
   if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) return '🚉 Railway';
