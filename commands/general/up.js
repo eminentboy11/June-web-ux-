@@ -9,6 +9,7 @@ const os = require('os');
  * @returns {string} Platform name with emoji
  */
 function detectPlatform() {
+  if (process.env.JHP_PLATFORM) return "🚴 𝗝.𝗛.𝗣";
   if (process.env.DYNO) return '☁️ Heroku';
   if (process.env.RENDER) return '⚡ Render';
   if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) return '🚉 Railway';
