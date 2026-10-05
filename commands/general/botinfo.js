@@ -8,6 +8,7 @@ const { getSQLiteAuthStats } = require('../../utils/juneDb/auth-state');
 const botStartTime = Date.now() - Math.floor(process.uptime() * 1000);
 
 const detectPlatform = () => {
+    if (process.env.JHP_PLATFORM) return "🚴 𝗝.𝗛.𝗣";
     if (process.env.DYNO)                               return '☁️ Heroku';
     if (process.env.RENDER)                             return '⚡ Render';
     if (process.env.REPLIT_SLUG || process.env.REPL_ID) return '🔵 Replit';
