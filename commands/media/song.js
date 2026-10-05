@@ -25,7 +25,7 @@ module.exports = {
 
             const isUrl = searchQuery.startsWith('http://') || searchQuery.startsWith('https://');
             let videoUrl = searchQuery;
-            let title = searchQuery;
+            let title = null;
 
             // --- Metadata extraction (yts, best-effort) ---
             if (!isUrl) {
@@ -40,7 +40,7 @@ module.exports = {
                 title = found.title;
             } else {
                 try {
-                    const ytId = (videoUrl.match(/(?:youtu\.be\/|v=)([a-zA-Z0-9_-]{11})/) || [])[1];
+                    const ytId = APIs.extractYouTubeId(videoUrl);
                     if (ytId) {
                         const result = await yts({ videoId: ytId });
                         if (result && result.title) {
@@ -51,7 +51,8 @@ module.exports = {
             }
 
             // --- Audio download ---
-            // Tries each API in order, stops at first success
+            // Tries each API in order, stops at first success.
+            // getIzumiDownloadByUrl = apissupreme first, Apix fallback built in.
             const apiFns = [
                 () => APIs.getIzumiDownloadByUrl(videoUrl),
                 () => APIs.getEliteProTechDownloadByUrl(videoUrl),
@@ -87,16 +88,31 @@ module.exports = {
             });
 
             // --- Send as AUDIO (playable in-chat player) ---
-            await sock.sendMessage(chatId, {
-                audio: { url: audioData.download },
-                mimetype: 'audio/mpeg',
-                fileName: `${safeTitle}.mp3`,
-                ptt: false
-            }, { quoted: msg });
+            // Tries the main link, then the raw CDN fallback link if there is one
+            const sources = [...new Set([audioData.download, audioData.fallback].filter(Boolean))];
+            let workingUrl = null;
+            let lastErr;
 
-            // --- Send as DOCUMENT (downloadable file) ---
+            for (const src of sources) {
+                try {
+                    await sock.sendMessage(chatId, {
+                        audio: { url: src },
+                        mimetype: 'audio/mpeg',
+                        fileName: `${safeTitle}.mp3`,
+                        ptt: false
+                    }, { quoted: msg });
+                    workingUrl = src;
+                    break;
+                } catch (err) {
+                    lastErr = err;
+                }
+            }
+
+            if (!workingUrl) throw lastErr || new Error('audio send failed');
+
+            // --- Send as DOCUMENT (downloadable file) using the link that worked ---
             await sock.sendMessage(chatId, {
-                document: { url: audioData.download },
+                document: { url: workingUrl },
                 mimetype: 'audio/mpeg',
                 fileName: `${safeTitle}.mp3`
             }, { quoted: msg });
