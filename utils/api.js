@@ -19,7 +19,20 @@ const DOWNLOAD_HEADERS = {
   }
 };
 
+// ─── Apix (Wolvarex) YouTube MP3 config ─────────────────────────
+const APIX_YTMP3_URL = 'https://apix.wolvarex.com/api/music/ytmp3-download';
+const APIX_KEY = process.env.APIX_KEY || 'wxa_f_bb386b5e5a';
 
+// Pulls the 11-char video ID out of any YouTube URL (or accepts a bare ID)
+const extractYouTubeId = (input) => {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  const m = s.match(
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/|v\/)|music\.youtube\.com\/watch\?(?:.*&)?v=)([\w-]{11})/
+  );
+  return m ? m[1] : null;
+};
 
 // ─── NVIDIA NIM (build.nvidia.com) config ───────────────────────
 const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
@@ -297,17 +310,28 @@ const APIs = {
 
   // ─── YouTube Audio Download ───────────────────────────────────
 
+  // Now powered by Apix (apix.wolvarex.com) instead of apissupreme.vercel.app
   getIzumiDownloadByUrl: async (youtubeUrl) => {
+    const id = extractYouTubeId(youtubeUrl);
+    if (!id) throw new Error('invalid YouTube URL / video ID');
+
     const res = await tryRequest(() =>
-      axios.get(`https://apissupreme.vercel.app/media/ytmp3?apikey=supreme&url=${encodeURIComponent(youtubeUrl)}`, DOWNLOAD_HEADERS)
+      axios.get(APIX_YTMP3_URL, {
+        ...DOWNLOAD_HEADERS,
+        params: { id, provider: 'ytmp3', key: APIX_KEY }
+      })
     );
-    if (res?.data?.status && res?.data?.downloadUrl) {
+
+    const d = res?.data;
+    const direct = d?.directURL || d?.downloadURL || null;
+    if (d?.success && (d.proxyURL || direct)) {
       return {
-        download: res.data.downloadUrl,
-        title: res.data.title,
-        thumbnail: res.data.thumbnail,
-        duration: res.data.duration,
-        source: res.data.source
+        download: d.proxyURL || direct,        // proxy first (more stable)
+        fallback: direct,                       // raw CDN link, use if proxy fails
+        title: d.title,
+        thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
+        duration: undefined,                    // Apix does not return duration
+        source: d.provider || 'apix'
       };
     }
     throw new Error('no download URL returned');
@@ -469,4 +493,5 @@ const APIs = {
 APIs.NVIDIA_DEFAULT_MODEL = NVIDIA_DEFAULT_MODEL;
 APIs.NVIDIA_BASE_URL = NVIDIA_BASE_URL;
 APIs.getNvidiaApiKey = getNvidiaApiKey;
+APIs.extractYouTubeId = extractYouTubeId;
 module.exports = APIs;
