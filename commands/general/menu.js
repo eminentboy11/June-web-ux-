@@ -33,7 +33,7 @@ function createFakeContact(msg) {
 }
 
 const detectPlatform = () => {
-  if (process.env.JHP_PLATFORM) return "🚴 JHP";
+  if (process.env.JHP_PLATFORM) return "🚴 𝗝.𝗛.𝗣";
   if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) return "🚉 Railway";
   if (process.env.DYNO) return "☁️ Heroku";
   if (process.env.RENDER) return "⚡ Render";
