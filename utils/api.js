@@ -310,8 +310,30 @@ const APIs = {
 
   // ─── YouTube Audio Download ───────────────────────────────────
 
-  // Now powered by Apix (apix.wolvarex.com) instead of apissupreme.vercel.app
+  // Tries apissupreme.vercel.app first, falls back to Apix if it fails
   getIzumiDownloadByUrl: async (youtubeUrl) => {
+    try {
+      const res = await tryRequest(() =>
+        axios.get(`https://apissupreme.vercel.app/media/ytmp3?apikey=supreme&url=${encodeURIComponent(youtubeUrl)}`, DOWNLOAD_HEADERS)
+      );
+      if (res?.data?.status && res?.data?.downloadUrl) {
+        return {
+          download: res.data.downloadUrl,
+          title: res.data.title,
+          thumbnail: res.data.thumbnail,
+          duration: res.data.duration,
+          source: res.data.source
+        };
+      }
+      throw new Error('no download URL returned');
+    } catch (err) {
+      console.error('[apissupreme ytmp3] failed, trying Apix:', err.message);
+      return APIs.getApixDownloadByUrl(youtubeUrl);
+    }
+  },
+
+  // Apix (apix.wolvarex.com) YouTube MP3 — also usable on its own
+  getApixDownloadByUrl: async (youtubeUrl) => {
     const id = extractYouTubeId(youtubeUrl);
     if (!id) throw new Error('invalid YouTube URL / video ID');
 
