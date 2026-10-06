@@ -4,7 +4,7 @@ const database = require('../../database');
 
 module.exports = {
   name: 'setownername',
-  aliases: ['setowner_name'],
+  aliases: ['setowner'],
   category: 'owner',
   description: 'Change the bot owner display name',
   usage: '.setownername <new name>',
