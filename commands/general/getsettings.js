@@ -95,7 +95,7 @@ module.exports = {
             const anticallOn     = database.getBotSetting('anticall')      || false;
             const anticallAction = database.getBotSetting('anticallAction') || 'decline';
 
-            // ── Build flat bot settings list ──────────────────────────────────
+            // ── Build flat bot settings list (blue diamonds) ──────────────────
 
             let text =
                 `*CURRENT BOT SETTINGS*\n\n` +
@@ -130,7 +130,7 @@ module.exports = {
                 `🔹 *menuimage* : ${menuImage.custom ? 'custom (SQLite)' : 'bundled default'}\n` +
                 `🔹 *fontstyle* : ${fontStyle}\n`;
 
-            // ── Group settings (only when run in a group) ─────────────────────
+            // ── Group settings (only when run in a group) — yellow diamonds ───
 
             if (isGroup) {
                 let groupName = 'This Group';
@@ -147,31 +147,31 @@ module.exports = {
                 text +=
                     `\n*GROUP: ${groupName}*\n\n` +
 
-                    `🔹 *antilink* : ${flag(gs.antilink)}${act('antilinkAction')}\n` +
-                    `🔹 *antitag* : ${flag(gs.antitag)}${act('antitagAction')}\n` +
-                    `🔹 *antitagadmins* : ${flag(antiTagAdmins.enabled)}${antiTagAdmins.enabled ? ` — ${antiTagAdmins.action}` : ''}\n` +
-                    `🔹 *antiimage* : ${flag(gs.antiimage)}${act('antiimageAction')}\n` +
-                    `🔹 *antisticker* : ${flag(gs.antisticker)}${act('antistickerAction')}\n` +
-                    `🔹 *antiaudio* : ${flag(gs.antiaudio)}${act('antiaudioAction')}\n` +
-                    `🔹 *antigif* : ${flag(gs.antigif)}${act('antigifAction')}\n` +
-                    `🔹 *anticontact* : ${flag(gs.anticontact)}${act('anticontactAction')}\n` +
-                    `🔹 *antibadword* : ${flag(gs.antibadword)}${act('antibadwordAction')}\n` +
-                    `🔹 *antiviewonce* : ${flag(gs.antiviewonce)}\n` +
-                    `🔹 *antiforward* : ${flag(gs.antiforward)}\n` +
-                    `🔹 *antibot* : ${flag(gs.antibot)}\n` +
-                    `🔹 *antiall* : ${flag(antiAll)}\n` +
-                    `🔹 *antivideo* : ${flag(gs.antivideo)}\n` +
-                    `🔹 *antidemote* : ${flag(gs.antidemote)}\n` +
-                    `🔹 *antipromote* : ${flag(gs.antipromote)}\n` +
-                    `🔹 *antikickall* : ${flag(gs.antikickall)}\n` +
-                    `🔹 *antigroupmention* : ${flag(gs.antigroupmention)}${act('antigroupmentionAction')}\n` +
-                    `🔹 *antigroupstatus* : ${flag(gs.antigroupstatus)}${act('antigroupstatusAction')}\n` +
-                    `🔹 *antispam* : ${flag(gs.antiSpam)}${gs.antiSpam ? ` — ${gs.antiSpamLimit || 5} msgs/${gs.antiSpamWindow || 5}s → ${gs.antiSpamAction || 'delete'}` : ''}\n` +
-                    `🔹 *welcome* : ${flag(gs.welcome)}\n` +
-                    `🔹 *goodbye* : ${flag(gs.goodbye)}\n` +
-                    `🔹 *chatbot* : ${flag(gs.chatbot)}\n` +
-                    `🔹 *autosticker* : ${flag(gs.autosticker)}\n` +
-                    `🔹 *nsfw* : ${flag(gs.nsfw)}\n`;
+                    `🔸 *antilink* : ${flag(gs.antilink)}${act('antilinkAction')}\n` +
+                    `🔸 *antitag* : ${flag(gs.antitag)}${act('antitagAction')}\n` +
+                    `🔸 *antitagadmins* : ${flag(antiTagAdmins.enabled)}${antiTagAdmins.enabled ? ` — ${antiTagAdmins.action}` : ''}\n` +
+                    `🔸 *antiimage* : ${flag(gs.antiimage)}${act('antiimageAction')}\n` +
+                    `🔸 *antisticker* : ${flag(gs.antisticker)}${act('antistickerAction')}\n` +
+                    `🔸 *antiaudio* : ${flag(gs.antiaudio)}${act('antiaudioAction')}\n` +
+                    `🔸 *antigif* : ${flag(gs.antigif)}${act('antigifAction')}\n` +
+                    `🔸 *anticontact* : ${flag(gs.anticontact)}${act('anticontactAction')}\n` +
+                    `🔸 *antibadword* : ${flag(gs.antibadword)}${act('antibadwordAction')}\n` +
+                    `🔸 *antiviewonce* : ${flag(gs.antiviewonce)}\n` +
+                    `🔸 *antiforward* : ${flag(gs.antiforward)}\n` +
+                    `🔸 *antibot* : ${flag(gs.antibot)}\n` +
+                    `🔸 *antiall* : ${flag(antiAll)}\n` +
+                    `🔸 *antivideo* : ${flag(gs.antivideo)}\n` +
+                    `🔸 *antidemote* : ${flag(gs.antidemote)}\n` +
+                    `🔸 *antipromote* : ${flag(gs.antipromote)}\n` +
+                    `🔸 *antikickall* : ${flag(gs.antikickall)}\n` +
+                    `🔸 *antigroupmention* : ${flag(gs.antigroupmention)}${act('antigroupmentionAction')}\n` +
+                    `🔸 *antigroupstatus* : ${flag(gs.antigroupstatus)}${act('antigroupstatusAction')}\n` +
+                    `🔸 *antispam* : ${flag(gs.antiSpam)}${gs.antiSpam ? ` — ${gs.antiSpamLimit || 5} msgs/${gs.antiSpamWindow || 5}s → ${gs.antiSpamAction || 'delete'}` : ''}\n` +
+                    `🔸 *welcome* : ${flag(gs.welcome)}\n` +
+                    `🔸 *goodbye* : ${flag(gs.goodbye)}\n` +
+                    `🔸 *chatbot* : ${flag(gs.chatbot)}\n` +
+                    `🔸 *autosticker* : ${flag(gs.autosticker)}\n` +
+                    `🔸 *nsfw* : ${flag(gs.nsfw)}\n`;
             }
 
             try {
