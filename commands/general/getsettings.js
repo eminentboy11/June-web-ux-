@@ -19,7 +19,7 @@ module.exports = {
         try {
             const chatId  = extra.from;
             const isGroup = chatId.endsWith('@g.us');
-            const p       = database.getBotSetting('prefix') || '.';
+            const p       = database.getBotSetting('prefix');
             const footer  = `> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${database.getBotSetting('botName')}`;
 
             const ownerNums   = [].concat(database.getOwners() || []).map(n => String(n).replace(/\D/g, '')).filter(Boolean);
