@@ -390,7 +390,7 @@ const APIs = {
 
   getEliteProTechVideoByUrl: async (youtubeUrl) => {
     const res = await tryRequest(() =>
-      axios.get(`https://apiskeith2-production-3679.up.railway.app/download/video?url=${encodeURIComponent(youtubeUrl)}&format=mp4`, DOWNLOAD_HEADERS)
+      axios.get(`https://apis.keithsite.lol/download/video?url=${encodeURIComponent(youtubeUrl)}&format=mp4`, DOWNLOAD_HEADERS)
     );
     if (res?.data?.status && res?.data?.result) {
       return {
