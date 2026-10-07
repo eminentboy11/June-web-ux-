@@ -1,14 +1,8 @@
 'use strict';
 
 /**
- * AntiDelete — recovers deleted messages (text, image, video, audio, sticker).
- *
- * Configuration is bot-wide SQLite state. Captured messages use one record path:
- *   in-memory cache for immediate recovery
- *   → SQLite antidelete_messages for recovery after a restart
- *
- * There is no file-backed backup, standalone anti-delete JSON, or second
- * persistent message store.
+ * AntiDelete: recovers deleted messages (text, image, video, audio, sticker, document).
+ * Messages are cached in memory and persisted to SQLite (antidelete_messages).
  */
 
 const database = require('../../database');
@@ -52,9 +46,7 @@ function normaliseTimestamp(value) {
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
 }
 
-// Baileys media metadata includes Buffers such as mediaKey/file hashes. Encode
-// those explicitly so a SQLite JSON payload can be restored into valid Buffers
-// after a restart without writing a companion media/JSON file.
+// Encode Buffers/BigInts so the payload survives a JSON round trip in SQLite.
 function encodeForDatabase(value, seen = new WeakSet()) {
   if (value === null || value === undefined) return value;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
@@ -157,7 +149,6 @@ function flushPersistentMessages() {
       pendingPersistence.delete(key);
       saved += 1;
     } catch (error) {
-      // Keep the pending record for the retry interval or graceful shutdown.
       reportPersistenceError(error);
     }
   }
@@ -229,8 +220,6 @@ const storeMessage = (msg) => {
     chatMap.set(msg.key.id, entry);
     if (chatMap.size > 500) chatMap.delete(chatMap.keys().next().value);
 
-    // SQLite is the persistent record path; the memory Map remains only the
-    // immediate hot cache for messages arriving during this process lifetime.
     queuePersistentMessage(chatId, msg.key.id, entry);
   } catch (_) {}
 };
@@ -382,7 +371,6 @@ const handleDelete = async (sock, revokeItems) => {
       if (!stored) continue;
 
       await sendRecovered(sock, targetJid, stored, chatId);
-      // A recovered record no longer needs to occupy the capped SQLite store.
       removeStoredEntry(chatId, deletedId);
     }
   } catch (error) {
@@ -402,19 +390,24 @@ function getStoreStats() {
   };
 }
 
-// A short debounce avoids synchronous SQLite writes in the incoming-message
-// hot path. The interval retries a temporary database failure without creating
-// a second persistent store.
 setInterval(flushPersistentMessages, PERSIST_RETRY_INTERVAL_MS).unref();
 global.__JUNE_FLUSH_ANTIDELETE = flushPersistentMessages;
 process.prependListener('exit', flushPersistentMessages);
+
+const USAGE = '.antidelete on | chat | private | off | status';
+
+function statusLabel(mode) {
+  if (mode === 'chat') return '✅ ON (Chat)';
+  if (mode === 'private') return '✅ ON (Private)';
+  return '❌ OFF';
+}
 
 module.exports = {
   name: 'antidelete',
   aliases: ['antidel'],
   category: 'owner',
   description: 'Recover deleted messages',
-  usage: '.antidelete on/private/off/status',
+  usage: USAGE,
   adminOnly: true,
 
   storeMessage,
@@ -425,27 +418,36 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     const { reply } = extra;
-    const sub = (args[0] || '').toLowerCase();
-    const globalMode = getMode();
-    const statusLabel =
-      globalMode === 'chat' ? '✅ ON — Chat' :
-      globalMode === 'private' ? '✅ ON — Private' : '❌ OFF';
+    const sub = String(args[0] || '').toLowerCase().trim();
 
     if (!sub || sub === 'status') {
-      return reply(`🗑️ Anti-Delete: *${statusLabel}*\n\n.antidelete on | private | off`);
+      return reply(`🗑️ Anti-Delete: *${statusLabel(getMode())}*\n\n${USAGE}`);
     }
-    if (sub === 'on' || sub === 'chat') {
+
+    if (sub === 'on') {
+      const current = getMode();
+      const mode = current === 'private' ? 'private' : 'chat';
+      database.setAntideleteMode(mode);
+      return reply(mode === 'private'
+        ? '🗑️ Anti-Delete is *ON* (Private). Deleted msgs go to owner DM.'
+        : '🗑️ Anti-Delete is *ON* (Chat). Deleted msgs show in each chat.');
+    }
+
+    if (sub === 'chat') {
       database.setAntideleteMode('chat');
-      return reply('🗑️ Anti-Delete set to *ON* — deleted msgs shown in each chat.');
+      return reply('🗑️ Anti-Delete set to *Chat*. Deleted msgs show in each chat.');
     }
+
     if (sub === 'private') {
       database.setAntideleteMode('private');
-      return reply('🗑️ Anti-Delete set to *Private* — all deleted msgs go to owner DM.');
+      return reply('🗑️ Anti-Delete set to *Private*. Deleted msgs go to owner DM.');
     }
+
     if (sub === 'off') {
       database.setAntideleteMode('off');
       return reply('🗑️ Anti-Delete set to *OFF*.');
     }
-    return reply('⚠️ Usage: .antidelete on | private | off | status');
+
+    return reply(`⚠️ Usage: ${USAGE}`);
   },
 };
