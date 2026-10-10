@@ -222,6 +222,14 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         }));
     }
 
+    // One indexed message by id (used to quote a message after a restart).
+    function getIndexed(chatJid, msgId) {
+        const row = db.prepare(
+            'SELECT chat_jid, msg_id, from_me, sender, text, ts FROM webchat_messages WHERE chat_jid = ? AND msg_id = ? AND deleted = 0'
+        ).get(String(chatJid), String(msgId));
+        return row ? { chatJid: row.chat_jid, id: row.msg_id, fromMe: !!row.from_me, sender: row.sender, text: row.text || '', ts: row.ts } : null;
+    }
+
     // Newest indexed message of every chat — chats that exist only in SQLite (after a restart).
     function latestPerChat(limit = 200) {
         // Newest timestamp per chat (index-backed), then the row at that timestamp.
@@ -418,6 +426,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         search,
         pageBefore,
         latestPerChat,
+        getIndexed,
         countSince,
         senderName,
         phonebookName,

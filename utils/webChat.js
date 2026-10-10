@@ -1064,7 +1064,28 @@ function attachChatUI(app, deps) {
             const msg = store?.messages?.get(j)?.get(String(msgId));
             if (msg) return { msg, chat: j };
         }
+        // After a restart the recent store is empty: quote from the SQLite index instead.
+        for (const j of getJidMap().related(String(jid))) {
+            const row = chatStore.getIndexed(j, msgId);
+            if (row) return { msg: quoteFromIndex(row), chat: row.chatJid };
+        }
         return null;
+    }
+
+    // Build the minimal WhatsApp message shape a quote needs (id, sender, text).
+    function quoteFromIndex(row) {
+        const isGroup = String(row.chatJid).endsWith('@g.us');
+        return {
+            key: {
+                remoteJid: row.chatJid,
+                id: row.id,
+                fromMe: row.fromMe,
+                ...(isGroup && row.sender ? { participant: row.sender } : {}),
+            },
+            message: { conversation: row.text },
+            messageTimestamp: Math.floor((row.ts || 0) / 1000),
+            pushName: row.fromMe ? '' : (chatStore.phonebookName(row.sender) || ''),
+        };
     }
 
     function afterOutgoing(jid, sent) {
@@ -1403,10 +1424,8 @@ function attachChatUI(app, deps) {
                 if (typeof quotedMsgId !== 'string' || !MSG_ID_RE.test(quotedMsgId)) {
                     return res.status(400).json({ ok: false, error: 'invalid quotedMsgId' });
                 }
-                for (const j of getJidMap().related(jid)) {
-                    quoted = store?.messages?.get(j)?.get(quotedMsgId) || null;
-                    if (quoted) break;
-                }
+                const found = findStored(jid, quotedMsgId);
+                quoted = found ? found.msg : null;
                 if (!quoted) {
                     return res.status(404).json({ ok: false, error: 'quoted message not in recent store' });
                 }

@@ -1330,3 +1330,25 @@ test('saved contact names apply to LID-only chats', async (t) => {
     const chats = (await (await fetch(`${base}/api/chats`, { headers: { cookie } })).json()).chats;
     assert.equal(chats.find((c) => c.jid === LID9).name, 'Saved LID Friend');
 });
+
+test('replying to a message works after a restart (quote comes from the index)', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const PN7 = '2347000000007@s.whatsapp.net';
+    // Only the index holds this message: the in-memory recent store is empty.
+    ctx.chatStore.logMessage(makeMsg({ id: 'QUOTE1', jid: PN7, text: 'remember this', ts: 1700000000, pushName: 'Friend' }));
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const r = await fetch(`${base}/api/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', cookie },
+        body: JSON.stringify({ jid: PN7, text: 'my reply', quotedMsgId: 'QUOTE1' }),
+    });
+    assert.equal(r.status, 200, await r.clone().text());
+    const sentQuote = ctx.sent[ctx.sent.length - 1].options?.quoted;
+    assert.equal(sentQuote?.key?.id, 'QUOTE1');
+});
