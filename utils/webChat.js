@@ -846,9 +846,11 @@ function attachChatUI(app, deps) {
         const cursorId = dtos.length ? dtos[0].id : '';
         const hasMore = all.length > list.length
             || (cursorTs > 0 && chatStore.pageBefore(jids, cursorTs, 1, cursorId).length > 0);
+        const access = jid.endsWith('@g.us') ? await groupAccess(jid) : null;
         res.json({
             ok: true,
             jid,
+            groupAccess: access ? { announce: access.announce, canSend: access.canSend, known: access.known } : null,
             presence: getPresenceAny(jids),
             lastSeen: lastSeenAny(jids),
             messages: dtos,
@@ -997,6 +999,7 @@ function attachChatUI(app, deps) {
             if (typeof audio !== 'string' || !audio) {
                 return res.status(400).json({ ok: false, error: 'missing audio' });
             }
+            if (await blockedByAdminOnly(jid)) return res.status(403).json({ ok: false, error: ADMIN_ONLY_MSG });
             const buf = Buffer.from(audio, 'base64');
             if (!buf.length || buf.length > MAX_VOICE_BYTES) {
                 return res.status(400).json({ ok: false, error: `voice note too large (max ${MAX_VOICE_BYTES / 1024 / 1024}MB)` });
@@ -1089,6 +1092,7 @@ function attachChatUI(app, deps) {
             }
             const sock = getSock();
             if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            if (await blockedByAdminOnly(jid)) return res.status(403).json({ ok: false, error: ADMIN_ONLY_MSG });
             let forwarded = 0, failed = 0;
             for (const id of msgIds) {
                 const found = findStored(jid, id);
@@ -1117,6 +1121,7 @@ function attachChatUI(app, deps) {
             if (!Array.isArray(options) || options.length < 2 || options.length > 12) {
                 return res.status(400).json({ ok: false, error: 'a poll needs 2–12 options' });
             }
+            if (await blockedByAdminOnly(jid)) return res.status(403).json({ ok: false, error: ADMIN_ONLY_MSG });
             const opts = options.map((o) => (typeof o === 'string' ? o.trim() : '')).filter(Boolean);
             if (opts.length !== options.length || new Set(opts).size !== opts.length || opts.some((o) => o.length > 100)) {
                 return res.status(400).json({ ok: false, error: 'options must be unique, non-empty and at most 100 chars' });
@@ -1220,6 +1225,7 @@ function attachChatUI(app, deps) {
             if (typeof jid !== 'string' || !JID_RE.test(jid)) {
                 return res.status(400).json({ ok: false, error: 'invalid jid' });
             }
+            if (await blockedByAdminOnly(jid)) return res.status(403).json({ ok: false, error: ADMIN_ONLY_MSG });
             // Quoted reply: Baileys needs the full stored message (key +
             // message + timestamp) to render the quote on the other side.
             let quoted = null;
@@ -1336,6 +1342,43 @@ function attachChatUI(app, deps) {
     }
 
     // Digits of our own addresses — used to mark our own poll votes.
+    // ── admin-only groups ("announce" mode): who may send ─────────────────
+    const ADMIN_ONLY_MSG = 'Only admins can send messages in this group';
+    const groupAccessCache = new Map();   // group jid -> { ts, value }
+    const GROUP_ACCESS_TTL = 60 * 1000;
+    const GROUP_ACCESS_RETRY = 15 * 1000;
+
+    // announce = only admins may send. If the lookup fails, or the owner is not
+    // found in the member list, we allow the send and let WhatsApp decide: we
+    // never block on a guess.
+    async function groupAccess(jid) {
+        if (!String(jid).endsWith('@g.us')) return { isGroup: false, known: false, announce: false, amAdmin: false, canSend: true };
+        const hit = groupAccessCache.get(jid);
+        if (hit && Date.now() - hit.ts < (hit.value.known ? GROUP_ACCESS_TTL : GROUP_ACCESS_RETRY)) return hit.value;
+        let value = { isGroup: true, known: false, announce: false, amAdmin: false, canSend: true };
+        const sock = getSock();
+        if (sock && typeof sock.groupMetadata === 'function') {
+            try {
+                const meta = await withTimeout(sock.groupMetadata(jid), 4000);
+                const mine = myDigits();
+                const me = (meta?.participants || []).find((p) => {
+                    const ids = [p?.id, p?.lid, p?.phoneNumber].filter(Boolean).map(String);
+                    return ids.some((x) => mine.has(digits(x)) || jidCandidates(x).some((c) => mine.has(digits(c))));
+                });
+                const announce = !!meta?.announce;
+                const amAdmin = !!me && (me.admin === 'admin' || me.admin === 'superadmin');
+                value = { isGroup: true, known: !!me, announce, amAdmin, canSend: !announce || !me || amAdmin };
+            } catch (_) { /* keep the permissive default */ }
+        }
+        groupAccessCache.set(jid, { ts: Date.now(), value });
+        return value;
+    }
+
+    async function blockedByAdminOnly(jid) {
+        const a = await groupAccess(jid);
+        return a.isGroup && !a.canSend;
+    }
+
     function myDigits() {
         return new Set([digits(getSock()?.user?.id), digits(getSock()?.user?.lid)].filter(Boolean));
     }

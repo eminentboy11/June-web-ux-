@@ -151,6 +151,8 @@
   .emo-grid button{background:none;border:none;font-size:1.2rem;padding:4px 0;letter-spacing:0}
   .emo-grid button:hover{background:rgba(0,255,224,.12)}
   #send-form{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border);background:var(--panel);align-items:center;position:relative}
+  #send-form.restricted #send-text{font-style:italic;color:var(--orange)}
+  #send-form.restricted #send-text::placeholder{color:var(--orange);opacity:.85}
   #send-text{flex:1;min-width:0}
   #send-form button.tool{padding:.5rem .6rem;font-size:.95rem;letter-spacing:0}
   #logout{font-size:.62rem;padding:.3rem .6rem;margin-top:10px;align-self:flex-start}
@@ -377,10 +379,16 @@ async function loadStatus() {
 }
 
 function setComposerEnabled() {
-  const canSend = state.connected && !!state.currentJid;
-  for (const id of ['send-text', 'send-btn', 'attach-btn', 'emoji-btn', 'mic-btn', 'head-poll', 'head-search']) {
+  const restricted = !!state.currentIsGroup && state.groupCanSend === false;
+  const canSend = state.connected && !!state.currentJid && !restricted;
+  for (const id of ['send-text', 'send-btn', 'attach-btn', 'emoji-btn', 'mic-btn', 'head-poll']) {
     $(id).disabled = !canSend;
   }
+  // Search stays available even when the group is admin-only.
+  $('head-search').disabled = !(state.connected && !!state.currentJid);
+  const input = $('send-text');
+  input.placeholder = restricted ? 'Only admins can send messages' : 'type a message…';
+  $('send-form').classList.toggle('restricted', restricted);
 }
 
 async function loadChats() {
@@ -418,6 +426,7 @@ function openChat(jid, name, isGroup) {
   state.currentName = name || jid.split('@')[0];
   state.currentIsGroup = !!isGroup;
   state.historyGen++;
+  state.groupCanSend = null;
   state.memory = []; state.history = []; state.hasMore = false;
   state.olderPromise = null; state.historyFailures = 0; state.historyRetryAt = 0;
   setHistoryStatus('');
@@ -538,6 +547,8 @@ async function loadMessages() {
     if (jid !== state.currentJid) return;
     state.memory = r.messages || [];
     if (!state.history.length) state.hasMore = !!r.hasMore;
+    if (r.groupAccess) state.groupCanSend = r.groupAccess.canSend !== false;
+    setComposerEnabled();
     state.presence = r.presence || null;
     state.lastSeen = r.lastSeen || null;
     renderPresence();

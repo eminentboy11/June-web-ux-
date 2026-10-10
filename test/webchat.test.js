@@ -28,6 +28,9 @@ const GROUP = '120363000000@g.us';
 const PN2 = '2349000000001@s.whatsapp.net';
 const LID2 = '71109999999999@lid';
 const PN3 = '2349000000003@s.whatsapp.net';
+const ANN_GROUP = '120363111000@g.us';
+const ANN_ADMIN_GROUP = '120363222000@g.us';
+const OWNER_PN = '2348000000000@s.whatsapp.net';
 
 const voiceCalls = [];
 const relayCalls = [];
@@ -127,10 +130,12 @@ async function startTestServer() {
         readMessages: async (keys) => {
             readCalls.push(keys);
         },
-        groupMetadata: async (jid) => ({
-            subject: 'Test Group ' + jid.slice(0, 6),
-            participants: [{ id: DM }, { id: LID2 }],
-        }),
+        groupMetadata: async (jid) => {
+            // Admin-only ("announce") groups: the owner is a plain member, or an admin.
+            if (jid === ANN_GROUP) return { subject: 'Announce', announce: true, participants: [{ id: OWNER_PN }, { id: DM }] };
+            if (jid === ANN_ADMIN_GROUP) return { subject: 'Announce admin', announce: true, participants: [{ id: OWNER_PN, admin: 'admin' }, { id: DM }] };
+            return { subject: 'Test Group ' + jid.slice(0, 6), participants: [{ id: DM }, { id: LID2 }] };
+        },
         profilePictureUrl: async (jid) => 'https://cdn.example.com/' + encodeURIComponent(jid) + '.jpg',
     };
     const jidMap = makeMemoryJidMap();
@@ -272,6 +277,38 @@ test('web chat UI', async (t) => {
     await t.test('messages rejects an invalid jid', async () => {
         const r = await fetch(`${base}/api/messages?jid=evil`, { headers: { cookie } });
         assert.equal(r.status, 400);
+    });
+
+    await t.test('admin-only group: a non-admin owner is told they cannot send', async () => {
+        const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(ANN_GROUP)}`, { headers: { cookie } })).json();
+        assert.equal(j.groupAccess.announce, true);
+        assert.equal(j.groupAccess.canSend, false);
+    });
+
+    await t.test('admin-only group: sending is refused by the server with a clear message', async () => {
+        const r = await fetch(`${base}/api/send`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: ANN_GROUP, text: 'can I talk?' }),
+        });
+        assert.equal(r.status, 403);
+        assert.match((await r.json()).error, /Only admins can send/);
+    });
+
+    await t.test('admin-only group: an admin owner can still send', async () => {
+        const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(ANN_ADMIN_GROUP)}`, { headers: { cookie } })).json();
+        assert.equal(j.groupAccess.canSend, true);
+        const r = await fetch(`${base}/api/send`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: ANN_ADMIN_GROUP, text: 'admin hello' }),
+        });
+        assert.equal(r.status, 200);
+        sent.length = 0; // keep the shared outbox clean for the next send test
+    });
+
+    await t.test('normal group stays open to everyone', async () => {
+        const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(GROUP)}`, { headers: { cookie } })).json();
+        assert.equal(j.groupAccess.canSend, true);
+        assert.equal(j.groupAccess.announce, false);
     });
 
     await t.test('send validates the jid', async () => {
