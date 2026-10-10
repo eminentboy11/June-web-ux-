@@ -1203,3 +1203,37 @@ test('web chat UI generates a password when WEB_PASSWORD is unset', async (t) =>
     });
     assert.equal(r2.status, 503);
 });
+
+test('reactions never become message rows in the index', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wc-react-'));
+    const dbPath = path.join(dir, 'idx.db');
+    const phonebookPath = path.join(dir, 'pb.json');
+    const store = createWebChatStore({ dbPath, phonebookPath });
+    const reactionStanza = {
+        key: { id: 'R1', remoteJid: GROUP, fromMe: false, participant: PN2 },
+        message: { reactionMessage: { key: { id: 'T1', remoteJid: GROUP }, text: '❤️' } },
+        messageTimestamp: 100,
+    };
+    const text = {
+        key: { id: 'T1', remoteJid: GROUP, fromMe: false, participant: PN2 },
+        message: { conversation: 'hello group' },
+        messageTimestamp: 90,
+    };
+    store.logMessage(reactionStanza);
+    store.logMessage(text);
+    const rows = store.pageBefore([GROUP], 9e12, 50);
+    assert.deepStrictEqual(rows.map((r) => r.id), ['T1']);
+    store.close();
+
+    // A row written by an older build is removed when the index is opened again.
+    const Database = require('better-sqlite3');
+    const raw = new Database(dbPath);
+    raw.prepare('INSERT INTO webchat_messages (chat_jid, msg_id, from_me, sender, push_name, text, ts, deleted) VALUES (?, ?, 0, ?, ?, ?, ?, 0)')
+        .run(GROUP, 'OLD', PN2, 'x', '❤️ Reaction', 80);
+    raw.close();
+    const reopened = createWebChatStore({ dbPath, phonebookPath });
+    const after = reopened.pageBefore([GROUP], 9e12, 50).map((r) => r.id);
+    reopened.close();
+    assert.deepStrictEqual(after, ['T1']);
+    fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
-const { messageText, msgTs, digits } = require('./webChatText');
+const { messageText, msgTs, digits, unwrapMessage } = require('./webChatText');
 
 const MAX_ROWS = 100000;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // keep 30 days of history
@@ -56,6 +56,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             last_read_ts INTEGER NOT NULL
         );
     `);
+    // Reaction rows written by earlier builds show up as "❤️ Reaction" bubbles. Remove them.
+    db.prepare('DELETE FROM webchat_messages WHERE text = ?').run('❤️ Reaction');
     // Forward-only migrations for databases created by earlier phases.
     for (const sql of [
         'ALTER TABLE webchat_meta ADD COLUMN quoted TEXT',
@@ -138,6 +140,9 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             if (!msg?.key?.id || !msg?.key?.remoteJid) return;
             const jid = msg.key.remoteJid;
             if (jid === 'status@broadcast') return;
+            // Reactions are not messages. They update the reacted-to message's meta
+            // (webchat_meta.reactions), so they must never become rows of their own.
+            if (unwrapMessage(msg.message || {}).reactionMessage) return;
             const text = messageText(msg);
             if (!text) return;
             insertStmt.run(
