@@ -189,16 +189,23 @@ function createWebChatStore({ dbPath, phonebookPath }) {
     }
 
     // Older history for infinite scroll: rows strictly before `beforeTs`.
-    function pageBefore(jids, beforeTs, limit = 50) {
+    // Older rows strictly before the cursor (beforeTs, beforeId). Ties on the
+    // timestamp are broken by msg_id so a page boundary never drops messages
+    // that share a second with it. Returned oldest-first.
+    function pageBefore(jids, beforeTs, limit = 50, beforeId = '') {
         const list = (jids || []).filter(Boolean);
         if (!list.length) return [];
         const placeholders = list.map(() => '?').join(',');
+        const cond = beforeId ? '(ts < ? OR (ts = ? AND msg_id < ?))' : 'ts < ?';
+        const params = beforeId
+            ? [...list, beforeTs, beforeTs, String(beforeId), limit]
+            : [...list, beforeTs, limit];
         return db.prepare(
             `SELECT chat_jid, msg_id, from_me, sender, push_name, text, ts
                FROM webchat_messages
-              WHERE chat_jid IN (${placeholders}) AND ts < ? AND deleted = 0
-              ORDER BY ts DESC LIMIT ?`
-        ).all(...list, beforeTs, limit).reverse().map((r) => ({
+              WHERE chat_jid IN (${placeholders}) AND ${cond} AND deleted = 0
+              ORDER BY ts DESC, msg_id DESC LIMIT ?`
+        ).all(...params).reverse().map((r) => ({
             id: r.msg_id,
             fromMe: !!r.from_me,
             sender: r.sender,

@@ -789,11 +789,15 @@ function attachChatUI(app, deps) {
 
         // Infinite scroll: older history from the SQLite index.
         const before = Number(req.query.before) || 0;
+        const beforeId = MSG_ID_RE.test(String(req.query.beforeId || '')) ? String(req.query.beforeId) : '';
         if (before) {
-            const rows = chatStore.pageBefore(jids, before, limit);
+            // Ask for one extra row: it tells us exactly whether older history exists.
+            const rows = chatStore.pageBefore(jids, before, limit + 1, beforeId);
+            const hasMore = rows.length > limit;
+            const page = hasMore ? rows.slice(rows.length - limit) : rows;
             return res.json({
-                ok: true, jid, history: true, hasMore: rows.length === limit,
-                messages: rows.map((r) => ({
+                ok: true, jid, history: true, hasMore,
+                messages: page.map((r) => ({
                     ...r, media: null, status: null, reactions: [], quoted: null,
                     edited: false, deleted: false, mentions: [], forwarded: false, poll: null,
                 })),
@@ -836,8 +840,12 @@ function attachChatUI(app, deps) {
             }
             if (d.deleted) { d.text = 'This message was deleted'; d.media = null; d.poll = null; }
         }
-        const oldest = dtos[0]?.ts || 0;
-        const hasMore = all.length > list.length || (oldest > 0 && chatStore.pageBefore(jids, oldest, 1).length > 0);
+        // Cursor = oldest message on screen. With nothing in memory, ask the
+        // index for anything at all, so chats that only exist in SQLite still page.
+        const cursorTs = dtos.length ? (dtos[0].ts || 0) : Number.MAX_SAFE_INTEGER;
+        const cursorId = dtos.length ? dtos[0].id : '';
+        const hasMore = all.length > list.length
+            || (cursorTs > 0 && chatStore.pageBefore(jids, cursorTs, 1, cursorId).length > 0);
         res.json({
             ok: true,
             jid,

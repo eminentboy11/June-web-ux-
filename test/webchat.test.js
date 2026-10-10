@@ -983,6 +983,23 @@ test('web chat UI', async (t) => {
         assert.equal(old.text, 'ancient message');
     });
 
+    await t.test('history paging never skips messages that share a timestamp', async () => {
+        const ids = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5'];
+        for (const id of ids) handle.logMessage(makeMsg({ id, jid: DM, text: 'tie ' + id, ts: 1600000100 }));
+        const base0 = `${base}/api/messages?jid=${encodeURIComponent(DM)}&limit=2`;
+        const seen = [];
+        let url = `${base0}&before=${1600000200 * 1000}`;
+        for (let guard = 0; guard < 10; guard++) {
+            const j = await (await fetch(url, { headers: { cookie } })).json();
+            const ours = j.messages.filter((x) => ids.includes(x.id));
+            seen.unshift(...ours.map((x) => x.id));
+            if (!j.hasMore) break;
+            const oldest = j.messages[0];
+            url = `${base0}&before=${oldest.ts}&beforeId=${encodeURIComponent(oldest.id)}`;
+        }
+        assert.deepEqual(seen, ids, 'every tied message returned exactly once, oldest first');
+    });
+
     await t.test('last seen comes from presence updates', async () => {
         handle.handlePresenceUpdate(DM, { [DM]: { lastKnownPresence: 'unavailable', lastSeen: 1700000000 } });
         const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json();

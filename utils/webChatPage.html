@@ -66,8 +66,10 @@
   .sr-item:hover{background:rgba(0,255,224,.08)}
   .sr-item .sr-ts{color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:.62rem;flex:none}
   #messages{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:8px}
-  #load-older{align-self:center;font-size:.66rem;color:var(--muted);padding:4px 10px;border:1px solid var(--border);border-radius:20px;background:none}
-  #load-older:hover{color:var(--cyan)}
+  #history-status{order:-1;position:sticky;top:6px;height:0;margin-bottom:-8px;z-index:4;display:flex;justify-content:center;overflow:visible;pointer-events:none}
+  #history-status[hidden]{display:none}
+  #history-status span{background:#03060c;border:1px solid var(--border);color:var(--muted);font-size:.66rem;padding:4px 12px;border-radius:20px;white-space:nowrap}
+  #history-status.err span{color:var(--orange)}
   .date-sep{align-self:center;background:rgba(0,255,224,.08);border:1px solid var(--border);color:var(--muted);
     font-size:.62rem;letter-spacing:1px;padding:4px 12px;border-radius:20px;font-family:'JetBrains Mono',monospace;margin:6px 0}
   .msg-row{display:flex}
@@ -274,8 +276,12 @@
 const state = {
   chats: [], currentJid: null, currentName: '', currentIsGroup: false, filter: '', connected: false,
   memory: [],          // latest page from the live store
-  history: [],         // older pages loaded by scrolling up / search
+  history: [],         // older pages loaded automatically (or by scrolling up / search)
   hasMore: false,
+  historyGen: 0,       // bumped on every chat switch; stale loads check it and drop out
+  olderPromise: null,  // the in-flight older-page request, if any (dedupes callers)
+  historyFailures: 0,
+  historyRetryAt: 0,
   presence: null, lastSeen: null,
   replyTo: null, editing: null, forwardId: null,
   mentions: new Map(), // jid -> true, for mentions present in the composer
@@ -411,7 +417,10 @@ function openChat(jid, name, isGroup) {
   state.currentJid = jid;
   state.currentName = name || jid.split('@')[0];
   state.currentIsGroup = !!isGroup;
+  state.historyGen++;
   state.memory = []; state.history = []; state.hasMore = false;
+  state.olderPromise = null; state.historyFailures = 0; state.historyRetryAt = 0;
+  setHistoryStatus('');
   state.presence = null; state.lastSeen = null;
   state.mentions = new Map();
   $('app').classList.add('chat-open');
@@ -425,11 +434,14 @@ function openChat(jid, name, isGroup) {
   $('in-search').hidden = true;
   $('messages').textContent = '';
   setComposerEnabled();
-  loadMessages();
+  const gen = state.historyGen;
+  loadMessages().then(() => { if (gen === state.historyGen) autoLoadHistory(); });
   $('send-text').focus();
 }
 
 function closeChat() {
+  state.historyGen++;
+  setHistoryStatus('');
   stopTyping();
   cancelRecording();
   setReply(null);
@@ -536,14 +548,11 @@ async function loadMessages() {
 function renderMessages(scrollToBottomIfNear) {
   const box = $('messages');
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  // Distance from the bottom is what stays stable when older rows are prepended.
+  const distanceFromBottom = box.scrollHeight - box.scrollTop;
   const all = combinedMessages();
   box.textContent = '';
-  if (state.hasMore) {
-    const b = el('button', '', 'load older messages');
-    b.id = 'load-older';
-    b.addEventListener('click', loadOlder);
-    box.appendChild(b);
-  }
+  box.appendChild(historyEl);
   if (!all.length) box.appendChild(el('div', 'empty', 'no recent messages — the store keeps the latest per chat'));
 
   let prev = null;
@@ -560,6 +569,7 @@ function renderMessages(scrollToBottomIfNear) {
     prev = m;
   }
   if (scrollToBottomIfNear && nearBottom) box.scrollTop = box.scrollHeight;
+  else box.scrollTop = Math.max(0, box.scrollHeight - distanceFromBottom);
 }
 
 function renderRow(m, cont) {
@@ -779,24 +789,90 @@ async function votePoll(m, optionText) {
   } catch (err) { alert(err.message || 'vote failed'); }
 }
 
-/* ── history paging ────────────────────────────────────────────────────── */
+/* ── history paging (automatic) ───────────────────────────────────────── */
 
-async function loadOlder() {
-  const all = combinedMessages();
-  const oldest = all.find((m) => m.ts);
-  if (!oldest || !state.currentJid) return;
+const HISTORY_PAGE = 100;        // rows per request (server max is 200)
+const HISTORY_MAX = 1000;        // most older messages loaded per chat
+const HISTORY_RETRY_MS = 3000;
+const HISTORY_MAX_FAILURES = 2;  // consecutive failures before the auto-loader gives up
+
+const historyEl = document.createElement('div');
+historyEl.id = 'history-status';
+historyEl.hidden = true;
+historyEl.appendChild(document.createElement('span'));
+
+function setHistoryStatus(text, isError) {
+  if (!text) { historyEl.hidden = true; return; }
+  historyEl.hidden = false;
+  historyEl.className = isError ? 'err' : '';
+  historyEl.firstChild.textContent = text;
+}
+
+// Fetch one older page. Returns 'added' | 'none' | 'failed' | 'stale' | 'cooldown'.
+// Concurrent callers share the in-flight request, so nothing is fetched twice.
+function loadOlder() {
+  if (state.olderPromise) return state.olderPromise;
+  if (!state.currentJid || !state.hasMore) return Promise.resolve('none');
+  if (state.history.length >= HISTORY_MAX) {
+    state.hasMore = false;
+    setHistoryStatus('showing the latest ' + HISTORY_MAX + ' messages');
+    return Promise.resolve('none');
+  }
+  if (Date.now() < state.historyRetryAt) return Promise.resolve('cooldown');
+
+  const gen = state.historyGen;
   const jid = state.currentJid;
-  const box = $('messages');
-  const before = box.scrollHeight;
-  try {
-    const r = await api('/api/messages?jid=' + encodeURIComponent(jid) + '&before=' + oldest.ts + '&limit=50');
-    if (jid !== state.currentJid) return;
-    const known = new Set(combinedMessages().map((m) => m.id));
-    state.history = [...(r.messages || []).filter((m) => !known.has(m.id)), ...state.history];
-    state.hasMore = !!r.hasMore;
-    renderMessages(false);
-    box.scrollTop = box.scrollHeight - before;
-  } catch (_) {}
+  const oldest = combinedMessages().find((m) => m.ts);
+  // Cursor = the oldest message on screen (timestamp + id, so ties are not skipped).
+  const url = '/api/messages?jid=' + encodeURIComponent(jid) +
+    '&before=' + (oldest ? oldest.ts : Date.now() + 1000) +
+    (oldest && oldest.id ? '&beforeId=' + encodeURIComponent(oldest.id) : '') +
+    '&limit=' + HISTORY_PAGE;
+
+  setHistoryStatus('loading earlier messages…');
+  const p = (async () => {
+    try {
+      const r = await api(url);
+      if (gen !== state.historyGen) return 'stale';
+      if (!r || r.ok === false) throw new Error((r && r.error) || 'history request failed');
+      const known = new Set(combinedMessages().map((m) => m.id));
+      const fresh = (r.messages || []).filter((m) => !known.has(m.id));
+      state.history = [...fresh, ...state.history];
+      // Stop when the server reports nothing older, or when a page adds nothing new.
+      state.hasMore = !!r.hasMore && fresh.length > 0;
+      state.historyFailures = 0;
+      setHistoryStatus('');
+      renderMessages(false);   // keeps the reader's position (see renderMessages)
+      return fresh.length ? 'added' : 'none';
+    } catch (_) {
+      if (gen !== state.historyGen) return 'stale';
+      state.historyFailures++;
+      state.historyRetryAt = Date.now() + HISTORY_RETRY_MS;
+      setHistoryStatus("couldn't load older messages · scroll up to retry", true);
+      return 'failed';
+    }
+  })().finally(() => {
+    if (gen === state.historyGen) state.olderPromise = null;
+  });
+  state.olderPromise = p;
+  return p;
+}
+
+// Runs after a chat opens: keeps pulling older pages until the history is
+// exhausted, the cap is reached, or repeated failures stop it.
+async function autoLoadHistory() {
+  const gen = state.historyGen;
+  while (gen === state.historyGen && state.hasMore) {
+    const res = await loadOlder();
+    if (gen !== state.historyGen) return;
+    if (res === 'added') continue;
+    if (res === 'failed') {
+      if (state.historyFailures > HISTORY_MAX_FAILURES) return;
+      await new Promise((r) => setTimeout(r, HISTORY_RETRY_MS));
+      continue;
+    }
+    return; // none | cooldown | stale
+  }
 }
 
 /* ── in-chat search with jump-to ───────────────────────────────────────── */
@@ -816,7 +892,7 @@ async function reachMessage(id) {
   for (let i = 0; i < 15; i++) {
     if (jumpToMessage(id)) return true;
     if (!state.hasMore) break;
-    await loadOlder();
+    if ((await loadOlder()) !== 'added') break;
   }
   return jumpToMessage(id);
 }
