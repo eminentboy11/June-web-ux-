@@ -582,6 +582,19 @@ function attachChatUI(app, deps) {
     }
 
     // lid-mapping.update — Baileys reports { pn, lid } for one person.
+    // Saved contact names from the address book. LID entries are stored under their phone number.
+    function handleContacts(list) {
+        try {
+            for (const c of (Array.isArray(list) ? list : [])) {
+                const id = c?.id;
+                if (!id || !c.name) continue;
+                const canon = getJidMap().canonical(String(id));
+                if (!canon.endsWith('@s.whatsapp.net')) continue;
+                chatStore.setContactName(canon, c.name);
+            }
+        } catch (_) {}
+    }
+
     function handleLidMapping(mapping) {
         try {
             if (!mapping) return;
@@ -652,6 +665,7 @@ function attachChatUI(app, deps) {
     function chatDisplayName(jid, lastMsg) {
         const canon = getJidMap().canonical(jid);
         if (canon.endsWith('@g.us')) return groupNames.get(canon) || null;
+        // lastMsg must be the other side's message: our own pushName is our name, not theirs.
         return chatStore.phonebookName(canon) || lastMsg?.pushName || null;
     }
 
@@ -704,14 +718,16 @@ function attachChatUI(app, deps) {
                 const isGroup = jid.endsWith('@g.us');
                 const lastRead = chatStore.getRead(canon);
                 let last = null, unread = 0, count = 0;
+                let lastIn = null;
                 for (const m of msgs.values()) {
                     if (!m?.key || m.message?.reactionMessage) continue; // reactions aren't previews
                     count++;
                     last = m; // insertion order → last non-reaction is newest
+                    if (!m.key.fromMe) lastIn = m;
                     if (!m.key.fromMe && msgTs(m) > lastRead) unread++;
                 }
                 if (!last) continue;
-                const name = chatDisplayName(jid, last) || jid.split('@')[0];
+                const name = chatDisplayName(jid, lastIn) || jid.split('@')[0];
                 const lastTs = last.messageTimestamp ? Number(last.messageTimestamp) * 1000 : null;
                 const preview = String(slimMessage(last).text || '').slice(0, 100);
                 const existing = merged.get(canon);
@@ -746,7 +762,7 @@ function attachChatUI(app, deps) {
             const isGroup = canon.endsWith('@g.us');
             const lastRead = chatStore.getRead(canon);
             const jids = getJidMap().related(canon);
-            const name = chatDisplayName(canon, row) || canon.split('@')[0];
+            const name = chatDisplayName(canon, { pushName: chatStore.lastIncomingName(jids) }) || canon.split('@')[0];
             merged.set(canon, {
                 jid: canon,
                 isGroup,
@@ -1623,7 +1639,7 @@ function attachChatUI(app, deps) {
 
     /* ── read receipts, reactions, edits etc. stay below ─────────────── */
 
-    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete };
+    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts };
 }
 
 module.exports = { attachChatUI };

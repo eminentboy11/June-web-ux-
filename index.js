@@ -1281,6 +1281,10 @@ async function startJunexBot() {
     // Web chat UI: index every message (in + out) for search, and keep the
     // phonebook (number → WhatsApp name) fresh.
     // Web chat UI: LID ↔ PN identity mapping (one person, two addresses).
+    // Web chat UI: saved contact names (what the phone shows), not profile names.
+    const onContacts = (list) => { try { webChatHandle?.handleContacts?.(list) } catch (_) {} }
+    sock.ev.on('contacts.upsert', onContacts)
+    sock.ev.on('contacts.update', onContacts)
     sock.ev.on('lid-mapping.update', (mapping) => {
         try { webChatHandle?.handleLidMapping?.(mapping) } catch (_) {}
     })

@@ -1262,3 +1262,31 @@ test('after a restart, chats and messages come from the SQLite index', async (t)
     const page = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}&limit=50`, { headers: { cookie } })).json();
     assert.deepStrictEqual(page.messages.map((m) => m.text), ['before restart', 'still there']);
 });
+
+test('chat names come from the other person, and saved contact names win', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const PN9 = '2349000000009@s.whatsapp.net';
+    ctx.chatStore.logMessage(makeMsg({ id: 'N1', jid: PN9, text: 'hi from them', ts: 1700000000, pushName: 'Wazz' }));
+    // Our own last message carries our name; it must not become the chat's name.
+    ctx.chatStore.logMessage(makeMsg({ id: 'N2', jid: PN9, fromMe: true, text: 'my reply', ts: 1700000100, pushName: 'Imppecable' }));
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const list = async () => (await (await fetch(`${base}/api/chats`, { headers: { cookie } })).json()).chats;
+
+    let chat = (await list()).find((c) => c.jid === PN9);
+    assert.equal(chat.name, 'Wazz', 'name is the other person, not us');
+
+    // A saved contact name from the address book beats the profile name.
+    ctx.handle.handleContacts([{ id: PN9, name: 'Saved Friend' }]);
+    chat = (await list()).find((c) => c.jid === PN9);
+    assert.equal(chat.name, 'Saved Friend');
+    // A later profile name must not overwrite the saved name.
+    ctx.chatStore.logMessage(makeMsg({ id: 'N3', jid: PN9, text: 'again', ts: 1700000200, pushName: 'Other Profile' }));
+    chat = (await list()).find((c) => c.jid === PN9);
+    assert.equal(chat.name, 'Saved Friend');
+});

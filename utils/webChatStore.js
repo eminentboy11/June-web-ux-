@@ -155,9 +155,10 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                 msgTs(msg) || Date.now()
             );
             // Phonebook: remember the WhatsApp profile name of everyone who DMs us.
-            if (!msg.key.fromMe && msg.pushName) {
+            if (!msg.key.fromMe && msg.pushName && !msg.key.participant) {
                 const num = digits(jid);
-                if (num && phonebook[num]?.name !== msg.pushName) {
+                // A saved contact name (from the address book) always wins over a profile name.
+                if (num && !phonebook[num]?.saved && phonebook[num]?.name !== msg.pushName) {
                     phonebook[num] = { name: msg.pushName, updated: Date.now() };
                     phonebookDirty = true;
                 }
@@ -253,6 +254,29 @@ function createWebChatStore({ dbPath, phonebookPath }) {
 
     function markIndexDeleted(chatJid, msgId) {
         try { markDeletedStmt.run(chatJid, String(msgId)); } catch (_) {}
+    }
+
+    // Saved contact name from WhatsApp's address book (contacts.upsert / contacts.update).
+    function setContactName(jid, name) {
+        const num = digits(jid);
+        const clean = String(name || '').trim();
+        if (!num || !clean) return;
+        if (phonebook[num]?.saved && phonebook[num].name === clean) return;
+        phonebook[num] = { name: clean, saved: true, updated: Date.now() };
+        phonebookDirty = true;
+    }
+
+    // Latest name the other side used in this chat (never one of our own messages).
+    function lastIncomingName(jids) {
+        const list = (jids || []).filter(Boolean);
+        if (!list.length) return '';
+        const placeholders = list.map(() => '?').join(',');
+        const row = db.prepare(
+            `SELECT push_name FROM webchat_messages
+              WHERE chat_jid IN (${placeholders}) AND from_me = 0 AND deleted = 0 AND push_name <> ''
+              ORDER BY ts DESC LIMIT 1`
+        ).get(...list);
+        return row ? row.push_name : '';
     }
 
     function phonebookName(jid) {
@@ -396,6 +420,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         countSince,
         senderName,
         phonebookName,
+        setContactName,
+        lastIncomingName,
         getMsgMeta,
         getMsgMetas,
         setMsgMeta,
