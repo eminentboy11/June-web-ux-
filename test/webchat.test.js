@@ -335,6 +335,31 @@ test('web chat UI', async (t) => {
         assert.equal(ctx.getDownloadCalls(), 1, 'second request served from cache');
     });
 
+    await t.test('media endpoint honours Range requests for audio seeking', async () => {
+        const url = `${base}/api/media?jid=${encodeURIComponent(DM)}&id=MEDIA1`;
+        const full = await fetch(url, { headers: { cookie } });
+        assert.equal(full.headers.get('accept-ranges'), 'bytes');
+        assert.equal(full.status, 200);
+
+        const mid = await fetch(url, { headers: { cookie, range: 'bytes=3-' } });
+        assert.equal(mid.status, 206);
+        assert.equal(mid.headers.get('content-range'), 'bytes 3-7/8');
+        assert.equal(await mid.text(), 'BYTES');
+
+        const head = await fetch(url, { headers: { cookie, range: 'bytes=0-2' } });
+        assert.equal(head.status, 206);
+        assert.equal(head.headers.get('content-range'), 'bytes 0-2/8');
+        assert.equal(await head.text(), 'PNG');
+
+        const tail = await fetch(url, { headers: { cookie, range: 'bytes=-5' } });
+        assert.equal(tail.status, 206);
+        assert.equal(await tail.text(), 'BYTES');
+
+        const bad = await fetch(url, { headers: { cookie, range: 'bytes=50-60' } });
+        assert.equal(bad.status, 416);
+        assert.equal(bad.headers.get('content-range'), 'bytes */8');
+    });
+
     await t.test('media endpoint validates input', async () => {
         const badJid = await fetch(`${base}/api/media?jid=evil&id=MEDIA1`, { headers: { cookie } });
         assert.equal(badJid.status, 400);

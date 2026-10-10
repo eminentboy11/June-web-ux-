@@ -259,6 +259,44 @@ function defaultMsgId(sock) {
     }
 }
 
+/**
+ * Send a buffer honouring HTTP Range requests. Audio/video players (iOS Safari
+ * in particular) need 206 partial responses to seek and to learn the duration;
+ * without them voice-note progress bars stay stuck.
+ */
+function sendWithRange(req, res, buf) {
+    const total = buf.length;
+    res.setHeader('Accept-Ranges', 'bytes');
+    const header = req.headers.range;
+    if (!header) {
+        res.setHeader('Content-Length', total);
+        return res.end(buf);
+    }
+    const m = /^bytes=(\d*)-(\d*)$/.exec(String(header).trim());
+    if (!m || (m[1] === '' && m[2] === '')) {
+        res.setHeader('Content-Range', `bytes */${total}`);
+        return res.status(416).end();
+    }
+    let start;
+    let end;
+    if (m[1] === '') {                       // suffix: last N bytes
+        const n = Number(m[2]);
+        start = Math.max(0, total - n);
+        end = total - 1;
+    } else {
+        start = Number(m[1]);
+        end = m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1);
+    }
+    if (total === 0 || start >= total || start > end) {
+        res.setHeader('Content-Range', `bytes */${total}`);
+        return res.status(416).end();
+    }
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+    res.setHeader('Content-Length', end - start + 1);
+    return res.end(buf.subarray(start, end + 1));
+}
+
 function attachChatUI(app, deps) {
     const getSock = deps.getSock || (() => global.currentSock || null);
     const getBotState = deps.getBotState || (() => global.botState || 'unknown');
@@ -852,7 +890,7 @@ function attachChatUI(app, deps) {
                 res.setHeader('Content-Disposition', 'inline');
             }
             res.setHeader('Cache-Control', 'private, max-age=3600');
-            res.send(media.buf);
+            sendWithRange(req, res, media.buf);
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
         }

@@ -91,7 +91,7 @@
   .media-img{max-width:260px;max-height:300px;border-radius:8px;display:block;cursor:pointer;border:1px solid var(--border)}
   .media-video{max-width:300px;border-radius:8px;display:block;border:1px solid var(--border)}
   .media-audio{max-width:280px;display:block}
-  .wave{display:flex;align-items:flex-end;gap:2px;height:28px;margin-bottom:4px;min-width:200px}
+  .wave{display:flex;align-items:flex-end;gap:2px;height:28px;margin-bottom:4px;min-width:200px;cursor:pointer;touch-action:manipulation}
   .wave span{flex:1;background:var(--muted);border-radius:2px;min-height:3px;opacity:.7}
   .wave span.played{background:var(--cyan);opacity:1}
   .doc-card{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-decoration:none;color:var(--text);max-width:280px}
@@ -615,7 +615,7 @@ function renderRow(m, cont) {
 
   // Tap a bubble to show its actions (phones have no hover).
   bubble.addEventListener('click', (ev) => {
-    if (ev.target.closest('button, a, .quote, audio, video, img')) return;
+    if (ev.target.closest('button, a, .quote, audio, video, img, .wave')) return;
     document.querySelectorAll('.msg-row.show-actions').forEach((r) => { if (r !== row) r.classList.remove('show-actions'); });
     row.classList.toggle('show-actions');
   });
@@ -669,27 +669,71 @@ function renderMedia(m) {
   return mediaBox;
 }
 
+// Only one voice note plays at a time (like WhatsApp).
+let activeVoice = null;
+
 function renderVoice(m) {
   const box = el('div', 'media');
   const bars = m.media.waveform && m.media.waveform.length ? m.media.waveform : null;
   const audio = el('audio', 'media-audio');
   audio.controls = true;
-  audio.preload = 'none';
+  audio.preload = 'metadata';
   audio.src = mediaSrc(m);
+
+  // Some recordings report Infinity/NaN duration until fully buffered; fall back
+  // to the length WhatsApp sent with the message.
+  const knownSecs = Number(m.media.seconds) || 0;
+  const hasRealDuration = () => isFinite(audio.duration) && audio.duration > 0;
+  const durationOf = () => (hasRealDuration() ? audio.duration : knownSecs);
+
+  let wave = null;
+  let spans = [];
+  let frame = 0;
+  const paint = () => {
+    if (!spans.length) return;
+    const dur = durationOf();
+    const ratio = dur > 0 ? Math.min(1, Math.max(0, audio.currentTime / dur)) : 0;
+    const lit = ratio * spans.length;
+    for (let i = 0; i < spans.length; i++) spans[i].classList.toggle('played', i < lit);
+  };
+  // Smooth progress while playing (timeupdate alone only fires ~4x/second).
+  const loop = () => {
+    paint();
+    frame = audio.paused ? 0 : requestAnimationFrame(loop);
+  };
+
   if (bars) {
-    const wave = el('div', 'wave');
+    wave = el('div', 'wave');
+    wave.title = 'Tap to seek';
     for (const v of bars) {
       const bar = el('span');
       bar.style.height = Math.max(3, Math.round((v / 99) * 28)) + 'px';
       wave.appendChild(bar);
     }
-    audio.addEventListener('timeupdate', () => {
-      const spans = wave.children;
-      const played = audio.duration ? Math.floor((audio.currentTime / audio.duration) * spans.length) : 0;
-      for (let i = 0; i < spans.length; i++) spans[i].classList.toggle('played', i < played);
+    spans = Array.from(wave.children);
+    wave.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (!hasRealDuration()) { audio.play().catch(() => {}); return; }
+      const rect = wave.getBoundingClientRect();
+      const f = Math.min(1, Math.max(0, (ev.clientX - rect.left) / (rect.width || 1)));
+      audio.currentTime = f * audio.duration;
+      paint();
+      audio.play().catch(() => {});
     });
-    box.appendChild(wave);
   }
+
+  audio.addEventListener('play', () => {
+    if (activeVoice && activeVoice !== audio) activeVoice.pause();
+    activeVoice = audio;
+    if (!frame) frame = requestAnimationFrame(loop);
+  });
+  audio.addEventListener('pause', paint);
+  audio.addEventListener('ended', () => { audio.currentTime = 0; paint(); });
+  for (const ev of ['timeupdate', 'seeked', 'loadedmetadata', 'durationchange']) {
+    audio.addEventListener(ev, paint);
+  }
+
+  if (wave) box.appendChild(wave);
   box.appendChild(audio);
   if (m.media.seconds) box.appendChild(el('div', 'poll-meta', '🎙️ ' + m.media.seconds + 's'));
   return box;
