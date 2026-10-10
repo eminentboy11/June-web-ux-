@@ -1196,6 +1196,31 @@ function attachChatUI(app, deps) {
 
     // Group members for the @mention picker (cached 5 minutes).
     const memberCache = new Map(); // group jid -> { ts, list }
+    // Phone-number address for each group participant, where we can work it out:
+    // the participant's phoneNumber field, the id itself, the saved LID↔PN map,
+    // then a short live lookup for LID-only members. Capped so big groups stay fast.
+    async function resolvePhoneNumbers(parts, sock) {
+        const isPn = (j) => /@s\.whatsapp\.net$/.test(j) && !!digits(j);
+        const out = new Map();
+        const needLive = [];
+        for (const p of parts) {
+            const id = String(p?.id || '');
+            if (!id) continue;
+            const field = String(p?.phoneNumber || '');
+            const fromField = field ? (field.includes('@') ? field : digits(field) + '@s.whatsapp.net') : '';
+            const pn = [fromField, id, canonicalChat(id)].find(isPn);
+            if (pn) out.set(id, pn);
+            else if (id.endsWith('@lid')) needLive.push(id);
+        }
+        await Promise.all(needLive.slice(0, 60).map((id) =>
+            withTimeout(getJidMap().enrich(id, sock), 1500).catch(() => {})));
+        for (const id of needLive) {
+            const pn = canonicalChat(id);
+            if (isPn(pn)) out.set(id, pn);
+        }
+        return out;
+    }
+
     app.get('/api/groupmembers', requireAuth, async (req, res) => {
         const jid = String(req.query.jid || '');
         if (!JID_RE.test(jid) || !jid.endsWith('@g.us')) return res.status(400).json({ ok: false, error: 'invalid group jid' });
@@ -1206,14 +1231,20 @@ function attachChatUI(app, deps) {
         try {
             const meta = await withTimeout(sock.groupMetadata(jid), 6000);
             const mine = myDigits();
-            const list = (meta?.participants || [])
+            const parts = meta?.participants || [];
+            // Messages are stored under the phone-number (PN) address, so every
+            // member is shown and opened by that address, never by a raw LID.
+            const pnFor = await resolvePhoneNumbers(parts, sock);
+            const list = parts
                 .map((p) => {
                     const id = String(p?.id || '');
-                    const name = chatStore.phonebookName(canonicalChat(id)) || digits(canonicalChat(id)) || digits(id);
+                    const pn = pnFor.get(id) || null;
+                    const chatJid = pn || canonicalChat(id);
+                    const name = (pn && chatStore.phonebookName(pn)) || (pn ? '+' + digits(pn) : 'unknown number');
                     const me = mine.has(digits(id)) || [p?.lid, p?.phoneNumber].some((x) => x && mine.has(digits(x)));
-                    return { jid: canonicalChat(id), name, admin: !!p?.admin, me };
+                    return { jid: chatJid, name, admin: !!p?.admin, me };
                 })
-                .filter((m) => m.jid);
+                .filter((m) => m.jid && JID_RE.test(m.jid));
             memberCache.set(jid, { ts: Date.now(), list });
             res.json({ ok: true, members: list });
         } catch (e) {

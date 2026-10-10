@@ -31,6 +31,7 @@ const PN3 = '2349000000003@s.whatsapp.net';
 const ANN_GROUP = '120363111000@g.us';
 const ANN_ADMIN_GROUP = '120363222000@g.us';
 const ANN_UNKNOWN_GROUP = '120363333000@g.us';
+const ANN_LID_GROUP = '120363444000@g.us';
 const OWNER_PN = '2348000000000@s.whatsapp.net';
 
 const voiceCalls = [];
@@ -134,6 +135,10 @@ async function startTestServer() {
         groupMetadata: async (jid) => {
             // Admin-only ("announce") groups: the owner is a plain member, or an admin.
             if (jid === ANN_GROUP) return { subject: 'Announce', announce: true, participants: [{ id: OWNER_PN }, { id: DM }] };
+            if (jid === ANN_LID_GROUP) return { subject: 'LID admins', announce: true, participants: [
+                { id: '71100000005555@lid', phoneNumber: '2347000000009@s.whatsapp.net', admin: 'admin' },
+                { id: DM },
+            ] };
             if (jid === ANN_UNKNOWN_GROUP) return { subject: 'Announce, owner not listed', announce: true, participants: [{ id: DM }] };
             if (jid === ANN_ADMIN_GROUP) return { subject: 'Announce admin', announce: true, participants: [{ id: OWNER_PN, admin: 'admin' }, { id: DM }] };
             return { subject: 'Test Group ' + jid.slice(0, 6), participants: [{ id: DM }, { id: LID2 }] };
@@ -324,6 +329,14 @@ test('web chat UI', async (t) => {
         assert.ok(me, 'owner is flagged as me');
         assert.equal(me.admin, true);
         assert.equal(j.members.filter((m) => m.admin && !m.me).length, 0, 'no other admins in this fixture');
+    });
+
+    await t.test('group members are shown by phone number, never by a raw LID', async () => {
+        const j = await (await fetch(`${base}/api/groupmembers?jid=${encodeURIComponent(ANN_LID_GROUP)}`, { headers: { cookie } })).json();
+        const admin = j.members.find((m) => m.admin);
+        assert.equal(admin.jid, '2347000000009@s.whatsapp.net', 'opens the phone-number chat');
+        assert.equal(admin.name, '+2347000000009');
+        assert.ok(!j.members.some((m) => m.jid.endsWith('@lid')), 'no LID addresses in the list');
     });
 
     await t.test('normal group stays open to everyone', async () => {

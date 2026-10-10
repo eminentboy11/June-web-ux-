@@ -965,7 +965,7 @@ function renderAdmins(query) {
     const name = m.name || String(m.jid).split('@')[0];
     const row = el('button', 'admin-item');
     row.type = 'button';
-    row.appendChild(el('span', 'admin-av', name.charAt(0).toUpperCase()));
+    row.appendChild(el('span', 'admin-av', /^[A-Za-z]/.test(name) ? name[0].toUpperCase() : '#'));
     row.appendChild(el('span', '', name));
     row.addEventListener('click', () => {
       closeAdmins();
