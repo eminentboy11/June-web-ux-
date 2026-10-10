@@ -1,15 +1,15 @@
 /**
  * June-X Ultra — Web Chat persistence (utils/webChatStore.js)
  *
- * Three jobs:
- *   1. Message search index — every incoming/outgoing message is written to a
- *      small SQLite database (better-sqlite3, already a project dependency) so
- *      the web chat can search history that survives restarts.
+ * Four jobs:
+ *   1. Message search index — every message is written to a small SQLite
+ *      database (better-sqlite3, already a project dependency) so the web
+ *      chat can search and page through history that survives restarts.
  *   2. Phonebook — number → WhatsApp profile name (pushName), persisted to a
  *      JSON file, so the chat list shows "Amaka" instead of 2348111111111.
- *   3. Message meta + read state — per-message status (✓/✓✓ ticks), reactions
- *      and edited/deleted flags, plus the per-chat last-read timestamp that
- *      drives unread badges. Also SQLite, so it survives restarts.
+ *   3. Message meta — per-message status (✓/✓✓ ticks), reactions, quoted
+ *      blocks, edits, deletes and poll state.
+ *   4. Read state — per-chat last-read timestamp that drives unread badges.
  */
 'use strict';
 
@@ -56,17 +56,22 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             last_read_ts INTEGER NOT NULL
         );
     `);
-
-    // Older databases predate the quoted column.
-    try { db.exec('ALTER TABLE webchat_meta ADD COLUMN quoted TEXT'); } catch (_) {}
+    // Forward-only migrations for databases created by earlier phases.
+    for (const sql of [
+        'ALTER TABLE webchat_meta ADD COLUMN quoted TEXT',
+        'ALTER TABLE webchat_meta ADD COLUMN extra TEXT',
+        'ALTER TABLE webchat_messages ADD COLUMN deleted INTEGER DEFAULT 0',
+    ]) {
+        try { db.exec(sql); } catch (_) {}
+    }
 
     const insertStmt = db.prepare(
-        'INSERT OR REPLACE INTO webchat_messages (chat_jid, msg_id, from_me, sender, push_name, text, ts) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT OR REPLACE INTO webchat_messages (chat_jid, msg_id, from_me, sender, push_name, text, ts, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
     );
     const searchStmt = db.prepare(
         `SELECT chat_jid, msg_id, from_me, sender, push_name, text, ts
            FROM webchat_messages
-          WHERE text LIKE ? ESCAPE '\\'
+          WHERE text LIKE ? ESCAPE '\\' AND deleted = 0
           ORDER BY ts DESC
           LIMIT ?`
     );
@@ -77,24 +82,25 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         'DELETE FROM webchat_messages WHERE ts < (SELECT ts FROM webchat_messages ORDER BY ts DESC LIMIT 1 OFFSET ?)'
     );
     const getMetaStmt = db.prepare(
-        'SELECT status, reactions, edited, deleted, quoted FROM webchat_meta WHERE chat_jid = ? AND msg_id = ?'
+        'SELECT status, reactions, edited, deleted, quoted, extra FROM webchat_meta WHERE chat_jid = ? AND msg_id = ?'
     );
     const upsertMetaStmt = db.prepare(
-        `INSERT INTO webchat_meta (chat_jid, msg_id, status, reactions, edited, deleted, quoted, updated_ts)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO webchat_meta (chat_jid, msg_id, status, reactions, edited, deleted, quoted, extra, updated_ts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
             status = excluded.status,
             reactions = excluded.reactions,
             edited = excluded.edited,
             deleted = excluded.deleted,
             quoted = excluded.quoted,
+            extra = excluded.extra,
             updated_ts = excluded.updated_ts`
     );
     const metasStmtCache = new Map();
     const getMetasStmt = (n) => {
         if (!metasStmtCache.has(n)) {
             metasStmtCache.set(n, db.prepare(
-                `SELECT msg_id, status, reactions, edited, deleted, quoted
+                `SELECT msg_id, status, reactions, edited, deleted, quoted, extra
                    FROM webchat_meta
                   WHERE chat_jid = ? AND msg_id IN (${Array(n).fill('?').join(',')})`
             ));
@@ -105,6 +111,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         'INSERT INTO webchat_read (chat_jid, last_read_ts) VALUES (?, ?) ON CONFLICT(chat_jid) DO UPDATE SET last_read_ts = excluded.last_read_ts'
     );
     const getReadStmt = db.prepare('SELECT last_read_ts FROM webchat_read WHERE chat_jid = ?');
+    const updateTextStmt = db.prepare('UPDATE webchat_messages SET text = ? WHERE chat_jid = ? AND msg_id = ?');
+    const markDeletedStmt = db.prepare('UPDATE webchat_messages SET deleted = 1 WHERE chat_jid = ? AND msg_id = ?');
 
     /* ── phonebook ─────────────────────────────────────────────────────── */
     let phonebook = {};
@@ -152,10 +160,24 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         } catch (_) {}
     }
 
-    function search(q, limit = 50) {
+    // Optional chat scope: `jids` restricts the search to those chat addresses.
+    function search(q, limit = 50, jids = null) {
         // Escape LIKE wildcards so user input can't break out of the pattern.
         const escaped = String(q).replace(/[\\%_]/g, (ch) => '\\' + ch);
-        return searchStmt.all(`%${escaped}%`, limit).map((r) => ({
+        const pattern = `%${escaped}%`;
+        let rows;
+        if (jids && jids.length) {
+            const placeholders = jids.map(() => '?').join(',');
+            rows = db.prepare(
+                `SELECT chat_jid, msg_id, from_me, sender, push_name, text, ts
+                   FROM webchat_messages
+                  WHERE text LIKE ? ESCAPE '\\' AND deleted = 0 AND chat_jid IN (${placeholders})
+                  ORDER BY ts DESC LIMIT ?`
+            ).all(pattern, ...jids, limit);
+        } else {
+            rows = searchStmt.all(pattern, limit);
+        }
+        return rows.map((r) => ({
             chatJid: r.chat_jid,
             msgId: r.msg_id,
             fromMe: !!r.from_me,
@@ -166,41 +188,67 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         }));
     }
 
+    // Older history for infinite scroll: rows strictly before `beforeTs`.
+    function pageBefore(jids, beforeTs, limit = 50) {
+        const list = (jids || []).filter(Boolean);
+        if (!list.length) return [];
+        const placeholders = list.map(() => '?').join(',');
+        return db.prepare(
+            `SELECT chat_jid, msg_id, from_me, sender, push_name, text, ts
+               FROM webchat_messages
+              WHERE chat_jid IN (${placeholders}) AND ts < ? AND deleted = 0
+              ORDER BY ts DESC LIMIT ?`
+        ).all(...list, beforeTs, limit).reverse().map((r) => ({
+            id: r.msg_id,
+            fromMe: !!r.from_me,
+            sender: r.sender,
+            pushName: r.push_name,
+            text: r.text,
+            ts: r.ts,
+        }));
+    }
+
+    function updateIndexText(chatJid, msgId, text) {
+        try { updateTextStmt.run(String(text), chatJid, String(msgId)); } catch (_) {}
+    }
+
+    function markIndexDeleted(chatJid, msgId) {
+        try { markDeletedStmt.run(chatJid, String(msgId)); } catch (_) {}
+    }
+
     function phonebookName(jid) {
         return phonebook[digits(jid)]?.name || null;
     }
 
-    /* ── message meta (status ticks, reactions, edited/deleted) ────────── */
+    /* ── message meta (status, reactions, quoted, edits, deletes, polls) ── */
 
-    function parseReactions(raw) {
+    function parseJson(raw, fallback) {
         try {
-            const v = JSON.parse(raw || 'null');
-            return Array.isArray(v) ? v : [];
+            const v = JSON.parse(raw == null ? 'null' : raw);
+            return v == null ? fallback : v;
         } catch (_) {
-            return [];
+            return fallback;
         }
     }
 
-    function parseQuoted(raw) {
-        try {
-            const v = JSON.parse(raw || 'null');
-            return v && typeof v === 'object' ? v : null;
-        } catch (_) {
-            return null;
-        }
+    function rowToMeta(row) {
+        const extra = parseJson(row.extra, {});
+        return {
+            status: row.status,
+            reactions: Array.isArray(parseJson(row.reactions, [])) ? parseJson(row.reactions, []) : [],
+            edited: !!row.edited,
+            deleted: !!row.deleted,
+            quoted: parseJson(row.quoted, null),
+            editText: extra.editText ?? null,
+            poll: extra.poll ?? null,
+            pollSecret: extra.pollSecret ?? null,
+        };
     }
 
     function getMsgMeta(chatJid, msgId) {
         try {
             const row = getMetaStmt.get(chatJid, String(msgId));
-            if (!row) return null;
-            return {
-                status: row.status,
-                reactions: parseReactions(row.reactions),
-                edited: !!row.edited,
-                deleted: !!row.deleted,
-                quoted: parseQuoted(row.quoted),
-            };
+            return row ? rowToMeta(row) : null;
         } catch (_) {
             return null;
         }
@@ -213,13 +261,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             for (let i = 0; i < ids.length; i += 200) {
                 const chunk = ids.slice(i, i + 200);
                 for (const row of getMetasStmt(chunk.length).all(chatJid, ...chunk)) {
-                    out.set(row.msg_id, {
-                        status: row.status,
-                        reactions: parseReactions(row.reactions),
-                        edited: !!row.edited,
-                        deleted: !!row.deleted,
-                        quoted: parseQuoted(row.quoted),
-                    });
+                    out.set(row.msg_id, rowToMeta(row));
                 }
             }
         } catch (_) {}
@@ -230,11 +272,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         try {
             if (!chatJid || !msgId || !patch) return;
             const existing = getMsgMeta(chatJid, String(msgId)) || {
-                status: null,
-                reactions: [],
-                edited: false,
-                deleted: false,
-                quoted: null,
+                status: null, reactions: [], edited: false, deleted: false, quoted: null,
+                editText: null, poll: null, pollSecret: null,
             };
             let status = existing.status;
             if (typeof patch.status === 'number') {
@@ -243,23 +282,21 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                     status = patch.status;
                 }
             }
-            const next = {
-                status,
-                reactions: patch.reactions !== undefined ? patch.reactions : existing.reactions,
-                edited: patch.edited !== undefined ? !!patch.edited : existing.edited,
-                deleted: patch.deleted !== undefined ? !!patch.deleted : existing.deleted,
-                quoted: patch.quoted !== undefined
-                    ? (patch.quoted ? JSON.stringify(patch.quoted) : null)
-                    : (existing.quoted ? JSON.stringify(existing.quoted) : null),
+            const pick = (key) => (patch[key] !== undefined ? patch[key] : existing[key]);
+            const extra = {
+                editText: pick('editText'),
+                poll: pick('poll'),
+                pollSecret: pick('pollSecret'),
             };
             upsertMetaStmt.run(
                 chatJid,
                 String(msgId),
-                next.status,
-                JSON.stringify(next.reactions),
-                next.edited ? 1 : 0,
-                next.deleted ? 1 : 0,
-                next.quoted,
+                status,
+                JSON.stringify(pick('reactions') || []),
+                pick('edited') ? 1 : 0,
+                pick('deleted') ? 1 : 0,
+                pick('quoted') ? JSON.stringify(pick('quoted')) : null,
+                JSON.stringify(extra),
                 Date.now()
             );
         } catch (_) {}
@@ -304,10 +341,13 @@ function createWebChatStore({ dbPath, phonebookPath }) {
     return {
         logMessage,
         search,
+        pageBefore,
         phonebookName,
         getMsgMeta,
         getMsgMetas,
         setMsgMeta,
+        updateIndexText,
+        markIndexDeleted,
         setRead,
         getRead,
         flush,

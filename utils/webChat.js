@@ -42,7 +42,9 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 
-const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor } = require('./webChatText');
+const { spawn } = require('child_process');
+const pollCrypto = require('./webChatPoll');
+const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits } = require('./webChatText');
 const { createWebChatStore } = require('./webChatStore');
 
 const PAGE_PATH = path.join(__dirname, 'webChatPage.html');
@@ -169,12 +171,103 @@ async function defaultDownloadMedia(content, kind) {
     return Buffer.concat(chunks);
 }
 
+const MAX_VOICE_BYTES = 10 * 1024 * 1024;
+
+// Run ffmpeg with stdin input and return its stdout. The binary is resolved
+// by utils/ffmpegPath.js (system ffmpeg first, then the runtime-provisioned one).
+function runFfmpeg(args, input) {
+    return new Promise((resolve, reject) => {
+        let bin = 'ffmpeg';
+        try { bin = require('./ffmpegPath')() || 'ffmpeg'; } catch (_) {}
+        const child = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+        const out = [];
+        let errText = '';
+        const timer = setTimeout(() => {
+            try { child.kill('SIGKILL'); } catch (_) {}
+            reject(new Error('audio conversion timed out'));
+        }, 30000);
+        child.stdout.on('data', (d) => out.push(d));
+        child.stderr.on('data', (d) => { if (errText.length < 2000) errText += d.toString(); });
+        child.on('error', (e) => { clearTimeout(timer); reject(e); });
+        child.on('close', (code) => {
+            clearTimeout(timer);
+            if (code === 0) resolve(Buffer.concat(out));
+            else reject(new Error('ffmpeg failed: ' + errText.slice(-200)));
+        });
+        child.stdin.on('error', () => {});
+        child.stdin.end(input);
+    });
+}
+
+// Browser recording (webm/opus, mp4, ...) -> WhatsApp voice format (mono OGG/Opus)
+// plus 16 kHz mono PCM for duration and waveform analysis.
+async function defaultConvertAudio(buf) {
+    const base = ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-ac', '1'];
+    const opus = await runFfmpeg([...base, '-c:a', 'libopus', '-b:a', '32k', '-f', 'ogg', 'pipe:1'], buf);
+    const pcm = await runFfmpeg([...base, '-ar', '16000', '-f', 's16le', 'pipe:1'], buf);
+    return { opus, pcm };
+}
+
+// 64 bars, each the peak amplitude of its slice, scaled to WhatsApp's 0–99.
+function waveformFromPcm(pcm, bars = 64) {
+    const out = new Uint8Array(bars);
+    const samples = Math.floor(pcm.length / 2);
+    if (!samples) return out;
+    const per = Math.max(1, Math.floor(samples / bars));
+    for (let b = 0; b < bars; b++) {
+        let peak = 0;
+        const end = Math.min(samples, b * per + per);
+        for (let i = b * per; i < end; i++) {
+            const v = Math.abs(pcm.readInt16LE(i * 2));
+            if (v > peak) peak = v;
+        }
+        out[b] = Math.min(99, Math.round((peak / 32768) * 99));
+    }
+    return out;
+}
+
+// Voice note = PTT audio with duration + waveform. Built the same way the
+// Baileys voice-note guide describes: prepare the upload, patch the
+// AudioMessage, generate the message and relay it (a plain sendMessage with
+// ptt renders the waveform as a flat line on some clients).
+async function defaultSendVoice(sock, jid, opus, { seconds, waveform, quoted }) {
+    const baileys = require('@whiskeysockets/baileys');
+    const media = await baileys.prepareWAMessageMedia(
+        { audio: opus, mimetype: 'audio/ogg; codecs=opus', ptt: true },
+        { upload: sock.waUploadToServer }
+    );
+    const audioMessage = {
+        ...media.audioMessage,
+        mimetype: 'audio/ogg; codecs=opus',
+        ptt: true,
+        seconds,
+        waveform,
+    };
+    const msg = baileys.generateWAMessageFromContent(jid, { audioMessage }, {
+        userJid: sock.user.id,
+        ...(quoted ? { quoted } : {}),
+    });
+    await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
+    return msg;
+}
+
+function defaultMsgId(sock) {
+    try {
+        return require('@whiskeysockets/baileys').generateMessageIDV2(sock?.user?.id);
+    } catch (_) {
+        return crypto.randomBytes(10).toString('hex').toUpperCase();
+    }
+}
+
 function attachChatUI(app, deps) {
     const getSock = deps.getSock || (() => global.currentSock || null);
     const getBotState = deps.getBotState || (() => global.botState || 'unknown');
     const store = deps.store || null;
     const log = deps.log || console.log;
     const downloadMedia = deps.downloadMedia || defaultDownloadMedia;
+    const convertAudio = deps.convertAudio || defaultConvertAudio;
+    const sendVoice = deps.sendVoice || defaultSendVoice;
+    const newMsgId = deps.newMsgId || defaultMsgId;
 
     const chatStore = deps.chatStore || createWebChatStore({
         dbPath: path.join(__dirname, '..', 'database', 'webchat.db'),
@@ -258,6 +351,8 @@ function attachChatUI(app, deps) {
     const sessions = new Map();    // token -> expiry ts
     const groupNames = new Map();  // groupJid -> subject
     const presenceMap = new Map(); // jid -> { presence, ts }
+    const lastSeenMap = new Map(); // jid -> ms timestamp (WhatsApp "last seen")
+    const subscribed = new Map();  // jid -> ts of last presenceSubscribe
     const mediaCache = new Map();  // `${jid}|${msgId}` -> { buf, mime, fileName, kind, size, ts }
     let mediaCacheBytes = 0;
     const avatarCache = new Map(); // jid -> { buf, mime, ts }
@@ -324,6 +419,7 @@ function attachChatUI(app, deps) {
                 const last = data?.lastKnownPresence;
                 if (!last) continue;
                 presenceMap.set(jid, { presence: last, ts: Date.now() });
+                if (data.lastSeen) lastSeenMap.set(jid, Number(data.lastSeen) * 1000);
                 if (last === 'composing') anyComposing = true;
             }
             // For groups, expose a chat-level indicator: composing if anyone is.
@@ -620,6 +716,27 @@ function attachChatUI(app, deps) {
         return null;
     }
 
+    function lastSeenAny(jids) {
+        let best = null;
+        for (const j of jids) {
+            const v = lastSeenMap.get(j);
+            if (v && (!best || v > best)) best = v;
+        }
+        return best;
+    }
+
+    // Ask WhatsApp to keep us subscribed to a chat's presence (last seen,
+    // typing, recording). Re-subscribe at most every 10 minutes.
+    function subscribePresence(jid) {
+        const now = Date.now();
+        if ((subscribed.get(jid) || 0) > now - 10 * 60 * 1000) return;
+        subscribed.set(jid, now);
+        const sock = getSock();
+        if (sock && typeof sock.presenceSubscribe === 'function') {
+            Promise.resolve().then(() => sock.presenceSubscribe(jid)).catch(() => {});
+        }
+    }
+
     app.get('/api/messages', requireAuth, async (req, res) => {
         const jid = String(req.query.jid || '');
         if (!JID_RE.test(jid)) {
@@ -629,7 +746,22 @@ function attachChatUI(app, deps) {
         // LID ↔ PN: one person can chat under both addresses. Best-effort
         // live lookup, then merge every bucket that maps to this chat.
         await withTimeout(getJidMap().enrich(jid, getSock()), 1500).catch(() => {});
+        subscribePresence(jid);
         const jids = getJidMap().related(jid);
+
+        // Infinite scroll: older history from the SQLite index.
+        const before = Number(req.query.before) || 0;
+        if (before) {
+            const rows = chatStore.pageBefore(jids, before, limit);
+            return res.json({
+                ok: true, jid, history: true, hasMore: rows.length === limit,
+                messages: rows.map((r) => ({
+                    ...r, media: null, status: null, reactions: [], quoted: null,
+                    edited: false, deleted: false, mentions: [], forwarded: false, poll: null,
+                })),
+            });
+        }
+
         const byId = new Map();
         for (const j of jids) {
             const msgs = store?.messages?.get(j);
@@ -641,7 +773,7 @@ function attachChatUI(app, deps) {
         }
         const all = Array.from(byId.values()).sort((a, b) => (msgTs(a) || 0) - (msgTs(b) || 0));
         const list = all.slice(-limit);
-        // Ticks/reactions meta can be keyed under either address — query both.
+        // Ticks/reactions/poll meta can be keyed under either address — query both.
         const metas = new Map();
         for (const j of jids) {
             for (const [id, meta] of chatStore.getMsgMetas(j, list.map((m) => m?.key?.id))) {
@@ -650,24 +782,31 @@ function attachChatUI(app, deps) {
         }
         // Opening a chat marks it read → the sender sees blue ticks.
         markChatRead(jid, all);
-        const dtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id)));
+        const mine = myDigits();
+        const dtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id), mine));
         // Enrich quoted blocks with the sender's profile name when we have it.
         for (const d of dtos) {
-            if (!d.quoted?.id || d.quoted.pushName) continue;
-            for (const j of jids) {
-                const qm = store?.messages?.get(j)?.get(d.quoted.id);
-                if (qm) {
-                    d.quoted.pushName = qm.pushName || '';
-                    d.quoted.fromMe = !!qm.key?.fromMe;
-                    break;
+            if (d.quoted?.id && !d.quoted.pushName) {
+                for (const j of jids) {
+                    const qm = store?.messages?.get(j)?.get(d.quoted.id);
+                    if (qm) {
+                        d.quoted.pushName = qm.pushName || '';
+                        d.quoted.fromMe = !!qm.key?.fromMe;
+                        break;
+                    }
                 }
             }
+            if (d.deleted) { d.text = 'This message was deleted'; d.media = null; d.poll = null; }
         }
+        const oldest = dtos[0]?.ts || 0;
+        const hasMore = all.length > list.length || (oldest > 0 && chatStore.pageBefore(jids, oldest, 1).length > 0);
         res.json({
             ok: true,
             jid,
             presence: getPresenceAny(jids),
+            lastSeen: lastSeenAny(jids),
             messages: dtos,
+            hasMore,
         });
     });
 
@@ -677,7 +816,10 @@ function attachChatUI(app, deps) {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
         const seen = new Set();
         const results = [];
-        for (const r of chatStore.search(q, limit)) {
+        const scopeRaw = req.query.jid ? String(req.query.jid) : '';
+        if (scopeRaw && !JID_RE.test(scopeRaw)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+        const scope = scopeRaw ? getJidMap().related(getJidMap().canonical(scopeRaw)) : null;
+        for (const r of chatStore.search(q, limit, scope)) {
             // LID ↔ PN: show one canonical chat per person.
             const cj = getJidMap().canonical(r.chatJid);
             const key = `${cj}|${r.msgId}`;
@@ -784,6 +926,248 @@ function attachChatUI(app, deps) {
         }
     });
 
+    // Find a message we hold in memory, under either address of its chat.
+    function findStored(jid, msgId) {
+        for (const j of getJidMap().related(String(jid))) {
+            const msg = store?.messages?.get(j)?.get(String(msgId));
+            if (msg) return { msg, chat: j };
+        }
+        return null;
+    }
+
+    function afterOutgoing(jid, sent) {
+        try { store?.storeMessage?.(jid, sent); } catch (_) {}
+        try { chatStore.logMessage(sent); } catch (_) {}
+        try { chatStore.setMsgMeta(canonicalChat(jid), sent?.key?.id, { status: STATUS.PENDING }); } catch (_) {}
+    }
+
+    // Voice note: browser recording → OGG/Opus + duration + 64-bar waveform.
+    app.post('/api/voice', requireAuth, sendParser, async (req, res) => {
+        try {
+            const { jid, audio, quotedMsgId } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) {
+                return res.status(400).json({ ok: false, error: 'invalid jid' });
+            }
+            if (typeof audio !== 'string' || !audio) {
+                return res.status(400).json({ ok: false, error: 'missing audio' });
+            }
+            const buf = Buffer.from(audio, 'base64');
+            if (!buf.length || buf.length > MAX_VOICE_BYTES) {
+                return res.status(400).json({ ok: false, error: `voice note too large (max ${MAX_VOICE_BYTES / 1024 / 1024}MB)` });
+            }
+            let quoted = null;
+            if (quotedMsgId != null) {
+                const found = typeof quotedMsgId === 'string' && MSG_ID_RE.test(quotedMsgId) ? findStored(jid, quotedMsgId) : null;
+                if (!found) return res.status(400).json({ ok: false, error: 'quoted message not in recent store' });
+                quoted = found.msg;
+            }
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            let conv;
+            try {
+                conv = await convertAudio(buf);
+            } catch (_) {
+                return res.status(500).json({ ok: false, error: 'could not convert audio (is ffmpeg installed?)' });
+            }
+            const seconds = Math.max(1, Math.round(conv.pcm.length / 2 / 16000));
+            const waveform = waveformFromPcm(conv.pcm);
+            const sent = await sendVoice(sock, jid, conv.opus, { seconds, waveform, quoted });
+            afterOutgoing(jid, sent);
+            res.json({ ok: true, id: sent?.key?.id || null, seconds });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // Delete for everyone (WhatsApp: own messages within ~48 h).
+    app.post('/api/delete', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, msgId } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            if (typeof msgId !== 'string' || !MSG_ID_RE.test(msgId)) return res.status(400).json({ ok: false, error: 'invalid msgId' });
+            const found = findStored(jid, msgId);
+            if (!found) return res.status(404).json({ ok: false, error: 'message not in recent store' });
+            const hours = (Date.now() - msgTs(found.msg)) / 3600000;
+            if (found.msg.key.fromMe && hours > 48) {
+                return res.status(400).json({ ok: false, error: 'delete for everyone is only allowed within 48 hours' });
+            }
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            await sock.sendMessage(found.msg.key.remoteJid, { delete: found.msg.key });
+            markDeletedEverywhere(found.msg.key);
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // Edit (WhatsApp: own text messages within 15 minutes).
+    app.post('/api/edit', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, msgId, text } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            if (typeof msgId !== 'string' || !MSG_ID_RE.test(msgId)) return res.status(400).json({ ok: false, error: 'invalid msgId' });
+            if (typeof text !== 'string' || !text.trim() || text.length > MAX_TEXT_LEN) {
+                return res.status(400).json({ ok: false, error: 'invalid text' });
+            }
+            const found = findStored(jid, msgId);
+            if (!found) return res.status(404).json({ ok: false, error: 'message not in recent store' });
+            if (!found.msg.key.fromMe) return res.status(403).json({ ok: false, error: 'you can only edit your own messages' });
+            if (Date.now() - msgTs(found.msg) > 15 * 60 * 1000) {
+                return res.status(400).json({ ok: false, error: 'WhatsApp only allows edits within 15 minutes' });
+            }
+            const inner = unwrapMessage(found.msg.message || {});
+            if (!inner.conversation && !inner.extendedTextMessage) {
+                return res.status(400).json({ ok: false, error: 'only text messages can be edited' });
+            }
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            await sock.sendMessage(found.msg.key.remoteJid, { text: text.trim(), edit: found.msg.key });
+            const chat = canonicalChat(found.msg.key.remoteJid);
+            chatStore.setMsgMeta(chat, msgId, { editText: text.trim(), edited: true });
+            chatStore.updateIndexText(chat, msgId, text.trim());
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // Forward one or more stored messages to another chat (max 10).
+    app.post('/api/forward', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, toJid, msgIds } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            if (typeof toJid !== 'string' || !JID_RE.test(toJid)) return res.status(400).json({ ok: false, error: 'invalid target jid' });
+            if (!Array.isArray(msgIds) || !msgIds.length || msgIds.length > 10 || !msgIds.every((id) => typeof id === 'string' && MSG_ID_RE.test(id))) {
+                return res.status(400).json({ ok: false, error: 'pick 1–10 valid messages' });
+            }
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            let forwarded = 0, failed = 0;
+            for (const id of msgIds) {
+                const found = findStored(jid, id);
+                if (!found) { failed++; continue; }
+                try {
+                    const sent = await sock.sendMessage(toJid, { forward: found.msg });
+                    afterOutgoing(toJid, sent);
+                    forwarded++;
+                } catch (_) { failed++; }
+            }
+            res.json({ ok: true, forwarded, failed });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // Create a poll (2–12 unique options). The message secret is kept so the
+    // poll can be tallied and voted on from the web UI.
+    app.post('/api/poll', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, name, options, selectableCount } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            if (typeof name !== 'string' || !name.trim() || name.length > 255) {
+                return res.status(400).json({ ok: false, error: 'poll question is required (max 255 chars)' });
+            }
+            if (!Array.isArray(options) || options.length < 2 || options.length > 12) {
+                return res.status(400).json({ ok: false, error: 'a poll needs 2–12 options' });
+            }
+            const opts = options.map((o) => (typeof o === 'string' ? o.trim() : '')).filter(Boolean);
+            if (opts.length !== options.length || new Set(opts).size !== opts.length || opts.some((o) => o.length > 100)) {
+                return res.status(400).json({ ok: false, error: 'options must be unique, non-empty and at most 100 chars' });
+            }
+            const sel = Number.isInteger(selectableCount) ? selectableCount : 1;
+            if (sel < 0 || sel > opts.length) return res.status(400).json({ ok: false, error: 'invalid selectableCount' });
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            const sent = await sock.sendMessage(jid, { poll: { name: name.trim(), values: opts, selectableCount: sel } });
+            store?.storeMessage?.(jid, sent);
+            logMessage(sent);
+            const secret = sent?.message?.messageContextInfo?.messageSecret;
+            const chat = canonicalChat(jid);
+            chatStore.setMsgMeta(chat, String(sent?.key?.id || ''), {
+                poll: { name: name.trim(), selectableCount: sel, options: opts, votes: {} },
+                pollSecret: secret ? toB64(secret) : null,
+            });
+            res.json({ ok: true, id: sent?.key?.id || null, voteable: !!secret });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // Vote on a poll from the web UI. Encrypts the vote exactly as WhatsApp
+    // expects (see utils/webChatPoll.js) and relays it as pollUpdateMessage.
+    app.post('/api/pollvote', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, pollId, options } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            if (typeof pollId !== 'string' || !MSG_ID_RE.test(pollId)) return res.status(400).json({ ok: false, error: 'invalid pollId' });
+            if (!Array.isArray(options) || options.length > 12 || !options.every((o) => typeof o === 'string')) {
+                return res.status(400).json({ ok: false, error: 'invalid options' });
+            }
+            const found = findStored(jid, pollId);
+            if (!found) return res.status(404).json({ ok: false, error: 'poll not in recent store' });
+            const chat = canonicalChat(found.chat);
+            const meta = chatStore.getMsgMeta(chat, pollId);
+            if (!meta?.poll || !meta.pollSecret) {
+                return res.status(400).json({ ok: false, error: 'this poll cannot be voted on from the web' });
+            }
+            if (!options.every((o) => meta.poll.options.includes(o))) {
+                return res.status(400).json({ ok: false, error: 'unknown option' });
+            }
+            const max = meta.poll.selectableCount || 0;
+            if (max && options.length > max) return res.status(400).json({ ok: false, error: `pick at most ${max}` });
+            const voterPn = myPnJid();
+            const sock = getSock();
+            if (!sock || !voterPn) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            const creatorRaw = found.msg.key.fromMe ? (myLidJid() || voterPn) : (found.msg.key.participant || found.msg.key.remoteJid);
+            const creatorJid = creatorRaw.endsWith('@lid')
+                ? creatorRaw
+                : (jidCandidates(creatorRaw).find((j) => j.endsWith('@lid')) || creatorRaw);
+            const { encPayload, encIv } = pollCrypto.encryptPollVote(
+                { pollEncKey: meta.pollSecret, pollMsgId: pollId, pollCreatorJid: creatorJid, voterJid: voterPn },
+                options
+            );
+            const id = newMsgId(sock);
+            await sock.relayMessage(found.msg.key.remoteJid, {
+                pollUpdateMessage: {
+                    pollCreationMessageKey: found.msg.key,
+                    vote: { encPayload, encIv },
+                    senderTimestampMs: Date.now(),
+                    metadata: {},
+                },
+            }, { messageId: id });
+            applyVote(chat, pollId, voterPn, options, Date.now());
+            res.json({ ok: true, id, selected: options });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // Group members for the @mention picker (cached 5 minutes).
+    const memberCache = new Map(); // group jid -> { ts, list }
+    app.get('/api/groupmembers', requireAuth, async (req, res) => {
+        const jid = String(req.query.jid || '');
+        if (!JID_RE.test(jid) || !jid.endsWith('@g.us')) return res.status(400).json({ ok: false, error: 'invalid group jid' });
+        const cached = memberCache.get(jid);
+        if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return res.json({ ok: true, members: cached.list });
+        const sock = getSock();
+        if (!sock || typeof sock.groupMetadata !== 'function') return res.status(503).json({ ok: false, error: 'bot is not connected' });
+        try {
+            const meta = await withTimeout(sock.groupMetadata(jid), 6000);
+            const list = (meta?.participants || [])
+                .map((p) => {
+                    const id = String(p?.id || '');
+                    const name = chatStore.phonebookName(canonicalChat(id)) || digits(canonicalChat(id)) || digits(id);
+                    return { jid: canonicalChat(id), name, admin: !!p?.admin };
+                })
+                .filter((m) => m.jid);
+            memberCache.set(jid, { ts: Date.now(), list });
+            res.json({ ok: true, members: list });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
     app.post('/api/send', requireAuth, sendParser, async (req, res) => {
         try {
             const { jid, text, media, quotedMsgId } = req.body || {};
@@ -839,6 +1223,10 @@ function attachChatUI(app, deps) {
             if (!sock || typeof sock.sendMessage !== 'function') {
                 return res.status(503).json({ ok: false, error: 'bot is not connected' });
             }
+            const mentions = Array.isArray(req.body?.mentions)
+                ? req.body.mentions.filter((j) => typeof j === 'string' && JID_RE.test(j)).slice(0, 50)
+                : [];
+            if (mentions.length && payload && typeof payload === 'object') payload.mentions = mentions;
             const sent = await sock.sendMessage(jid, payload, quoted ? { quoted } : undefined);
             // Keep our own outgoing message in the recent store + search index.
             try { store?.storeMessage?.(jid, sent); } catch (_) {}
@@ -871,17 +1259,149 @@ function attachChatUI(app, deps) {
         try {
             // Learn LID ↔ PN pairs from the message's alternate address.
             linkKey(msg?.key);
+            const inner = unwrapMessage(msg?.message || {});
+            if (inner.protocolMessage) { handleProtocol(inner); return; }
+            if (inner.pollUpdateMessage) { handlePollVote(msg, inner.pollUpdateMessage); return; }
             // Index under the canonical chat so search + phonebook see one chat.
-            const canon = msg?.key?.remoteJid ? getJidMap().canonical(msg.key.remoteJid) : null;
+            const canon = msg?.key?.remoteJid ? canonicalChat(msg.key.remoteJid) : null;
             if (canon && canon !== msg.key.remoteJid) {
                 chatStore.logMessage({ ...msg, key: { ...msg.key, remoteJid: canon } });
             } else {
                 chatStore.logMessage(msg);
             }
+            if (canon && msg.key.id) rememberPollCreation(canon, msg, inner);
         } catch (_) {}
     }
 
-    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping };
+    /* ── identity helpers (LID ↔ PN aware) ─────────────────────────────── */
+
+    function canonicalChat(jid) {
+        return getJidMap().canonical(String(jid || ''));
+    }
+
+    function myPnJid() {
+        const d = digits(getSock()?.user?.id);
+        return d ? `${d}@s.whatsapp.net` : null;
+    }
+
+    function myLidJid() {
+        const d = digits(getSock()?.user?.lid);
+        return d ? `${d}@lid` : null;
+    }
+
+    // Digits of our own addresses — used to mark our own poll votes.
+    function myDigits() {
+        return new Set([digits(getSock()?.user?.id), digits(getSock()?.user?.lid)].filter(Boolean));
+    }
+
+    // Every address a jid may be known by (its LID and its phone twin).
+    function jidCandidates(raw) {
+        const out = [];
+        for (const j of getJidMap().related(String(raw || ''))) if (j && !out.includes(j)) out.push(j);
+        return out;
+    }
+
+    function toB64(secret) {
+        return typeof secret === 'string' ? secret : Buffer.from(secret).toString('base64');
+    }
+
+    /* ── protocol messages: delete-for-everyone and edits ──────────────── */
+
+    function markDeletedEverywhere(key) {
+        if (!key?.id || !key?.remoteJid) return;
+        const chat = canonicalChat(key.remoteJid);
+        chatStore.setMsgMeta(chat, String(key.id), { deleted: true });
+        chatStore.markIndexDeleted(chat, String(key.id));
+    }
+
+    function handleProtocol(inner) {
+        const proto = inner.protocolMessage;
+        const target = proto?.key;
+        if (!target?.id || !target?.remoteJid) return;
+        const type = Number(proto.type);
+        if (type === 0) { // REVOKE — "delete for everyone"
+            markDeletedEverywhere(target);
+            return;
+        }
+        if (type === 14) { // MESSAGE_EDIT — the new text replaces the old one
+            const text = editedTextFromProtocol(inner);
+            if (text == null) return;
+            const chat = canonicalChat(target.remoteJid);
+            chatStore.setMsgMeta(chat, String(target.id), { editText: text, edited: true });
+            chatStore.updateIndexText(chat, String(target.id), text);
+        }
+    }
+
+    function handleMessagesDelete(payload) {
+        try {
+            if (payload && Array.isArray(payload.keys)) {
+                for (const k of payload.keys) markDeletedEverywhere(k);
+            }
+        } catch (_) {}
+    }
+
+    /* ── polls: remember secrets, decrypt votes, keep one vote per voter ── */
+
+    // Poll creation seen on the wire: keep its options and message secret so
+    // votes can be decrypted later. Never resets votes already recorded.
+    function rememberPollCreation(chat, msg, inner) {
+        const pc = inner.pollCreationMessage || inner.pollCreationMessageV2 || inner.pollCreationMessageV3;
+        if (!pc) return;
+        const id = String(msg.key.id);
+        if (chatStore.getMsgMeta(chat, id)?.poll) return;
+        const options = (pc.options || []).map((o) => o.optionName || '').filter(Boolean);
+        if (!options.length) return;
+        const secret = msg.message?.messageContextInfo?.messageSecret;
+        chatStore.setMsgMeta(chat, id, {
+            poll: { name: pc.name || '', selectableCount: pc.selectableCount ?? 1, options, votes: {} },
+            pollSecret: secret ? toB64(secret) : null,
+        });
+    }
+
+    // One vote per voter (keyed by phone digits so LID/PN twins collapse).
+    // A newer vote replaces the old one; an empty selection withdraws it.
+    function applyVote(chat, pollId, voterRaw, names, ts) {
+        const meta = chatStore.getMsgMeta(chat, pollId);
+        if (!meta?.poll) return false;
+        const voter = digits(canonicalChat(voterRaw));
+        if (!voter) return false;
+        const votes = { ...(meta.poll.votes || {}) };
+        const prev = votes[voter];
+        if (prev && prev.ts > ts) return false; // out-of-order older vote never wins
+        if (!names.length) delete votes[voter];
+        else votes[voter] = { sel: names, ts };
+        chatStore.setMsgMeta(chat, pollId, { poll: { ...meta.poll, votes } });
+        return true;
+    }
+
+    function handlePollVote(msg, pu) {
+        const creation = pu?.pollCreationMessageKey;
+        if (!creation?.id || !creation?.remoteJid) return;
+        const chat = canonicalChat(creation.remoteJid);
+        const meta = chatStore.getMsgMeta(chat, String(creation.id));
+        if (!meta?.poll || !meta.pollSecret) return;
+        const voterRaw = msg.key.fromMe ? myPnJid() : (msg.key.participant || msg.key.remoteJid);
+        if (!voterRaw) return;
+        // Baileys #2342: WhatsApp encrypts with LID for the creator and PN for
+        // the voter in 1:1 chats — try every known address combination.
+        const creatorJids = creation.fromMe
+            ? [myLidJid(), myPnJid()].filter(Boolean)
+            : jidCandidates(creation.participant || creation.remoteJid);
+        const found = pollCrypto.decryptPollVoteAny(pu.vote || {}, {
+            pollEncKey: meta.pollSecret,
+            pollMsgId: String(creation.id),
+            creatorJids,
+            voterJids: msg.key.fromMe ? [myPnJid(), myLidJid()].filter(Boolean) : jidCandidates(voterRaw),
+        });
+        if (!found) return;
+        const names = pollCrypto.namesFromHashes(found.selected, meta.poll.options || []);
+        const ts = Number(pu.senderTimestampMs) || msgTs(msg) || Date.now();
+        applyVote(chat, String(creation.id), voterRaw, names, ts);
+    }
+
+    /* ── read receipts, reactions, edits etc. stay below ─────────────── */
+
+    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete };
 }
 
 module.exports = { attachChatUI };

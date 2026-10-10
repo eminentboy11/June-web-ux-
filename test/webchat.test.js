@@ -21,12 +21,38 @@ process.env.WEB_PASSWORD = process.env.WEB_PASSWORD || 'test-pass';
 const { attachChatUI } = require('../utils/webChat');
 const { createMessageStore } = require('../utils/messageStore');
 const { createWebChatStore } = require('../utils/webChatStore');
+const pollCrypto = require('../utils/webChatPoll');
 
 const DM = '2348111111111@s.whatsapp.net';
 const GROUP = '120363000000@g.us';
 const PN2 = '2349000000001@s.whatsapp.net';
 const LID2 = '71109999999999@lid';
 const PN3 = '2349000000003@s.whatsapp.net';
+
+const voiceCalls = [];
+const relayCalls = [];
+const pollSecret = Buffer.from('0123456789abcdef0123456789abcdef');
+
+// What the mock socket reports back for each kind of outgoing message.
+function messageFor(content) {
+    if (content.text) return { conversation: content.text };
+    if (content.poll) return {
+        pollCreationMessageV3: {
+            name: content.poll.name,
+            selectableCount: content.poll.selectableCount,
+            options: content.poll.values.map((optionName) => ({ optionName })),
+        },
+        messageContextInfo: { messageSecret: pollSecret },
+    };
+    return content;
+}
+
+// 2 seconds of 16 kHz mono PCM with a ramp, for the voice-note analysis.
+function fakePcm() {
+    const buf = Buffer.alloc(16000 * 2 * 2);
+    for (let i = 0; i < buf.length / 2; i++) buf.writeInt16LE(Math.round((i % 400) * 40), i * 2);
+    return buf;
+}
 
 function makeMsg({ id, jid, fromMe = false, text, participant, ts, pushName }) {
     return {
@@ -82,22 +108,29 @@ async function startTestServer() {
     const readCalls = [];
     let downloadCalls = 0;
     const sock = {
-        user: { id: '2348000000000:5@s.whatsapp.net' },
+        user: { id: '2348000000000:5@s.whatsapp.net', lid: '71100000000000:3@lid' },
         sendMessage: async (jid, content, options) => {
             sent.push({ jid, content, options });
             return {
                 key: { id: 'SENT' + sent.length, remoteJid: jid, fromMe: true },
-                message: content.text ? { conversation: content.text } : content,
+                message: messageFor(content),
                 messageTimestamp: Math.floor(Date.now() / 1000),
             };
         },
         sendPresenceUpdate: async (presence, jid) => {
             presenceCalls.push({ presence, jid });
         },
+        relayMessage: async (jid, message, opts) => {
+            relayCalls.push({ jid, message, opts });
+            return 'RELAY' + relayCalls.length;
+        },
         readMessages: async (keys) => {
             readCalls.push(keys);
         },
-        groupMetadata: async (jid) => ({ subject: 'Test Group ' + jid.slice(0, 6) }),
+        groupMetadata: async (jid) => ({
+            subject: 'Test Group ' + jid.slice(0, 6),
+            participants: [{ id: DM }, { id: LID2 }],
+        }),
         profilePictureUrl: async (jid) => 'https://cdn.example.com/' + encodeURIComponent(jid) + '.jpg',
     };
     const jidMap = makeMemoryJidMap();
@@ -108,6 +141,12 @@ async function startTestServer() {
         chatStore,
         jidMap,
         log: () => {},
+        convertAudio: async () => ({ opus: Buffer.from('OPUS'), pcm: fakePcm() }),
+        sendVoice: async (sock, jid, opus, opts) => {
+            voiceCalls.push({ jid, opus, ...opts });
+            return { key: { id: 'VOICE' + voiceCalls.length, remoteJid: jid, fromMe: true }, message: { audioMessage: { ptt: true } }, messageTimestamp: Math.floor(Date.now() / 1000) };
+        },
+        newMsgId: () => 'PMSG' + relayCalls.length,
         downloadMedia: async () => {
             downloadCalls++;
             return Buffer.from('PNGBYTES');
@@ -688,6 +727,257 @@ test('web chat UI', async (t) => {
         assert.equal(r.status, 200, 'quoted message found in the PN bucket');
         const last = sent.at(-1);
         assert.equal(last.options.quoted.key.id, 'P1');
+    });
+
+    const nowSec = () => Math.floor(Date.now() / 1000);
+
+    await t.test('voice note converts, measures and sends a PTT waveform', async () => {
+        const r = await fetch(`${base}/api/voice`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, audio: Buffer.from('webm-bytes').toString('base64') }),
+        });
+        assert.equal(r.status, 200);
+        const j = await r.json();
+        assert.equal(j.seconds, 2, 'duration from the PCM length');
+        const call = voiceCalls.at(-1);
+        assert.equal(call.jid, DM);
+        assert.equal(call.opus.toString(), 'OPUS', 'converted OGG/Opus is what gets sent');
+        assert.equal(call.waveform.length, 64, '64-bar waveform');
+        assert.ok(Array.from(call.waveform).every((v) => v >= 0 && v <= 99), 'WhatsApp 0–99 scale');
+        assert.ok(Array.from(call.waveform).some((v) => v > 0), 'waveform is not flat');
+    });
+
+    await t.test('voice note rejects oversized and invalid input', async () => {
+        const big = await fetch(`${base}/api/voice`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, audio: Buffer.alloc(11 * 1024 * 1024).toString('base64') }),
+        });
+        assert.equal(big.status, 400);
+        const bad = await fetch(`${base}/api/voice`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: 'evil', audio: 'AAAA' }),
+        });
+        assert.equal(bad.status, 400);
+    });
+
+    await t.test('delete for everyone sends a revoke and hides the text', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'D1', jid: DM, fromMe: true, text: 'oops wrong chat', ts: nowSec() }));
+        const r = await fetch(`${base}/api/delete`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'D1' }),
+        });
+        assert.equal(r.status, 200);
+        assert.equal(sent.at(-1).content.delete.id, 'D1');
+        const m = (await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json())
+            .messages.find((x) => x.id === 'D1');
+        assert.equal(m.deleted, true);
+        assert.equal(m.text, 'This message was deleted');
+    });
+
+    await t.test('delete refuses messages older than 48 hours', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'D2', jid: DM, fromMe: true, text: 'ancient', ts: nowSec() - 3 * 24 * 3600 }));
+        const r = await fetch(`${base}/api/delete`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'D2' }),
+        });
+        assert.equal(r.status, 400);
+    });
+
+    await t.test('edit sends the new text and marks the message edited', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'E1', jid: DM, fromMe: true, text: 'typo hre', ts: nowSec() }));
+        const r = await fetch(`${base}/api/edit`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'E1', text: 'typo here' }),
+        });
+        assert.equal(r.status, 200);
+        assert.equal(sent.at(-1).content.text, 'typo here');
+        assert.equal(sent.at(-1).content.edit.id, 'E1');
+        const m = (await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json())
+            .messages.find((x) => x.id === 'E1');
+        assert.equal(m.text, 'typo here');
+        assert.equal(m.edited, true);
+    });
+
+    await t.test('edit refuses others messages, media and expired windows', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'E2', jid: DM, text: 'not mine', ts: nowSec() }));
+        const notMine = await fetch(`${base}/api/edit`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'E2', text: 'x' }),
+        });
+        assert.equal(notMine.status, 403);
+        store.storeMessage(DM, makeMsg({ id: 'E3', jid: DM, fromMe: true, text: 'old', ts: nowSec() - 3600 }));
+        const late = await fetch(`${base}/api/edit`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'E3', text: 'x' }),
+        });
+        assert.equal(late.status, 400);
+    });
+
+    await t.test('incoming revoke and edit protocol messages update the chat', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'P9', jid: DM, fromMe: true, text: 'will be deleted', ts: nowSec() }));
+        handle.logMessage({
+            key: { id: 'RV1', remoteJid: DM, fromMe: false },
+            message: { protocolMessage: { type: 0, key: { id: 'P9', remoteJid: DM, fromMe: true } } },
+            messageTimestamp: nowSec(),
+        });
+        handle.logMessage({
+            key: { id: 'ED1', remoteJid: DM, fromMe: false },
+            message: { protocolMessage: { type: 14, key: { id: 'E1', remoteJid: DM, fromMe: true }, editedMessage: { conversation: 'corrected by them' } } },
+            messageTimestamp: nowSec(),
+        });
+        const msgs = (await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json()).messages;
+        assert.equal(msgs.find((x) => x.id === 'P9').deleted, true, 'revoke applied');
+        assert.equal(msgs.find((x) => x.id === 'E1').text, 'corrected by them', 'edit applied');
+    });
+
+    await t.test('forward sends a stored message to another chat', async () => {
+        const r = await fetch(`${base}/api/forward`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, toJid: PN3, msgIds: ['A1'] }),
+        });
+        assert.equal(r.status, 200);
+        const j = await r.json();
+        assert.equal(j.forwarded, 1);
+        const last = sent.at(-1);
+        assert.equal(last.jid, PN3);
+        assert.equal(last.content.forward.key.id, 'A1');
+    });
+
+    await t.test('forward validates the target and selection', async () => {
+        const badTarget = await fetch(`${base}/api/forward`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, toJid: 'evil', msgIds: ['A1'] }),
+        });
+        assert.equal(badTarget.status, 400);
+        const tooMany = await fetch(`${base}/api/forward`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, toJid: PN3, msgIds: Array.from({ length: 11 }, (_, i) => 'M' + i) }),
+        });
+        assert.equal(tooMany.status, 400);
+    });
+
+    await t.test('mentions are passed to Baileys with the message', async () => {
+        const r = await fetch(`${base}/api/send`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, text: 'hey @2349000000001', mentions: [PN2, 'not-a-jid'] }),
+        });
+        assert.equal(r.status, 200);
+        assert.deepEqual(sent.at(-1).content.mentions, [PN2], 'invalid mentions are dropped');
+    });
+
+    await t.test('poll: create, receive a vote, cast a vote, tally', async () => {
+        const create = await fetch(`${base}/api/poll`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, name: 'Lunch?', options: ['Pizza', 'Rice'], selectableCount: 1 }),
+        });
+        const created = await create.json();
+        assert.equal(created.ok, true);
+        assert.equal(created.voteable, true, 'message secret kept for voting');
+        const pollId = created.id;
+
+        // Someone else votes "Rice" — encrypted the way WhatsApp does it.
+        const enc = pollCrypto.encryptPollVote(
+            { pollEncKey: pollSecret, pollMsgId: pollId, pollCreatorJid: '2348000000000@s.whatsapp.net', voterJid: DM },
+            ['Rice']
+        );
+        handle.logMessage({
+            key: { id: 'VOTE1', remoteJid: DM, fromMe: false },
+            message: { pollUpdateMessage: { pollCreationMessageKey: { id: pollId, remoteJid: DM, fromMe: true }, vote: enc, senderTimestampMs: Date.now() } },
+            messageTimestamp: nowSec(),
+        });
+        let m = (await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json())
+            .messages.find((x) => x.id === pollId);
+        assert.equal(m.poll.name, 'Lunch?');
+        assert.equal(m.poll.options.find((o) => o.text === 'Rice').count, 1, 'incoming vote tallied');
+        assert.equal(m.poll.totalVotes, 1);
+
+        // We vote "Pizza" from the web UI; the relayed vote must decrypt for WhatsApp's creator/voter pair.
+        const vote = await fetch(`${base}/api/pollvote`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, pollId, options: ['Pizza'] }),
+        });
+        assert.equal(vote.status, 200);
+        const relayed = relayCalls.at(-1);
+        assert.equal(relayed.jid, DM);
+        const names = pollCrypto.namesFromHashes(
+            pollCrypto.decryptPollVote(relayed.message.pollUpdateMessage.vote, {
+                pollEncKey: pollSecret, pollMsgId: pollId,
+                pollCreatorJid: '71100000000000@lid', voterJid: '2348000000000@s.whatsapp.net',
+            }),
+            ['Pizza', 'Rice']
+        );
+        assert.deepEqual(names, ['Pizza'], 'relayed vote decrypts to our selection');
+
+        m = (await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json())
+            .messages.find((x) => x.id === pollId);
+        assert.deepEqual(m.poll.myVote, ['Pizza']);
+        assert.equal(m.poll.options.find((o) => o.text === 'Pizza').byMe, true);
+        assert.equal(m.poll.totalVotes, 2);
+
+        // Multi-select is blocked for a single-choice poll.
+        const tooMany = await fetch(`${base}/api/pollvote`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, pollId, options: ['Pizza', 'Rice'] }),
+        });
+        assert.equal(tooMany.status, 400);
+
+        // Withdrawing the vote (empty selection) removes it from the tally.
+        await fetch(`${base}/api/pollvote`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, pollId, options: [] }),
+        });
+        m = (await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json())
+            .messages.find((x) => x.id === pollId);
+        assert.deepEqual(m.poll.myVote, []);
+        assert.equal(m.poll.totalVotes, 1);
+    });
+
+    await t.test('poll validation rejects bad option lists', async () => {
+        const r = await fetch(`${base}/api/poll`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, name: 'Dupes', options: ['a', 'a'] }),
+        });
+        assert.equal(r.status, 400);
+    });
+
+    await t.test('history paging returns older messages from the index', async () => {
+        handle.logMessage(makeMsg({ id: 'OLD1', jid: DM, text: 'ancient message', ts: 1600000000 }));
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}&before=${1700000000 * 1000}`, { headers: { cookie } });
+        const j = await r.json();
+        assert.equal(j.history, true);
+        const old = j.messages.find((x) => x.id === 'OLD1');
+        assert.ok(old, 'older message returned from SQLite');
+        assert.equal(old.text, 'ancient message');
+    });
+
+    await t.test('last seen comes from presence updates', async () => {
+        handle.handlePresenceUpdate(DM, { [DM]: { lastKnownPresence: 'unavailable', lastSeen: 1700000000 } });
+        const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json();
+        assert.equal(j.lastSeen, 1700000000000);
+    });
+
+    await t.test('group members feed the mention picker', async () => {
+        const r = await fetch(`${base}/api/groupmembers?jid=${encodeURIComponent(GROUP)}`, { headers: { cookie } });
+        const j = await r.json();
+        assert.equal(j.members.length, 2);
+        // The phonebook follows the most recent push name ("Friend" in these fixtures).
+        assert.equal(j.members[0].name, 'Friend', 'phonebook name used, not the bare number');
+        assert.equal(j.members[1].name, 'Friend', 'LID member resolved to its phone contact name');
+    });
+
+    await t.test('scoped search only looks inside one chat', async () => {
+        const inDm = await (await fetch(`${base}/api/search?q=birthday&jid=${encodeURIComponent(DM)}`, { headers: { cookie } })).json();
+        assert.equal(inDm.results.length, 1);
+        const inGroup = await (await fetch(`${base}/api/search?q=birthday&jid=${encodeURIComponent(GROUP)}`, { headers: { cookie } })).json();
+        assert.equal(inGroup.results.length, 0);
     });
 
     await t.test('logout kills the session', async () => {

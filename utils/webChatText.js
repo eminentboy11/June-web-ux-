@@ -25,7 +25,9 @@ const MEDIA_LABELS = {
     contactMessage: '👤 Contact',
     contactsArrayMessage: '👤 Contacts',
     pollCreationMessage: '📊 Poll',
-    pollUpdateMessage: '📊 Poll update',
+    pollCreationMessageV2: '📊 Poll',
+    pollCreationMessageV3: '📊 Poll',
+    pollUpdateMessage: '📊 Poll vote',
     reactionMessage: '❤️ Reaction',
     editedMessage: '✏️ Edited message',
 };
@@ -124,24 +126,30 @@ function applyReaction(reactions, emoji, sender) {
     return list;
 }
 
+// First contextInfo found on any message node (replies, mentions, forwards).
+function firstContext(inner) {
+    for (const value of Object.values(inner || {})) {
+        const ctx = value && typeof value === 'object' ? value.contextInfo : null;
+        if (ctx) return ctx;
+    }
+    return null;
+}
+
 // Quoted-reply descriptor from a message node's contextInfo (incoming
 // replies carry stanzaId + participant + quotedMessage on the node).
 function quotedFromContext(inner) {
-    for (const value of Object.values(inner || {})) {
-        const ctx = value && typeof value === 'object' ? value.contextInfo : null;
-        if (!ctx || (!ctx.stanzaId && !ctx.quotedMessage)) continue;
-        const qm = ctx.quotedMessage || {};
-        const media = extractMedia(unwrapMessage(qm));
-        return {
-            id: String(ctx.stanzaId || ''),
-            sender: ctx.participant || '',
-            pushName: '',
-            text: media ? (media.caption || '') : messageText({ message: qm }),
-            mediaKind: media ? media.kind : null,
-            fromMe: null,
-        };
-    }
-    return null;
+    const ctx = firstContext(inner);
+    if (!ctx || (!ctx.stanzaId && !ctx.quotedMessage)) return null;
+    const qm = ctx.quotedMessage || {};
+    const media = extractMedia(unwrapMessage(qm));
+    return {
+        id: String(ctx.stanzaId || ''),
+        sender: ctx.participant || '',
+        pushName: '',
+        text: media ? (media.caption || '') : messageText({ message: qm }),
+        mediaKind: media ? media.kind : null,
+        fromMe: null,
+    };
 }
 
 // Quoted-reply descriptor from a full message (fallback for sent echoes
@@ -159,11 +167,65 @@ function quotedDescriptor(msg) {
     };
 }
 
+// @mentioned JIDs of an incoming message (contextInfo.mentionedJid).
+function extractMentions(inner) {
+    const ctx = firstContext(inner);
+    const list = ctx?.mentionedJid;
+    return Array.isArray(list) ? list.map(String).filter(Boolean) : [];
+}
+
+// Forwarded label (contextInfo.forwardingScore / isForwarded).
+function isForwardedMsg(inner) {
+    const ctx = firstContext(inner);
+    return !!(ctx && (Number(ctx.forwardingScore) > 0 || ctx.isForwarded === true));
+}
+
+// Poll card: creation info from the message + votes from the meta store.
+// `meJids` (optional Set) marks the bot's own votes.
+function pollDto(inner, meta, meJids) {
+    const creation = inner.pollCreationMessage || inner.pollCreationMessageV2 || inner.pollCreationMessageV3;
+    const stored = meta?.poll || null;
+    if (!creation && !stored) return null;
+    const name = creation?.name || stored?.name || '';
+    const baseOptions = (creation?.options || []).map((o) => o.optionName || '').filter(Boolean);
+    const optionTexts = baseOptions.length ? baseOptions : (stored?.options || []);
+    if (!optionTexts.length) return null;
+    const votes = stored?.votes || {};
+    const isMe = (jid) => !meJids || meJids.has(String(jid));
+    const options = optionTexts.map((text) => {
+        const voters = Object.keys(votes).filter((jid) => (votes[jid]?.sel || []).includes(text));
+        return { text, count: voters.length, voters, byMe: voters.some(isMe) };
+    });
+    const myEntry = Object.entries(votes).find(([jid]) => isMe(jid));
+    return {
+        name,
+        selectableCount: creation?.selectableCount ?? stored?.selectableCount ?? 1,
+        options,
+        totalVotes: Object.keys(votes).length,
+        myVote: myEntry ? (myEntry[1].sel || []) : [],
+    };
+}
+
+// Incoming edit (protocolMessage.editedMessage) — returns the new text.
+function editedTextFromProtocol(inner) {
+    const proto = inner?.protocolMessage;
+    if (!proto?.editedMessage) return null;
+    return messageText({ message: proto.editedMessage });
+}
+
+// Incoming delete-for-everyone (protocolMessage REVOKE) — returns the key of
+// the message that was deleted.
+function revokedTargetKey(inner) {
+    const proto = inner?.protocolMessage;
+    if (!proto || Number(proto.type) !== 0 || !proto.key) return null;
+    return proto.key;
+}
+
 // Slim DTO sent to the browser. Media messages carry a descriptor so the page
 // can render them via /api/media (the text is the caption, not a label).
-// `meta` (optional) attaches status ticks, reactions, quoted blocks and
-// edited/deleted flags.
-function slimMessage(m, meta) {
+// `meta` (optional) attaches status ticks, reactions, quoted blocks, polls
+// and edited/deleted flags. `meJids` (optional Set) marks the bot's own votes.
+function slimMessage(m, meta, meJids) {
     const inner = unwrapMessage(m?.message || {});
     const media = extractMedia(inner);
     const reactions = Array.isArray(meta?.reactions) ? meta.reactions : [];
@@ -172,9 +234,15 @@ function slimMessage(m, meta) {
         fromMe: !!m?.key?.fromMe,
         sender: m?.key?.participant || m?.key?.remoteJid || '',
         pushName: m?.pushName || '',
-        text: media ? media.caption : messageText(m),
+        text: meta?.editText != null ? meta.editText : (media ? media.caption : messageText(m)),
         ts: msgTs(m) || null,
-        media: media ? { kind: media.kind, mime: media.mime, fileName: media.fileName } : null,
+        media: media ? {
+            kind: media.kind,
+            mime: media.mime,
+            fileName: media.fileName,
+            seconds: typeof media.content?.seconds === 'number' ? media.content.seconds : null,
+            waveform: media.content?.waveform ? Array.from(media.content.waveform) : null,
+        } : null,
         status: meta && meta.status != null ? meta.status : null,
         reactions: reactions.map((r) => ({
             emoji: r.emoji,
@@ -184,6 +252,10 @@ function slimMessage(m, meta) {
         quoted: quotedFromContext(inner) || (meta && meta.quoted) || null,
         edited: !!(meta && meta.edited),
         deleted: !!(meta && meta.deleted),
+        mentions: extractMentions(inner),
+        forwarded: isForwardedMsg(inner),
+        poll: pollDto(inner, meta, meJids),
+        history: false,
     };
 }
 
@@ -200,5 +272,10 @@ module.exports = {
     applyReaction,
     quotedFromContext,
     quotedDescriptor,
+    extractMentions,
+    isForwardedMsg,
+    pollDto,
+    editedTextFromProtocol,
+    revokedTargetKey,
     slimMessage,
 };

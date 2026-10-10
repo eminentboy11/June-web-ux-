@@ -1288,6 +1288,10 @@ async function startJunexBot() {
     sock.ev.on('messages.update', (updates) => {
         try { webChatHandle?.handleMessageUpdate?.(updates) } catch (_) {}
     })
+    // Web chat UI: delete-for-everyone arriving from the bookkeeping event.
+    sock.ev.on('messages.delete', (payload) => {
+        try { webChatHandle?.handleMessagesDelete?.(payload) } catch (_) {}
+    })
     sock.ev.on('messages.reaction', (reactions) => {
         try { webChatHandle?.handleReactions?.(reactions) } catch (_) {}
     })
