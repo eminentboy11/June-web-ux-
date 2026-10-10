@@ -219,27 +219,43 @@
   .status-item.unread .status-ring{border-color:var(--cyan)}
   .status-ring .avatar{width:50px;height:50px}
   .status-name{font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:66px}
-  #status-viewer{position:fixed;inset:0;z-index:95;background:#000;display:flex;flex-direction:column}
+  #status-viewer{position:fixed;inset:0;z-index:95;background:#000;color:#fff;display:flex;flex-direction:column}
   #status-viewer[hidden]{display:none!important}
-  .sv-top{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;color:#e8f4f8;font-size:.95rem}
-  .sv-top button{background:none;border:0;color:#e8f4f8;font-size:1.1rem;cursor:pointer}
-  #sv-progress{display:flex;gap:4px;padding:0 10px}
-  .sv-seg{flex:1;height:3px;background:rgba(255,255,255,.25);border-radius:2px}
-  .sv-seg.done,.sv-seg.active{background:var(--cyan)}
-  #sv-body{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0}
-  #sv-content{display:flex;align-items:center;justify-content:center;max-width:100%;max-height:100%}
-  #sv-content img,#sv-content video{max-width:100%;max-height:100%}
-  .sv-text{font-size:1.3rem;padding:24px;text-align:center;color:#e8f4f8;white-space:pre-wrap}
-  .sv-tap{position:absolute;top:0;bottom:0;width:50%;z-index:1}
+  #sv-progress{position:relative;z-index:3;display:flex;gap:3px;padding:8px 8px 0}
+  .sv-seg{flex:1;height:2.5px;background:rgba(255,255,255,.35);border-radius:2px;overflow:hidden}
+  .sv-seg>i{display:block;height:100%;width:0;background:#fff}
+  .sv-seg.done>i{width:100%}
+  .sv-seg.active>i{animation:svfill var(--sv-ms,6000ms) linear forwards}
+  @keyframes svfill{from{width:0}to{width:100%}}
+  .sv-head{position:relative;z-index:3;display:flex;align-items:center;gap:10px;padding:10px 12px}
+  #sv-close{background:none;border:0;color:#fff;font-size:1.8rem;line-height:1;cursor:pointer;padding:0 6px 0 0}
+  .sv-av{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#333;flex:none}
+  .sv-who{display:flex;flex-direction:column;min-width:0}
+  #sv-name{font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #sv-time{font-size:.75rem;color:#bbb}
+  #sv-stage{flex:1;position:relative;min-height:0;display:flex;align-items:center;justify-content:center;background:#000;overflow:hidden}
+  #sv-content{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+  #sv-content img,#sv-content video{width:100%;height:100%;object-fit:contain}
+  .sv-text{width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:28px;font-size:1.5rem;text-align:center;white-space:pre-wrap;background:linear-gradient(135deg,#0f3b3a,#0b1220)}
+  #sv-caption{position:relative;z-index:3;padding:14px 18px 26px;text-align:center;font-size:1rem;white-space:pre-wrap;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.8))}
+  #sv-caption:empty{display:none}
+  .sv-tap{position:absolute;top:120px;bottom:110px;width:40%;z-index:2}
   .sv-prev{left:0}
   .sv-next{right:0}
 </style>
 </head>
 <body>
 <div id="status-viewer" hidden>
-  <div class="sv-top"><span id="sv-name"></span><button id="sv-close" type="button">✕</button></div>
   <div id="sv-progress"></div>
-  <div id="sv-body"><div id="sv-content"></div><div class="sv-tap sv-prev"></div><div class="sv-tap sv-next"></div></div>
+  <div class="sv-head">
+    <button id="sv-close" type="button" aria-label="close">‹</button>
+    <img id="sv-avatar" class="sv-av" alt="">
+    <div class="sv-who"><div id="sv-name"></div><div id="sv-time"></div></div>
+  </div>
+  <div id="sv-stage"><div id="sv-content"></div></div>
+  <div id="sv-caption"></div>
+  <div class="sv-tap sv-prev"></div>
+  <div class="sv-tap sv-next"></div>
 </div>
 <div id="app">
   <aside id="sidebar">
@@ -1461,7 +1477,7 @@ function renderUpdates() {
     setAvatar(av, c.jid, c.name);
     const col = el('div', 'chat-col');
     const row1 = el('div', 'row1');
-    row1.appendChild(el('span', 'name', '📢 ' + c.name));
+    row1.appendChild(el('span', 'name', c.name));
     row1.appendChild(el('span', 'time', fmtTime(c.lastTs)));
     if (c.unread > 0) row1.appendChild(el('span', 'unread', String(c.unread)));
     col.appendChild(row1);
@@ -1475,17 +1491,30 @@ function renderUpdates() {
 
 /* status viewer: one poster's statuses, tap left/right, auto-advance */
 const sv = { sender: null, items: [], index: 0 };
-const SV_STEP_MS = 6000;
+const SV_IMAGE_MS = 6000;
+const SV_VIDEO_MS = 30000;
 const SV_MEDIA_RE = /Photo|Video|GIF|🖼|📷|🎥|🎞/i;
 let svTimer = null;
+
+function splitStatusText(text) {
+  const t = String(text || '');
+  if (!SV_MEDIA_RE.test(t)) return { isMedia: false, isVideo: false, caption: '' };
+  const isVideo = /Video|🎥|🎞/i.test(t);
+  const caption = t.replace(/^\s*(🖼️?|📷|🎥|🎞️?)?\s*(Photo|Video|GIF)\s*:?\s*/i, '').trim();
+  return { isMedia: true, isVideo, caption };
+}
 
 function openStatusViewer(sender, name) {
   sv.sender = sender;
   sv.items = [];
   sv.index = 0;
   $('sv-name').textContent = name || '';
+  const av = $('sv-avatar');
+  av.src = '/api/avatar?jid=' + encodeURIComponent(sender);
+  av.onerror = () => { av.removeAttribute('src'); };
   $('status-viewer').hidden = false;
-  $('sv-content').textContent = 'loading…';
+  $('sv-content').textContent = '';
+  $('sv-caption').textContent = '';
   $('sv-progress').textContent = '';
   api('/api/updates/status?sender=' + encodeURIComponent(sender))
     .then((r) => {
@@ -1496,45 +1525,63 @@ function openStatusViewer(sender, name) {
       // Mark them viewed (WhatsApp shows the poster that they were seen).
       postJson('/api/updates/viewed', { sender }).catch(() => {});
     })
-    .catch(() => { $('sv-content').textContent = 'could not load this status'; });
+    .catch(() => { $('sv-content').appendChild(el('div', 'sv-text', 'could not load this status')); });
 }
 
 function closeStatusViewer() {
   clearTimeout(svTimer);
   svTimer = null;
   $('status-viewer').hidden = true;
+  $('sv-content').textContent = '';
   sv.items = [];
   sv.sender = null;
   loadUpdates();
 }
 
+function nextStatus() { sv.index++; showStatusItem(); }
+
 function showStatusItem() {
   clearTimeout(svTimer);
   if (sv.index >= sv.items.length) { closeStatusViewer(); return; }
   if (sv.index < 0) sv.index = 0;
+  const it = sv.items[sv.index];
+  const parts = splitStatusText(it.text);
+  const stepMs = parts.isVideo ? SV_VIDEO_MS : SV_IMAGE_MS;
+
   const progress = $('sv-progress');
   progress.textContent = '';
   sv.items.forEach((_, i) => {
     const seg = el('div', 'sv-seg' + (i < sv.index ? ' done' : i === sv.index ? ' active' : ''));
+    seg.appendChild(document.createElement('i'));
+    if (i === sv.index) seg.style.setProperty('--sv-ms', stepMs + 'ms');
     progress.appendChild(seg);
   });
+
+  $('sv-time').textContent = it.ts ? fmtTime(it.ts) : '';
   const content = $('sv-content');
   content.textContent = '';
-  const it = sv.items[sv.index];
-  if (SV_MEDIA_RE.test(it.text || '')) {
-    const isVideo = /Video|🎥|🎞/i.test(it.text);
-    const media = document.createElement(isVideo ? 'video' : 'img');
+  const caption = $('sv-caption');
+  caption.textContent = '';
+
+  if (parts.isMedia) {
+    const media = document.createElement(parts.isVideo ? 'video' : 'img');
     media.src = '/api/media?jid=status%40broadcast&id=' + encodeURIComponent(it.id);
-    if (isVideo) { media.controls = true; media.autoplay = true; media.muted = true; }
-    media.onerror = () => { content.textContent = ''; content.appendChild(el('div', 'sv-text', it.text || '')); };
-    content.appendChild(media);
-    if (!isVideo) {
-      if (it.text) content.appendChild(el('div', 'sv-text', it.text));
+    if (parts.isVideo) {
+      media.controls = true;
+      media.autoplay = true;
+      media.playsInline = true;
+      media.onended = nextStatus;
     }
+    media.onerror = () => {
+      content.textContent = '';
+      content.appendChild(el('div', 'sv-text', it.text || ''));
+    };
+    content.appendChild(media);
+    caption.textContent = parts.caption;
   } else {
     content.appendChild(el('div', 'sv-text', it.text || '(empty status)'));
   }
-  svTimer = setTimeout(() => { sv.index++; showStatusItem(); }, SV_STEP_MS);
+  svTimer = setTimeout(nextStatus, stepMs);
 }
 
 $('sv-close').addEventListener('click', closeStatusViewer);

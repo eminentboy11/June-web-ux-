@@ -681,7 +681,8 @@ function attachChatUI(app, deps) {
         if (cached && Date.now() - cached.ts < AVATAR_CACHE_TTL_MS) return cached;
         const sock = getSock();
         if (!sock || typeof sock.profilePictureUrl !== 'function') return null;
-        const url = await sock.profilePictureUrl(jid, 'image');
+        const chanMeta = jid.endsWith('@newsletter') ? await loadChannelMeta(jid) : null;
+        const url = chanMeta?.pictureUrl || await sock.profilePictureUrl(jid, 'image');
         if (!url) return null;
         const resp = await withTimeout(fetch(url), 8000);
         if (!resp.ok) return null;
@@ -743,10 +744,32 @@ function attachChatUI(app, deps) {
     /* ── Updates: statuses (24h) and channels ──────────────────────────── */
     const STATUS_WINDOW_MS = 24 * 60 * 60 * 1000;
     const channelNames = new Map();
+    // Channel name and picture from WhatsApp, cached for an hour.
+    const channelMeta = new Map();
+    async function loadChannelMeta(jid) {
+        const cached = channelMeta.get(jid);
+        if (cached && Date.now() - cached.ts < 60 * 60 * 1000) return cached;
+        const entry = { name: '', pictureUrl: '', ts: Date.now() };
+        const sock = getSock();
+        if (sock && typeof sock.newsletterMetadata === 'function') {
+            let meta = null;
+            try { meta = await withTimeout(sock.newsletterMetadata('jid', jid), 4000); }
+            catch (_) {
+                try { meta = await withTimeout(sock.newsletterMetadata(jid), 4000); } catch (_) {}
+            }
+            const tm = meta?.thread_metadata || meta || {};
+            const nm = tm?.name?.text ?? tm?.name;
+            entry.name = typeof nm === 'string' ? nm : '';
+            const pic = tm?.picture?.url;
+            entry.pictureUrl = typeof pic === 'string' ? pic : '';
+        }
+        channelMeta.set(jid, entry);
+        return entry;
+    }
     const statusNameFor = (sender, pushName) =>
         chatStore.phonebookName(sender) || pushName || String(sender || '').split('@')[0];
 
-    app.get('/api/updates', requireAuth, (req, res) => {
+    app.get('/api/updates', requireAuth, async (req, res) => {
         const since = Date.now() - STATUS_WINDOW_MS;
         const statuses = chatStore.statusPosters(since).map((p) => {
             const read = chatStore.getRead('status:' + p.sender);
@@ -758,16 +781,17 @@ function attachChatUI(app, deps) {
                 unread: chatStore.countStatusesSince(p.sender, Math.max(read, since)),
             };
         });
-        const channels = chatStore.channelList(100).map((c) => {
+        const channels = await Promise.all(chatStore.channelList(100).map(async (c) => {
             const last = chatStore.pageBefore([c.jid], Number.MAX_SAFE_INTEGER, 1)[0];
+            const meta = await loadChannelMeta(c.jid);
             return {
                 jid: c.jid,
-                name: channelNames.get(c.jid) || c.jid.split('@')[0],
+                name: meta.name || channelNames.get(c.jid) || c.jid.split('@')[0],
                 lastTs: c.lastTs,
                 preview: String(last?.text || '').slice(0, 100),
                 unread: chatStore.countSince([c.jid], chatStore.getRead(c.jid)),
             };
-        });
+        }));
         res.json({ ok: true, statuses, channels });
     });
 
