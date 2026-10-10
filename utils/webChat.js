@@ -850,7 +850,11 @@ function attachChatUI(app, deps) {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
         // LID ↔ PN: one person can chat under both addresses. Best-effort
         // live lookup, then merge every bucket that maps to this chat.
-        await withTimeout(getJidMap().enrich(jid, getSock()), 1500).catch(() => {});
+        // The lookup can take up to 1.5s; never make a poll wait longer than 150ms for it.
+        await Promise.race([
+            withTimeout(getJidMap().enrich(jid, getSock()), 1500).catch(() => {}),
+            new Promise((resolve) => setTimeout(resolve, 150)),
+        ]);
         subscribePresence(jid);
         const jids = getJidMap().related(jid);
 

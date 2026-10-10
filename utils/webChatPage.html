@@ -313,6 +313,7 @@
 <script>
 'use strict';
 const state = {
+  pending: [], loadingJid: null,
   chats: [], currentJid: null, currentName: '', currentIsGroup: false, filter: '', connected: false,
   memory: [],          // latest page from the live store
   history: [],         // older pages loaded automatically (or by scrolling up / search)
@@ -577,8 +578,9 @@ function combinedMessages() {
 }
 
 async function loadMessages() {
-  if (!state.currentJid) return;
+  if (!state.currentJid || state.loadingJid === state.currentJid) return;
   const jid = state.currentJid;
+  state.loadingJid = jid;
   try {
     const r = await api('/api/messages?jid=' + encodeURIComponent(jid) + '&limit=200');
     if (jid !== state.currentJid) return;
@@ -590,7 +592,18 @@ async function loadMessages() {
     state.lastSeen = r.lastSeen || null;
     renderPresence();
     renderMessages(true);
-  } catch (_) {}
+  } catch (_) {} finally {
+    if (state.loadingJid === jid) state.loadingJid = null;
+  }
+}
+
+// Sent messages still waiting for WhatsApp's copy to reach the poll. A pending bubble is
+// dropped once the real message appears, or after 30 seconds.
+function pendingRows(all) {
+  const now = Date.now();
+  state.pending = state.pending.filter((p) => now - p.ts < 30000 &&
+    !(p.jid === state.currentJid && all.some((m) => m.fromMe && m.text === p.text && m.ts >= p.ts - 15000)));
+  return state.pending.filter((p) => p.jid === state.currentJid);
 }
 
 function renderMessages(scrollToBottomIfNear) {
@@ -616,6 +629,7 @@ function renderMessages(scrollToBottomIfNear) {
     box.appendChild(renderRow(m, cont));
     prev = m;
   }
+  for (const p of pendingRows(all)) box.appendChild(renderRow(p, false));
   if (scrollToBottomIfNear && nearBottom) box.scrollTop = box.scrollHeight;
   else box.scrollTop = Math.max(0, box.scrollHeight - distanceFromBottom);
   refreshOpenMenus();
@@ -1138,7 +1152,7 @@ function isInteractive(target) {
 }
 
 function attachMessageGestures(row, bubble, m) {
-  if (m.deleted) return;
+  if (m.deleted || m.pending) return;
   bubble.addEventListener('touchstart', (ev) => {
     pressState = null;
     clearTimeout(pressTimer);
@@ -1583,6 +1597,7 @@ $('send-form').addEventListener('submit', async (e) => {
   $('send-text').value = '';
   stopTyping();
   $('mention-list').hidden = true;
+  let pend = null;
   try {
     if (state.editing) {
       const id = state.editing.id;
@@ -1593,12 +1608,19 @@ $('send-form').addEventListener('submit', async (e) => {
       if (state.replyTo) body.quotedMsgId = state.replyTo.id;
       const mentions = mentionsForText(text);
       if (mentions.length) body.mentions = mentions;
+      // Show the message now; WhatsApp's round trip takes a moment.
+      pend = { pending: true, jid: state.currentJid, fromMe: true, text, ts: Date.now(), status: 1 };
+      state.pending.push(pend);
+      renderMessages(true);
+      $('messages').scrollTop = $('messages').scrollHeight;
       await postJson('/api/send', body);
       setReply(null);
       state.mentions = new Map();
     }
     loadMessages();
   } catch (err) {
+    if (pend) state.pending = state.pending.filter((p) => p !== pend);
+    renderMessages(false);
     alert(err.message || 'send failed');
   }
 });
@@ -1765,7 +1787,7 @@ $('poll-create').addEventListener('click', async () => {
 /* ── timers + boot ─────────────────────────────────────────────────────── */
 
 setInterval(() => { if (!document.hidden) { loadStatus(); loadChats(); } }, 5000);
-setInterval(() => { if (!document.hidden) loadMessages(); }, 2500);
+setInterval(() => { if (!document.hidden) loadMessages(); }, 1200);
 $('messages').addEventListener('scroll', () => {
   if ($('messages').scrollTop < 40 && state.hasMore) loadOlder();
 });
