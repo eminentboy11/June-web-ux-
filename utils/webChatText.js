@@ -78,6 +78,10 @@ function messageText(msg) {
             return caption ? `${label}: ${caption}` : label;
         }
     }
+    if (inner.callLogMessage) {
+        const c = inner.callLogMessage;
+        return `📞 Missed ${c.isVideo ? 'video' : 'voice'} call`;
+    }
     if (inner.protocolMessage) return '⚙️ System message';
     if (msg.messageStubType != null) return '⚙️ Notification';
     return '· Unsupported message ·';

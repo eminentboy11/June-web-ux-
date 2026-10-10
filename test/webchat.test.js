@@ -1426,3 +1426,22 @@ test('status photos download after a restart (raw message kept in the index)', a
     assert.equal(r.status, 200, await r.clone().text());
     assert.ok(String(r.headers.get('content-type')).startsWith('image/'));
 });
+
+test('unanswered incoming calls appear as missed-call rows; answered ones do not', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const now = Math.floor(Date.now() / 1000);
+    ctx.handle.logCall({ id: 'C1', chatId: DM, from: DM, date: now, isVideo: false, status: 'timeout' });
+    ctx.handle.logCall({ id: 'C2', chatId: DM, from: DM, date: now + 1, isVideo: false, status: 'accept' });
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+    const j = await r.json();
+    const calls = j.messages.filter((m) => m.id.startsWith('CALL-'));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].text, '📞 Missed voice call');
+});

@@ -1306,6 +1306,11 @@ async function startJunexBot() {
     sock.ev.on('message-receipt.update', (receipts) => {
         try { webChatHandle?.handleReceiptUpdate?.(receipts) } catch (_) {}
     })
+    sock.ev.on('call', (calls) => {
+        for (const c of calls || []) {
+            try { webChatHandle?.logCall?.(c) } catch (_) {}
+        }
+    })
     sock.ev.on('messages.upsert', ({ messages }) => {
         for (const m of messages || []) {
             try { webChatHandle?.logMessage?.(m) } catch (_) {}

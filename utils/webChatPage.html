@@ -43,6 +43,8 @@
   .chat-item .time{font-size:.62rem;color:var(--muted);flex:none;font-family:'JetBrains Mono',monospace}
   .chat-item .preview{font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .search-head{padding:10px 14px;font-size:.6rem;letter-spacing:2px;color:var(--muted);border-bottom:1px solid var(--border);text-transform:uppercase}
+  .e2e-notice{align-self:center;max-width:92%;margin:6px 0 10px;padding:8px 12px;border-radius:8px;background:rgba(255,214,102,.12);border:1px solid rgba(255,214,102,.25);color:var(--text,#e8f1f0);font-size:.7rem;line-height:1.35;text-align:center}
+  .swipe-hint{position:absolute;left:-34px;top:50%;transform:translateY(-50%);font-size:1rem;opacity:0;pointer-events:none}
   .empty{padding:18px 14px;font-size:.75rem;color:var(--muted);text-align:center}
   .avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;flex:none;border:1px solid var(--border);display:block;background:rgba(0,255,224,.08)}
   .avatar-fallback{display:flex;align-items:center;justify-content:center;color:var(--cyan);font-weight:600;font-size:.85rem;font-family:'JetBrains Mono',monospace}
@@ -666,6 +668,7 @@ function renderMessages(scrollToBottomIfNear) {
   const all = combinedMessages();
   box.textContent = '';
   box.appendChild(historyEl);
+  box.appendChild(el('div', 'e2e-notice', '🔒 Messages and calls are end-to-end encrypted. Only people in this chat can read, listen to, or share them.'));
   if (!all.length) box.appendChild(el('div', 'empty', 'no recent messages — the store keeps the latest per chat'));
 
   let prev = null;
@@ -687,10 +690,47 @@ function renderMessages(scrollToBottomIfNear) {
   refreshOpenMenus();
 }
 
+// Swipe a bubble to the right to quote it (WhatsApp-style reply).
+function attachSwipeReply(row, bubble, m) {
+  if (m.pending || m.deleted || m.history) return;
+  const THRESHOLD = 60;
+  let x0 = null, y0 = null, dx = 0, locked = false;
+  const hint = el('span', 'swipe-hint', '↩');
+  bubble.appendChild(hint);
+  row.addEventListener('touchstart', (ev) => {
+    const t = ev.touches[0];
+    x0 = t.clientX; y0 = t.clientY; dx = 0; locked = false;
+  }, { passive: true });
+  row.addEventListener('touchmove', (ev) => {
+    if (x0 == null) return;
+    const t = ev.touches[0];
+    const mx = t.clientX - x0, my = t.clientY - y0;
+    if (!locked) {
+      if (Math.abs(my) > 12 && Math.abs(my) > Math.abs(mx)) { x0 = null; return; } // vertical scroll
+      if (Math.abs(mx) > 12) locked = true; else return;
+    }
+    dx = Math.max(0, Math.min(mx, 90));
+    bubble.style.transform = `translateX(${dx}px)`;
+    hint.style.opacity = dx > THRESHOLD ? '1' : String(Math.min(dx / THRESHOLD, 0.6));
+  }, { passive: true });
+  const end = () => {
+    const fire = dx >= THRESHOLD;
+    x0 = null; dx = 0; locked = false;
+    bubble.style.transition = 'transform .15s';
+    bubble.style.transform = '';
+    hint.style.opacity = '0';
+    setTimeout(() => { bubble.style.transition = ''; }, 160);
+    if (fire) setReply(m);
+  };
+  row.addEventListener('touchend', end);
+  row.addEventListener('touchcancel', end);
+}
+
 function renderRow(m, cont) {
   const row = el('div', 'msg-row ' + (m.fromMe ? 'me' : 'them') + (cont ? ' cont' : ''));
   if (m.id) row.setAttribute('data-msg-id', m.id);
   const bubble = el('div', 'bubble' + (m.deleted ? ' deleted' : ''));
+  attachSwipeReply(row, bubble, m);
   if (!m.fromMe && state.currentIsGroup && m.sender && !cont) {
     bubble.appendChild(el('div', 'sender', m.pushName || m.sender.split('@')[0]));
   }

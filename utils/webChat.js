@@ -1593,6 +1593,22 @@ function attachChatUI(app, deps) {
 
     /* ── handle returned to index.js ────────────────────────────────────── */
 
+    // Calls from the `call` event. Only unanswered incoming calls are kept, as a
+    // "Missed voice call" row in the chat they came from.
+    function logCall(call) {
+        try {
+            if (!call || (call.status !== 'timeout' && call.status !== 'reject')) return;
+            const chatId = call.chatId || call.from;
+            if (!chatId || call.isGroup) return;
+            logMessage({
+                key: { id: 'CALL-' + String(call.id), remoteJid: chatId, fromMe: false },
+                message: { callLogMessage: { isVideo: !!call.isVideo } },
+                messageTimestamp: Number(call.date) || Math.floor(Date.now() / 1000),
+                pushName: '',
+            });
+        } catch (_) {}
+    }
+
     function logMessage(msg) {
         try {
             // Learn LID ↔ PN pairs from the message's alternate address.
@@ -1790,7 +1806,7 @@ function attachChatUI(app, deps) {
 
     /* ── read receipts, reactions, edits etc. stay below ─────────────── */
 
-    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts, handleHistorySync };
+    return { logMessage, logCall, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts, handleHistorySync };
 }
 
 module.exports = { attachChatUI };
