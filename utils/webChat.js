@@ -1345,12 +1345,15 @@ function attachChatUI(app, deps) {
     // ── admin-only groups ("announce" mode): who may send ─────────────────
     const ADMIN_ONLY_MSG = 'Only admins can send messages in this group';
     const groupAccessCache = new Map();   // group jid -> { ts, value }
+    const groupLastKnown = new Map();     // group jid -> { announce, amAdmin } (survives lookup failures)
+    const groupWarned = new Set();
     const GROUP_ACCESS_TTL = 60 * 1000;
     const GROUP_ACCESS_RETRY = 15 * 1000;
 
-    // announce = only admins may send. If the lookup fails, or the owner is not
-    // found in the member list, we allow the send and let WhatsApp decide: we
-    // never block on a guess.
+    // Fail closed: in an admin-only group we send only when we can confirm the
+    // owner is an admin. If the group can't be read right now, the last known
+    // state is used. Only a group we have never read is allowed through, and
+    // WhatsApp itself refuses the send if it is restricted.
     async function groupAccess(jid) {
         if (!String(jid).endsWith('@g.us')) return { isGroup: false, known: false, announce: false, amAdmin: false, canSend: true };
         const hit = groupAccessCache.get(jid);
@@ -1367,8 +1370,16 @@ function attachChatUI(app, deps) {
                 });
                 const announce = !!meta?.announce;
                 const amAdmin = !!me && (me.admin === 'admin' || me.admin === 'superadmin');
-                value = { isGroup: true, known: !!me, announce, amAdmin, canSend: !announce || !me || amAdmin };
-            } catch (_) { /* keep the permissive default */ }
+                if (announce && !me && !groupWarned.has(jid)) {
+                    groupWarned.add(jid);
+                    log(`[ WEB ] Admin-only group ${digits(jid)}: owner not found among members, sending blocked`, 'yellow');
+                }
+                groupLastKnown.set(jid, { announce, amAdmin });
+                value = { isGroup: true, known: true, announce, amAdmin, canSend: !announce || amAdmin };
+            } catch (_) {
+                const last = groupLastKnown.get(jid);
+                if (last) value = { isGroup: true, known: false, announce: last.announce, amAdmin: last.amAdmin, canSend: !last.announce || last.amAdmin };
+            }
         }
         groupAccessCache.set(jid, { ts: Date.now(), value });
         return value;

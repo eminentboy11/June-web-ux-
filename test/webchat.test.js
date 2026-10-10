@@ -30,6 +30,7 @@ const LID2 = '71109999999999@lid';
 const PN3 = '2349000000003@s.whatsapp.net';
 const ANN_GROUP = '120363111000@g.us';
 const ANN_ADMIN_GROUP = '120363222000@g.us';
+const ANN_UNKNOWN_GROUP = '120363333000@g.us';
 const OWNER_PN = '2348000000000@s.whatsapp.net';
 
 const voiceCalls = [];
@@ -133,6 +134,7 @@ async function startTestServer() {
         groupMetadata: async (jid) => {
             // Admin-only ("announce") groups: the owner is a plain member, or an admin.
             if (jid === ANN_GROUP) return { subject: 'Announce', announce: true, participants: [{ id: OWNER_PN }, { id: DM }] };
+            if (jid === ANN_UNKNOWN_GROUP) return { subject: 'Announce, owner not listed', announce: true, participants: [{ id: DM }] };
             if (jid === ANN_ADMIN_GROUP) return { subject: 'Announce admin', announce: true, participants: [{ id: OWNER_PN, admin: 'admin' }, { id: DM }] };
             return { subject: 'Test Group ' + jid.slice(0, 6), participants: [{ id: DM }, { id: LID2 }] };
         },
@@ -303,6 +305,17 @@ test('web chat UI', async (t) => {
         });
         assert.equal(r.status, 200);
         sent.length = 0; // keep the shared outbox clean for the next send test
+    });
+
+    await t.test('admin-only group: when the owner cannot be matched, sending fails closed', async () => {
+        const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(ANN_UNKNOWN_GROUP)}`, { headers: { cookie } })).json();
+        assert.equal(j.groupAccess.canSend, false);
+        const r = await fetch(`${base}/api/send`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: ANN_UNKNOWN_GROUP, text: 'should not go out' }),
+        });
+        assert.equal(r.status, 403);
+        assert.equal(sent.length, 0, 'nothing reached the socket');
     });
 
     await t.test('normal group stays open to everyone', async () => {
