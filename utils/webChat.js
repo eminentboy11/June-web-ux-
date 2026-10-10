@@ -529,7 +529,7 @@ function attachChatUI(app, deps) {
             for (const { key, update } of updates || []) {
                 if (!key?.id || !key?.remoteJid) continue;
                 linkKey(key);
-                const chatJid = key.remoteJid;
+                const chatJid = canonicalChat(key.remoteJid);
                 const msgId = String(key.id);
                 if (typeof update?.status === 'number') {
                     chatStore.setMsgMeta(chatJid, msgId, { status: update.status });
@@ -576,7 +576,7 @@ function attachChatUI(app, deps) {
                 const status = (type === 'read' || type === 'read-self' || type === 'played')
                     ? STATUS.READ
                     : STATUS.DELIVERY_ACK;
-                chatStore.setMsgMeta(key.remoteJid, String(key.id), { status });
+                chatStore.setMsgMeta(canonicalChat(key.remoteJid), String(key.id), { status });
             }
         } catch (_) {}
     }

@@ -524,7 +524,7 @@ function openChat(jid, name, isGroup) {
   state.mentions = new Map();
   $('app').classList.add('chat-open');
   $('chat-title').textContent = state.currentName;
-  $('chat-sub').textContent = jid;
+  $('chat-sub').textContent = jid.endsWith('@s.whatsapp.net') ? '+' + jid.split('@')[0] : '';
   setAvatar($('head-avatar'), jid, state.currentName);
   $('chat-presence').textContent = '';
   $('chat-presence').className = '';
