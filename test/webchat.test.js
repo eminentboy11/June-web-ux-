@@ -44,6 +44,7 @@ async function startTestServer() {
     });
     const sent = [];
     const presenceCalls = [];
+    const readCalls = [];
     let downloadCalls = 0;
     const sock = {
         user: { id: '2348000000000:5@s.whatsapp.net' },
@@ -57,6 +58,9 @@ async function startTestServer() {
         },
         sendPresenceUpdate: async (presence, jid) => {
             presenceCalls.push({ presence, jid });
+        },
+        readMessages: async (keys) => {
+            readCalls.push(keys);
         },
         groupMetadata: async (jid) => ({ subject: 'Test Group ' + jid.slice(0, 6) }),
         profilePictureUrl: async (jid) => 'https://cdn.example.com/' + encodeURIComponent(jid) + '.jpg',
@@ -77,7 +81,7 @@ async function startTestServer() {
     });
     const port = server.address().port;
     return {
-        server, port, store, chatStore, sent, presenceCalls, sock,
+        server, port, store, chatStore, sent, presenceCalls, readCalls, sock,
         getDownloadCalls: () => downloadCalls,
         handle,
         cleanup: () => {
@@ -90,7 +94,7 @@ async function startTestServer() {
 
 test('web chat UI', async (t) => {
     const ctx = await startTestServer();
-    const { port, store, sent, presenceCalls, handle } = ctx;
+    const { port, store, sent, presenceCalls, readCalls, handle } = ctx;
     const base = `http://127.0.0.1:${port}`;
     t.after(() => ctx.cleanup());
 
@@ -363,6 +367,128 @@ test('web chat UI', async (t) => {
         const j = await r.json();
         const dm = j.chats.find((c) => c.jid === DM);
         assert.equal(dm.name, 'Amaka', 'DM shown with the WhatsApp profile name');
+    });
+
+    await t.test('react endpoint sends a WhatsApp reaction and stores it', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'R1', jid: DM, fromMe: true, text: 'react to me', ts: 1700000200 }));
+        const r = await fetch(`${base}/api/react`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'R1', emoji: '👍' }),
+        });
+        assert.equal(r.status, 200);
+        const j = await r.json();
+        assert.equal(j.ok, true);
+        assert.deepEqual(j.reactions, [{ emoji: '👍', count: 1, byMe: true }]);
+        const last = sent.at(-1);
+        assert.equal(last.jid, DM);
+        assert.equal(last.content.react.text, '👍');
+        assert.equal(last.content.react.key.id, 'R1');
+        const r2 = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        const m = (await r2.json()).messages.find((x) => x.id === 'R1');
+        assert.deepEqual(m.reactions, [{ emoji: '👍', count: 1, byMe: true }]);
+    });
+
+    await t.test('react endpoint removes the reaction with an empty emoji', async () => {
+        const r = await fetch(`${base}/api/react`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'R1', emoji: '' }),
+        });
+        assert.equal(r.status, 200);
+        const j = await r.json();
+        assert.deepEqual(j.reactions, []);
+        assert.equal(sent.at(-1).content.react.text, '');
+        const r2 = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        const m = (await r2.json()).messages.find((x) => x.id === 'R1');
+        assert.deepEqual(m.reactions, []);
+    });
+
+    await t.test('react endpoint validates input', async () => {
+        const noAuth = await fetch(`${base}/api/react`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'R1', emoji: '👍' }),
+        });
+        assert.equal(noAuth.status, 401);
+        const badJid = await fetch(`${base}/api/react`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: 'evil', msgId: 'R1', emoji: '👍' }),
+        });
+        assert.equal(badJid.status, 400);
+        const badId = await fetch(`${base}/api/react`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: '../x', emoji: '👍' }),
+        });
+        assert.equal(badId.status, 400);
+        const unknown = await fetch(`${base}/api/react`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'NOPE', emoji: '👍' }),
+        });
+        assert.equal(unknown.status, 404);
+    });
+
+    await t.test('message status updates flow into /api/messages (ticks)', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'S1', jid: DM, fromMe: true, text: 'tick me', ts: 1700000300 }));
+        handle.handleMessageUpdate([{ key: { id: 'S1', remoteJid: DM, fromMe: true }, update: { status: 3 } }]);
+        let r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        let m = (await r.json()).messages.find((x) => x.id === 'S1');
+        assert.equal(m.status, 3);
+        // READ sticks — a later lower status never downgrades it.
+        handle.handleMessageUpdate([{ key: { id: 'S1', remoteJid: DM, fromMe: true }, update: { status: 4 } }]);
+        handle.handleMessageUpdate([{ key: { id: 'S1', remoteJid: DM, fromMe: true }, update: { status: 2 } }]);
+        r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        m = (await r.json()).messages.find((x) => x.id === 'S1');
+        assert.equal(m.status, 4);
+    });
+
+    await t.test('group receipts update ticks (message-receipt.update)', async () => {
+        store.storeMessage(GROUP, makeMsg({ id: 'S2', jid: GROUP, fromMe: true, text: 'group tick', ts: 1700000400 }));
+        handle.handleReceiptUpdate([{ key: { id: 'S2', remoteJid: GROUP, fromMe: true }, receipt: { type: 'read' } }]);
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(GROUP)}`, { headers: { cookie } });
+        const m = (await r.json()).messages.find((x) => x.id === 'S2');
+        assert.equal(m.status, 4);
+    });
+
+    await t.test('incoming reactions flow into /api/messages (messages.reaction)', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'R2', jid: DM, text: 'others react', ts: 1700000500 }));
+        const stanzaKey = { id: 'RX1', remoteJid: DM, participant: '2349000000000@s.whatsapp.net' };
+        handle.handleReactions([{ key: { id: 'R2', remoteJid: DM }, reaction: { key: stanzaKey, text: '❤️' } }]);
+        let r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        let m = (await r.json()).messages.find((x) => x.id === 'R2');
+        assert.deepEqual(m.reactions, [{ emoji: '❤️', count: 1, byMe: false }]);
+        // A new emoji from the same sender replaces the old one.
+        handle.handleReactions([{ key: { id: 'R2', remoteJid: DM }, reaction: { key: stanzaKey, text: '😂' } }]);
+        r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        m = (await r.json()).messages.find((x) => x.id === 'R2');
+        assert.deepEqual(m.reactions, [{ emoji: '😂', count: 1, byMe: false }]);
+        // Empty text removes the reaction.
+        handle.handleReactions([{ key: { id: 'R2', remoteJid: DM }, reaction: { key: stanzaKey, text: '' } }]);
+        r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        m = (await r.json()).messages.find((x) => x.id === 'R2');
+        assert.deepEqual(m.reactions, []);
+    });
+
+    await t.test('opening a chat marks incoming messages read once', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'RD1', jid: DM, text: 'mark me read', ts: Math.floor(Date.now() / 1000) + 20 }));
+        const before = readCalls.length;
+        await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        assert.ok(readCalls.length > before, 'readMessages called');
+        const keys = readCalls.at(-1);
+        assert.ok(keys.some((k) => k.id === 'RD1'), 'the new incoming message is marked read');
+        const n = readCalls.length;
+        await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        assert.equal(readCalls.length, n, 'second poll does not re-mark');
+    });
+
+    await t.test('chat list reports unread counts', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'U1', jid: DM, text: 'unread one', ts: Math.floor(Date.now() / 1000) + 10 }));
+        const r = await fetch(`${base}/api/chats`, { headers: { cookie } });
+        const dm = (await r.json()).chats.find((c) => c.jid === DM);
+        assert.ok(dm.unread >= 1, `unread badge count, got ${dm.unread}`);
     });
 
     await t.test('logout kills the session', async () => {

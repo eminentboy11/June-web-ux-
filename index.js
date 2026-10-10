@@ -1280,6 +1280,16 @@ async function startJunexBot() {
     store.bind(sock.ev)
     // Web chat UI: index every message (in + out) for search, and keep the
     // phonebook (number → WhatsApp name) fresh.
+    // Web chat UI: message status ticks, reactions and group read receipts.
+    sock.ev.on('messages.update', (updates) => {
+        try { webChatHandle?.handleMessageUpdate?.(updates) } catch (_) {}
+    })
+    sock.ev.on('messages.reaction', (reactions) => {
+        try { webChatHandle?.handleReactions?.(reactions) } catch (_) {}
+    })
+    sock.ev.on('message-receipt.update', (receipts) => {
+        try { webChatHandle?.handleReceiptUpdate?.(receipts) } catch (_) {}
+    })
     sock.ev.on('messages.upsert', ({ messages }) => {
         for (const m of messages || []) {
             try { webChatHandle?.logMessage?.(m) } catch (_) {}

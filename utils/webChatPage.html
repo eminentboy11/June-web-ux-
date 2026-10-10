@@ -69,13 +69,30 @@
   .msg-row{display:flex}
   .msg-row.me{justify-content:flex-end}
   .msg-row.cont{margin-top:-5px}
-  .bubble{max-width:72%;padding:8px 12px;border-radius:10px;font-size:.86rem;line-height:1.4;word-break:break-word;white-space:pre-wrap}
+  .bubble{position:relative;max-width:72%;padding:8px 12px;border-radius:10px;font-size:.86rem;line-height:1.4;word-break:break-word;white-space:pre-wrap}
   .msg-row.me .bubble{background:var(--me);border:1px solid rgba(0,255,224,.25);border-bottom-right-radius:3px}
   .msg-row.them .bubble{background:var(--them);border:1px solid rgba(255,255,255,.08);border-bottom-left-radius:3px}
   .msg-row.me.cont .bubble{border-top-right-radius:3px}
   .msg-row.them.cont .bubble{border-top-left-radius:3px}
   .bubble .sender{font-size:.66rem;color:var(--orange);margin-bottom:2px;font-weight:600}
-  .bubble .ts{font-size:.6rem;color:var(--muted);margin-top:4px;text-align:right;font-family:'JetBrains Mono',monospace}
+  .bubble .ts{font-size:.6rem;color:var(--muted);margin-top:4px;display:flex;justify-content:flex-end;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace}
+  .ticks{font-size:.62rem;letter-spacing:-1px;line-height:1}
+  .ticks.read{color:var(--cyan)}
+  .ticks.err{color:var(--red)}
+  .edited{font-size:.58rem;color:var(--muted);font-style:italic}
+  .rx-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px;justify-content:flex-end}
+  .rx-pill{background:rgba(0,0,0,.35);border:1px solid var(--border);color:var(--text);border-radius:20px;padding:1px 8px;font-size:.68rem;cursor:pointer;letter-spacing:0;line-height:1.5}
+  .rx-pill.by-me{border-color:var(--cyan);background:rgba(0,255,224,.16)}
+  .rx-pill:hover{border-color:var(--cyan)}
+  .bubble-actions{position:absolute;top:-9px;right:5px;display:none;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:1px 5px;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+  .msg-row:hover .bubble-actions{display:flex}
+  .bubble-actions button{background:none;border:none;color:var(--muted);font-size:.72rem;padding:1px 4px;letter-spacing:0;line-height:1.4}
+  .bubble-actions button:hover{color:var(--cyan);background:none}
+  #rx-bar{position:fixed;z-index:60;display:none;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:20px;padding:4px 7px;box-shadow:0 6px 18px rgba(0,0,0,.55)}
+  #rx-bar.show{display:flex}
+  #rx-bar button{background:none;border:none;font-size:1.05rem;padding:2px 5px;cursor:pointer;border-radius:6px;letter-spacing:0;line-height:1.3}
+  #rx-bar button:hover{background:rgba(0,255,224,.15)}
+  .unread{background:var(--cyan);color:#03060c;font-size:.6rem;font-weight:700;border-radius:20px;padding:1px 7px;flex:none;font-family:'JetBrains Mono',monospace;align-self:center}
   .media{margin-bottom:4px}
   .media-img{max-width:260px;max-height:300px;border-radius:8px;display:block;cursor:pointer;border:1px solid var(--border)}
   .media-video{max-width:300px;border-radius:8px;display:block;border:1px solid var(--border)}
@@ -146,6 +163,7 @@
     </form>
   </main>
 </div>
+<div id="rx-bar"></div>
 <div id="logged-out" hidden>
   <div class="lo-card">
     <div class="lo-title">LOGGED OUT</div>
@@ -254,6 +272,7 @@ function renderChats() {
     const row1 = el('div', 'row1');
     row1.appendChild(el('span', 'name', c.isGroup ? '👥 ' + c.name : c.name));
     row1.appendChild(el('span', 'time', fmtTime(c.lastTs)));
+    if (c.unread > 0) row1.appendChild(el('span', 'unread', String(c.unread)));
     col.appendChild(row1);
     col.appendChild(el('div', 'preview', c.preview));
     item.appendChild(av);
@@ -315,6 +334,51 @@ function stopTyping() {
 }
 
 /* ── messages ──────────────────────────────────────────────────────────── */
+/* ── reactions + read ticks ────────────────────────────────────────────── */
+function ticksEl(status) {
+  const s = el('span', 'ticks');
+  if (status === 0) { s.textContent = '⚠️'; s.classList.add('err'); s.title = 'failed to send'; }
+  else if (status === 1) { s.textContent = '🕐'; s.title = 'sending'; }
+  else if (status === 2) { s.textContent = '✓'; s.title = 'sent'; }
+  else if (status === 3) { s.textContent = '✓✓'; s.title = 'delivered'; }
+  else { s.textContent = '✓✓'; s.classList.add('read'); s.title = 'read'; }
+  return s;
+}
+
+async function sendReact(msgId, emoji) {
+  const res = await api('/api/react', { method: 'POST', body: JSON.stringify({ jid: state.currentJid, msgId, emoji }) });
+  if (!res || res.ok === false) throw new Error((res && res.error) || 'react failed');
+  loadMessages();
+}
+
+let rxTarget = null;
+const RX_QUICK = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
+function closeRxBar() { $('rx-bar').classList.remove('show'); rxTarget = null; }
+function openRxBar(m, bubble) {
+  rxTarget = m;
+  const bar = $('rx-bar');
+  bar.classList.add('show');
+  const rect = bubble.getBoundingClientRect();
+  const w = bar.offsetWidth, h = bar.offsetHeight;
+  bar.style.left = Math.min(Math.max(8, rect.right - w - 6), window.innerWidth - w - 8) + 'px';
+  bar.style.top = Math.max(8, rect.top - h - 8) + 'px';
+}
+for (const e of RX_QUICK) {
+  const b = el('button', '', e);
+  b.title = 'react ' + e;
+  b.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    if (!rxTarget || !state.currentJid) return;
+    const msgId = rxTarget.id;
+    closeRxBar();
+    try { await sendReact(msgId, e); } catch (err) { alert(err.message || 'react failed'); }
+  });
+  $('rx-bar').appendChild(b);
+}
+document.addEventListener('click', (e) => {
+  if (!$('rx-bar').contains(e.target)) closeRxBar();
+});
+
 function mediaSrc(m) {
   return '/api/media?jid=' + encodeURIComponent(state.currentJid) + '&id=' + encodeURIComponent(m.id);
 }
@@ -387,7 +451,34 @@ async function loadMessages() {
       } else {
         bubble.appendChild(el('div', 'text', m.text));
       }
-      bubble.appendChild(el('div', 'ts', fmtTime(m.ts)));
+      // Reactions (WhatsApp-style pills) + hover actions.
+      if (m.reactions && m.reactions.length) {
+        const rxRow = el('div', 'rx-row');
+        for (const r of m.reactions) {
+          const pill = el('button', 'rx-pill' + (r.byMe ? ' by-me' : ''));
+          pill.textContent = r.emoji + ' ' + r.count;
+          pill.title = r.byMe ? 'tap to remove your reaction' : 'tap to add your reaction';
+          pill.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            if (!state.currentJid) return;
+            try { await sendReact(m.id, r.byMe ? '' : r.emoji); } catch (err) { alert(err.message || 'react failed'); }
+          });
+          rxRow.appendChild(pill);
+        }
+        bubble.appendChild(rxRow);
+      }
+      const actions = el('div', 'bubble-actions');
+      const reactBtn = el('button', '', '😀');
+      reactBtn.title = 'add reaction';
+      reactBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openRxBar(m, bubble); });
+      actions.appendChild(reactBtn);
+      bubble.appendChild(actions);
+      // Timestamp + status ticks (✓ → ✓✓ → blue ✓✓) for our own messages.
+      const ts = el('div', 'ts');
+      if (m.edited) ts.appendChild(el('span', 'edited', 'edited'));
+      ts.appendChild(document.createTextNode(fmtTime(m.ts)));
+      if (m.fromMe && m.status != null) ts.appendChild(ticksEl(m.status));
+      bubble.appendChild(ts);
       row.appendChild(bubble);
       box.appendChild(row);
       prev = m;

@@ -16,6 +16,7 @@
  *   GET  /api/avatar     profile picture                      (auth)
  *   POST /api/send       send text or a media attachment      (auth)
  *   POST /api/typing     "owner is typing…" presence          (auth)
+ *   POST /api/react      add/remove an emoji reaction          (auth)
  *   POST /api/logout     end session                          (auth)
  *
  * Auth: set WEB_PASSWORD in the environment. If it is not set, a random
@@ -27,7 +28,8 @@
  * cached briefly in memory (never written to disk).
  *
  * attachChatUI() returns a handle used by index.js to feed the module:
- *   { logMessage(msg), handlePresenceUpdate(id, presences) }
+ *   { logMessage(msg), handlePresenceUpdate(id, presences),
+ *     handleMessageUpdate(updates), handleReactions(list), handleReceiptUpdate(receipts) }
  */
 'use strict';
 
@@ -36,7 +38,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 
-const { unwrapMessage, extractMedia, slimMessage } = require('./webChatText');
+const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction } = require('./webChatText');
 const { createWebChatStore } = require('./webChatStore');
 
 const PAGE_PATH = path.join(__dirname, 'webChatPage.html');
@@ -192,6 +194,7 @@ function attachChatUI(app, deps) {
     const avatarCache = new Map(); // jid -> { buf, mime, ts }
     const jsonParser = express.json({ limit: '64kb' });
     const sendParser = express.json({ limit: '25mb' }); // room for base64 media
+    const readMarked = new Set(); // `${jid}|${msgId}` already sent read receipts this session
 
     // Expire old sessions periodically.
     setInterval(() => {
@@ -269,6 +272,99 @@ function attachChatUI(app, deps) {
             return null;
         }
         return p.presence;
+    }
+
+    /* ── message status (ticks), reactions, read receipts ───────────────── */
+
+    // Opening a chat marks its incoming messages read → the sender's app
+    // shows blue ticks. Keys are deduped for the lifetime of this session.
+    function markChatRead(jid, msgs) {
+        try {
+            chatStore.setRead(jid, Date.now());
+            const sock = getSock();
+            if (!sock || typeof sock.readMessages !== 'function') return;
+            if (readMarked.size > 5000) readMarked.clear();
+            const keys = [];
+            for (const m of msgs) {
+                if (!m?.key || m.key.fromMe || m.message?.reactionMessage) continue;
+                const k = `${jid}|${m.key.id}`;
+                if (readMarked.has(k)) continue;
+                readMarked.add(k);
+                keys.push(m.key);
+                if (keys.length >= 50) break;
+            }
+            if (keys.length) Promise.resolve(sock.readMessages(keys)).catch(() => {});
+        } catch (_) {}
+    }
+
+    function reactionSender(stanzaKey) {
+        if (!stanzaKey) return 'unknown';
+        if (stanzaKey.participant) return stanzaKey.participant;
+        if (stanzaKey.fromMe) return 'me';
+        return stanzaKey.remoteJid || 'unknown';
+    }
+
+    function applyReactionUpdate(chatJid, msgId, emoji, sender) {
+        const meta = chatStore.getMsgMeta(chatJid, msgId) || {};
+        const reactions = applyReaction(meta.reactions, emoji, sender);
+        chatStore.setMsgMeta(chatJid, msgId, { reactions });
+        return reactions;
+    }
+
+    // messages.update — delivery/read receipts (ticks); some builds also
+    // deliver reactions or poll votes through here.
+    function handleMessageUpdate(updates) {
+        try {
+            for (const { key, update } of updates || []) {
+                if (!key?.id || !key?.remoteJid) continue;
+                const chatJid = key.remoteJid;
+                const msgId = String(key.id);
+                if (typeof update?.status === 'number') {
+                    chatStore.setMsgMeta(chatJid, msgId, { status: update.status });
+                }
+                if (Array.isArray(update?.reactions)) {
+                    for (const r of update.reactions) {
+                        applyReactionUpdate(chatJid, msgId, r?.text || '', reactionSender(r?.key));
+                    }
+                } else if (update?.reaction && typeof update.reaction === 'object') {
+                    const r = update.reaction;
+                    applyReactionUpdate(chatJid, msgId, r.text || '', reactionSender(r.key || key));
+                }
+            }
+        } catch (_) {}
+    }
+
+    // messages.reaction — Baileys emits { key: reactedToKey, reaction: { ...reactionMessage, key: stanzaKey } }.
+    // reaction.text is the emoji (empty = removed); reaction.key identifies the reactor.
+    function handleReactions(list) {
+        try {
+            for (const item of list || []) {
+                const reactedTo = item?.key;
+                const reaction = item?.reaction || {};
+                if (!reactedTo?.id || !reactedTo?.remoteJid) continue;
+                applyReactionUpdate(
+                    reactedTo.remoteJid,
+                    String(reactedTo.id),
+                    typeof reaction.text === 'string' ? reaction.text : '',
+                    reactionSender(reaction.key)
+                );
+            }
+        } catch (_) {}
+    }
+
+    // message-receipt.update — per-participant receipts (this is how group
+    // messages get ticks; messages.update carries no status for groups).
+    function handleReceiptUpdate(receipts) {
+        try {
+            for (const { key, receipt } of receipts || []) {
+                if (!key?.id || !key?.remoteJid || !key?.fromMe) continue;
+                const type = receipt?.type;
+                const status = (type === 'read' || type === 'read-self' || type === 'played')
+                    ? STATUS.READ
+                    : STATUS.DELIVERY_ACK;
+                chatStore.setMsgMeta(key.remoteJid, String(key.id), { status });
+            }
+        } catch (_) {}
     }
 
     /* ── media cache (in-memory only, bounded) ──────────────────────────── */
@@ -379,6 +475,12 @@ function attachChatUI(app, deps) {
                 let last = null;
                 for (const m of msgs.values()) last = m; // insertion order → last is newest
                 const isGroup = jid.endsWith('@g.us');
+                const lastRead = chatStore.getRead(jid);
+                let unread = 0;
+                for (const m of msgs.values()) {
+                    if (!m?.key || m.key.fromMe || m.message?.reactionMessage) continue;
+                    if (msgTs(m) > lastRead) unread++;
+                }
                 chats.push({
                     jid,
                     isGroup,
@@ -387,6 +489,7 @@ function attachChatUI(app, deps) {
                     preview: String(slimMessage(last).text || '').slice(0, 100),
                     lastTs: last?.messageTimestamp ? Number(last.messageTimestamp) * 1000 : null,
                     count: msgs.size,
+                    unread,
                 });
             }
         }
@@ -404,11 +507,15 @@ function attachChatUI(app, deps) {
         const msgs = store?.messages?.get(jid);
         // Reactions are noise in a chat view — skip them.
         const all = (msgs ? Array.from(msgs.values()) : []).filter((m) => !m?.message?.reactionMessage);
+        const list = all.slice(-limit);
+        const metas = chatStore.getMsgMetas(jid, list.map((m) => m?.key?.id));
+        // Opening a chat marks it read → the sender sees blue ticks.
+        markChatRead(jid, all);
         res.json({
             ok: true,
             jid,
             presence: getPresence(jid),
-            messages: all.slice(-limit).map(slimMessage),
+            messages: list.map((m) => slimMessage(m, metas.get(m?.key?.id))),
         });
     });
 
@@ -478,6 +585,43 @@ function attachChatUI(app, deps) {
         }
     });
 
+    app.post('/api/react', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, msgId, emoji } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) {
+                return res.status(400).json({ ok: false, error: 'invalid jid' });
+            }
+            if (typeof msgId !== 'string' || !MSG_ID_RE.test(msgId)) {
+                return res.status(400).json({ ok: false, error: 'invalid msgId' });
+            }
+            if (typeof emoji !== 'string' || emoji.length > 32) {
+                return res.status(400).json({ ok: false, error: 'invalid emoji' });
+            }
+            const text = emoji.trim();
+            if (text && (Array.from(text).length > 8 || !/\S/.test(text))) {
+                return res.status(400).json({ ok: false, error: 'invalid emoji' });
+            }
+            const msg = store?.messages?.get(jid)?.get(msgId);
+            if (!msg) {
+                return res.status(404).json({ ok: false, error: 'message not in recent store' });
+            }
+            const sock = getSock();
+            if (!sock || typeof sock.sendMessage !== 'function') {
+                return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            }
+            // An empty emoji removes our reaction (WhatsApp semantics).
+            await sock.sendMessage(jid, { react: { text, key: msg.key } });
+            const reactions = applyReactionUpdate(jid, msgId, text, 'me');
+            res.json({
+                ok: true,
+                id: msgId,
+                reactions: reactions.map((r) => ({ emoji: r.emoji, count: r.senders.length, byMe: r.senders.includes('me') })),
+            });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
     app.post('/api/send', requireAuth, sendParser, async (req, res) => {
         try {
             const { jid, text, media } = req.body || {};
@@ -522,6 +666,7 @@ function attachChatUI(app, deps) {
             // Keep our own outgoing message in the recent store + search index.
             try { store?.storeMessage?.(jid, sent); } catch (_) {}
             try { chatStore.logMessage(sent); } catch (_) {}
+            try { chatStore.setMsgMeta(jid, sent?.key?.id, { status: STATUS.PENDING }); } catch (_) {}
             res.json({ ok: true, id: sent?.key?.id || null });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
@@ -541,7 +686,7 @@ function attachChatUI(app, deps) {
         try { chatStore.logMessage(msg); } catch (_) {}
     }
 
-    return { logMessage, handlePresenceUpdate };
+    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate };
 }
 
 module.exports = { attachChatUI };

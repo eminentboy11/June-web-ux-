@@ -38,6 +38,17 @@ const DEFAULT_MIME = {
     document: 'application/octet-stream',
 };
 
+// WhatsApp message status (proto.WebMessageInfo.Status) — drives the
+// ✓ / ✓✓ / blue ✓✓ ticks on our own messages.
+const STATUS = {
+    ERROR: 0,
+    PENDING: 1,
+    SERVER_ACK: 2,
+    DELIVERY_ACK: 3,
+    READ: 4,
+    PLAYED: 5,
+};
+
 // Unwrap ephemeral / view-once / document-with-caption wrappers.
 function unwrapMessage(m) {
     let inner = m || {};
@@ -95,11 +106,31 @@ function digits(v) {
     return String(v || '').split('@')[0].split(':')[0].replace(/\D/g, '');
 }
 
+// Apply one reaction update to a reactions list ([{ emoji, senders: [] }]).
+// WhatsApp allows a single reaction per user: a new emoji replaces their
+// previous one, and an empty emoji removes it. Returns a new list.
+function applyReaction(reactions, emoji, sender) {
+    let list = Array.isArray(reactions)
+        ? reactions.map((r) => ({ emoji: r.emoji, senders: [...(r.senders || [])] }))
+        : [];
+    list = list
+        .map((r) => ({ emoji: r.emoji, senders: r.senders.filter((s) => s !== sender) }))
+        .filter((r) => r.senders.length > 0);
+    const target = typeof emoji === 'string' ? emoji.trim() : '';
+    if (!target) return list;
+    const existing = list.find((r) => r.emoji === target);
+    if (existing) existing.senders.push(sender);
+    else list.push({ emoji: target, senders: [sender] });
+    return list;
+}
+
 // Slim DTO sent to the browser. Media messages carry a descriptor so the page
 // can render them via /api/media (the text is the caption, not a label).
-function slimMessage(m) {
+// `meta` (optional) attaches status ticks, reactions and edited/deleted flags.
+function slimMessage(m, meta) {
     const inner = unwrapMessage(m?.message || {});
     const media = extractMedia(inner);
+    const reactions = Array.isArray(meta?.reactions) ? meta.reactions : [];
     return {
         id: m?.key?.id || '',
         fromMe: !!m?.key?.fromMe,
@@ -108,6 +139,14 @@ function slimMessage(m) {
         text: media ? media.caption : messageText(m),
         ts: msgTs(m) || null,
         media: media ? { kind: media.kind, mime: media.mime, fileName: media.fileName } : null,
+        status: meta && meta.status != null ? meta.status : null,
+        reactions: reactions.map((r) => ({
+            emoji: r.emoji,
+            count: (r.senders || []).length,
+            byMe: (r.senders || []).includes('me'),
+        })),
+        edited: !!(meta && meta.edited),
+        deleted: !!(meta && meta.deleted),
     };
 }
 
@@ -115,10 +154,12 @@ module.exports = {
     MEDIA_MAP,
     MEDIA_LABELS,
     DEFAULT_MIME,
+    STATUS,
     unwrapMessage,
     messageText,
     extractMedia,
     msgTs,
     digits,
+    applyReaction,
     slimMessage,
 };
