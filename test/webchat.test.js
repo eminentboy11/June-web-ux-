@@ -1352,3 +1352,54 @@ test('replying to a message works after a restart (quote comes from the index)',
     const sentQuote = ctx.sent[ctx.sent.length - 1].options?.quoted;
     assert.equal(sentQuote?.key?.id, 'QUOTE1');
 });
+
+test('updates: statuses and channels are separate from chats, and channels are read-only', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const POSTER = '2347000000021@s.whatsapp.net';
+    const CHANNEL = '120363000000000021@newsletter';
+    const now = Math.floor(Date.now() / 1000);
+    ctx.chatStore.logMessage(makeMsg({ id: 'ST1', jid: 'status@broadcast', participant: POSTER, text: 'status one', ts: now - 60, pushName: 'Poster' }));
+    ctx.chatStore.logMessage(makeMsg({ id: 'ST2', jid: 'status@broadcast', participant: POSTER, text: 'status two', ts: now - 30, pushName: 'Poster' }));
+    ctx.chatStore.logMessage(makeMsg({ id: 'CH1', jid: CHANNEL, text: 'channel post', ts: now - 10 }));
+    ctx.chatStore.logMessage(makeMsg({ id: 'DM1', jid: DM, text: 'a real chat', ts: now - 5, pushName: 'Friend' }));
+
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const get = async (p) => (await fetch(`${base}${p}`, { headers: { cookie } })).json();
+
+    const chats = (await get('/api/chats')).chats.map((c) => c.jid);
+    assert.ok(chats.includes(DM), 'real chat listed');
+    assert.ok(!chats.includes(CHANNEL), 'channel is not in Chats');
+    assert.ok(!chats.includes('status@broadcast'), 'statuses are not in Chats');
+
+    const upd = await get('/api/updates');
+    const poster = upd.statuses.find((s) => s.sender === POSTER);
+    assert.ok(poster, 'poster listed under Status');
+    assert.equal(poster.count, 2);
+    assert.equal(poster.unread, 2);
+    assert.equal(upd.channels.find((c) => c.jid === CHANNEL).preview, 'channel post');
+
+    const items = await get(`/api/updates/status?sender=${encodeURIComponent(POSTER)}`);
+    assert.deepStrictEqual(items.items.map((i) => i.text), ['status one', 'status two']);
+
+    const viewed = await fetch(`${base}/api/updates/viewed`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', cookie },
+        body: JSON.stringify({ sender: POSTER }),
+    });
+    assert.equal(viewed.status, 200);
+    assert.ok(ctx.readCalls.some((keys) => keys.some((k) => k.remoteJid === 'status@broadcast' && k.participant === POSTER)),
+        'WhatsApp is told the statuses were viewed');
+    const after = await get('/api/updates');
+    assert.equal(after.statuses.find((s) => s.sender === POSTER).unread, 0);
+
+    const send = await fetch(`${base}/api/send`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', cookie },
+        body: JSON.stringify({ jid: CHANNEL, text: 'hello channel' }),
+    });
+    assert.equal(send.status, 403);
+});

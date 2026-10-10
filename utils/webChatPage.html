@@ -208,9 +208,39 @@
     .bubble{max-width:85%}
     .emo-grid{grid-template-columns:repeat(8,1fr)}
   }
+  .tabs{display:flex;gap:6px;padding:8px 14px 0}
+  .tab{flex:1;background:none;border:1px solid var(--border);color:var(--muted);border-radius:18px;padding:6px 0;font:inherit;font-size:.8rem;cursor:pointer}
+  .tab.active{border-color:var(--cyan);color:var(--cyan);background:rgba(0,255,224,.08)}
+  .tab .unread{margin-left:6px}
+  .upd-head{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:12px 14px 6px}
+  .status-row{display:flex;gap:12px;overflow-x:auto;padding:4px 14px 10px}
+  .status-item{background:none;border:0;color:inherit;display:flex;flex-direction:column;align-items:center;gap:4px;width:66px;flex:none;cursor:pointer;font:inherit}
+  .status-ring{display:block;padding:2px;border-radius:50%;border:2px solid var(--border)}
+  .status-item.unread .status-ring{border-color:var(--cyan)}
+  .status-ring .avatar{width:50px;height:50px}
+  .status-name{font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:66px}
+  #status-viewer{position:fixed;inset:0;z-index:95;background:#000;display:flex;flex-direction:column}
+  #status-viewer[hidden]{display:none!important}
+  .sv-top{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;color:#e8f4f8;font-size:.95rem}
+  .sv-top button{background:none;border:0;color:#e8f4f8;font-size:1.1rem;cursor:pointer}
+  #sv-progress{display:flex;gap:4px;padding:0 10px}
+  .sv-seg{flex:1;height:3px;background:rgba(255,255,255,.25);border-radius:2px}
+  .sv-seg.done,.sv-seg.active{background:var(--cyan)}
+  #sv-body{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0}
+  #sv-content{display:flex;align-items:center;justify-content:center;max-width:100%;max-height:100%}
+  #sv-content img,#sv-content video{max-width:100%;max-height:100%}
+  .sv-text{font-size:1.3rem;padding:24px;text-align:center;color:#e8f4f8;white-space:pre-wrap}
+  .sv-tap{position:absolute;top:0;bottom:0;width:50%;z-index:1}
+  .sv-prev{left:0}
+  .sv-next{right:0}
 </style>
 </head>
 <body>
+<div id="status-viewer" hidden>
+  <div class="sv-top"><span id="sv-name"></span><button id="sv-close" type="button">✕</button></div>
+  <div id="sv-progress"></div>
+  <div id="sv-body"><div id="sv-content"></div><div class="sv-tap sv-prev"></div><div class="sv-tap sv-next"></div></div>
+</div>
 <div id="app">
   <aside id="sidebar">
     <div class="side-head">
@@ -222,6 +252,11 @@
       </div>
       <button id="logout">logout</button>
     </div>
+    <div class="tabs">
+      <button id="tab-chats" class="tab active" type="button">Chats</button>
+      <button id="tab-updates" class="tab" type="button">Updates<span id="updates-badge" class="unread" hidden></span></button>
+    </div>
+    <div id="updates-list" hidden></div>
     <div id="search-wrap"><input id="search" placeholder="search messages…" style="width:100%"></div>
     <div id="chat-list"><div class="empty">loading…</div></div>
   </aside>
@@ -313,7 +348,7 @@
 <script>
 'use strict';
 const state = {
-  pending: [], loadingJid: null,
+  pending: [], loadingJid: null, tab: 'chats', readOnly: false, updates: null,
   chats: [], currentJid: null, currentName: '', currentIsGroup: false, filter: '', connected: false,
   memory: [],          // latest page from the live store
   history: [],         // older pages loaded automatically (or by scrolling up / search)
@@ -418,7 +453,7 @@ async function loadStatus() {
 
 function setComposerEnabled() {
   const restricted = !!state.currentIsGroup && state.groupCanSend === false;
-  const canSend = state.connected && !!state.currentJid && !restricted;
+  const canSend = state.connected && !!state.currentJid && !restricted && !state.readOnly;
   for (const id of ['send-text', 'send-btn', 'attach-btn', 'emoji-btn', 'mic-btn', 'head-poll']) {
     $(id).disabled = !canSend;
   }
@@ -463,6 +498,7 @@ function openChat(jid, name, isGroup) {
   state.currentJid = jid;
   state.currentName = name || jid.split('@')[0];
   state.currentIsGroup = !!isGroup;
+  state.readOnly = String(jid).endsWith('@newsletter');
   state.historyGen++;
   state.groupCanSend = null;
   state.memory = []; state.history = []; state.hasMore = false;
@@ -1365,6 +1401,152 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeMsgMenu(); closeRxBar(); }
 });
 
+/* ── Updates: statuses (24h) and channels ───────────────────────────────── */
+function setTab(tab) {
+  state.tab = tab;
+  $('tab-chats').classList.toggle('active', tab === 'chats');
+  $('tab-updates').classList.toggle('active', tab === 'updates');
+  $('chat-list').hidden = tab !== 'chats';
+  $('search-wrap').hidden = tab !== 'chats';
+  $('updates-list').hidden = tab !== 'updates';
+  if (tab === 'updates') loadUpdates();
+}
+$('tab-chats').addEventListener('click', () => setTab('chats'));
+$('tab-updates').addEventListener('click', () => setTab('updates'));
+
+async function loadUpdates() {
+  try {
+    state.updates = await api('/api/updates');
+    renderUpdates();
+  } catch (_) {}
+}
+
+function renderUpdates() {
+  if (!state.updates) return;
+  const statuses = state.updates.statuses || [];
+  const channels = state.updates.channels || [];
+  const unread = statuses.reduce((n, s) => n + (s.unread || 0), 0) +
+    channels.reduce((n, c) => n + (c.unread || 0), 0);
+  const badge = $('updates-badge');
+  badge.hidden = unread === 0;
+  badge.textContent = String(unread);
+
+  const list = $('updates-list');
+  list.textContent = '';
+  list.appendChild(el('div', 'upd-head', 'Status'));
+  if (!statuses.length) {
+    list.appendChild(el('div', 'empty', 'no status updates in the last 24 hours'));
+  } else {
+    const row = el('div', 'status-row');
+    for (const s of statuses) {
+      const item = el('button', 'status-item' + (s.unread ? ' unread' : ''));
+      item.type = 'button';
+      const ring = el('span', 'status-ring');
+      const av = el('span', 'avatar');
+      setAvatar(av, s.sender, s.name);
+      ring.appendChild(av);
+      item.appendChild(ring);
+      item.appendChild(el('span', 'status-name', s.name));
+      item.addEventListener('click', () => openStatusViewer(s.sender, s.name));
+      row.appendChild(item);
+    }
+    list.appendChild(row);
+  }
+
+  list.appendChild(el('div', 'upd-head', 'Channels'));
+  if (!channels.length) list.appendChild(el('div', 'empty', 'no channel posts yet'));
+  for (const c of channels) {
+    const item = el('div', 'chat-item');
+    const av = el('span', 'avatar');
+    setAvatar(av, c.jid, c.name);
+    const col = el('div', 'chat-col');
+    const row1 = el('div', 'row1');
+    row1.appendChild(el('span', 'name', '📢 ' + c.name));
+    row1.appendChild(el('span', 'time', fmtTime(c.lastTs)));
+    if (c.unread > 0) row1.appendChild(el('span', 'unread', String(c.unread)));
+    col.appendChild(row1);
+    col.appendChild(el('div', 'preview', c.preview || ''));
+    item.appendChild(av);
+    item.appendChild(col);
+    item.addEventListener('click', () => openChat(c.jid, c.name, false));
+    list.appendChild(item);
+  }
+}
+
+/* status viewer: one poster's statuses, tap left/right, auto-advance */
+const sv = { sender: null, items: [], index: 0 };
+const SV_STEP_MS = 6000;
+const SV_MEDIA_RE = /Photo|Video|GIF|🖼|📷|🎥|🎞/i;
+let svTimer = null;
+
+function openStatusViewer(sender, name) {
+  sv.sender = sender;
+  sv.items = [];
+  sv.index = 0;
+  $('sv-name').textContent = name || '';
+  $('status-viewer').hidden = false;
+  $('sv-content').textContent = 'loading…';
+  $('sv-progress').textContent = '';
+  api('/api/updates/status?sender=' + encodeURIComponent(sender))
+    .then((r) => {
+      if (sv.sender !== sender) return;
+      sv.items = r.items || [];
+      sv.index = 0;
+      showStatusItem();
+      // Mark them viewed (WhatsApp shows the poster that they were seen).
+      postJson('/api/updates/viewed', { sender }).catch(() => {});
+    })
+    .catch(() => { $('sv-content').textContent = 'could not load this status'; });
+}
+
+function closeStatusViewer() {
+  clearTimeout(svTimer);
+  svTimer = null;
+  $('status-viewer').hidden = true;
+  sv.items = [];
+  sv.sender = null;
+  loadUpdates();
+}
+
+function showStatusItem() {
+  clearTimeout(svTimer);
+  if (sv.index >= sv.items.length) { closeStatusViewer(); return; }
+  if (sv.index < 0) sv.index = 0;
+  const progress = $('sv-progress');
+  progress.textContent = '';
+  sv.items.forEach((_, i) => {
+    const seg = el('div', 'sv-seg' + (i < sv.index ? ' done' : i === sv.index ? ' active' : ''));
+    progress.appendChild(seg);
+  });
+  const content = $('sv-content');
+  content.textContent = '';
+  const it = sv.items[sv.index];
+  if (SV_MEDIA_RE.test(it.text || '')) {
+    const isVideo = /Video|🎥|🎞/i.test(it.text);
+    const media = document.createElement(isVideo ? 'video' : 'img');
+    media.src = '/api/media?jid=status%40broadcast&id=' + encodeURIComponent(it.id);
+    if (isVideo) { media.controls = true; media.autoplay = true; media.muted = true; }
+    media.onerror = () => { content.textContent = ''; content.appendChild(el('div', 'sv-text', it.text || '')); };
+    content.appendChild(media);
+    if (!isVideo) {
+      if (it.text) content.appendChild(el('div', 'sv-text', it.text));
+    }
+  } else {
+    content.appendChild(el('div', 'sv-text', it.text || '(empty status)'));
+  }
+  svTimer = setTimeout(() => { sv.index++; showStatusItem(); }, SV_STEP_MS);
+}
+
+$('sv-close').addEventListener('click', closeStatusViewer);
+document.querySelector('#status-viewer .sv-prev').addEventListener('click', () => { sv.index--; showStatusItem(); });
+document.querySelector('#status-viewer .sv-next').addEventListener('click', () => { sv.index++; showStatusItem(); });
+document.addEventListener('keydown', (e) => {
+  if ($('status-viewer').hidden) return;
+  if (e.key === 'Escape') closeStatusViewer();
+  if (e.key === 'ArrowRight') { sv.index++; showStatusItem(); }
+  if (e.key === 'ArrowLeft') { sv.index--; showStatusItem(); }
+});
+
 /* ── reply / edit / delete / forward ───────────────────────────────────── */
 
 function setReply(m) {
@@ -1786,7 +1968,7 @@ $('poll-create').addEventListener('click', async () => {
 
 /* ── timers + boot ─────────────────────────────────────────────────────── */
 
-setInterval(() => { if (!document.hidden) { loadStatus(); loadChats(); } }, 5000);
+setInterval(() => { if (!document.hidden) { loadStatus(); loadChats(); if (state.tab === 'updates') loadUpdates(); } }, 5000);
 setInterval(() => { if (!document.hidden) loadMessages(); }, 1200);
 $('messages').addEventListener('scroll', () => {
   if ($('messages').scrollTop < 40 && state.hasMore) loadOlder();

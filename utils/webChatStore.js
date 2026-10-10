@@ -74,7 +74,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
     const searchStmt = db.prepare(
         `SELECT chat_jid, msg_id, from_me, sender, push_name, text, ts
            FROM webchat_messages
-          WHERE text LIKE ? ESCAPE '\\' AND deleted = 0
+          WHERE text LIKE ? ESCAPE '\\' AND deleted = 0 AND chat_jid NOT LIKE '%@newsletter' AND chat_jid <> 'status@broadcast'
           ORDER BY ts DESC
           LIMIT ?`
     );
@@ -140,7 +140,6 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         try {
             if (!msg?.key?.id || !msg?.key?.remoteJid) return;
             const jid = msg.key.remoteJid;
-            if (jid === 'status@broadcast') return;
             // Reactions are not messages. They update the reacted-to message's meta
             // (webchat_meta.reactions), so they must never become rows of their own.
             if (unwrapMessage(msg.message || {}).reactionMessage) return;
@@ -178,7 +177,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             rows = db.prepare(
                 `SELECT chat_jid, msg_id, from_me, sender, push_name, text, ts
                    FROM webchat_messages
-                  WHERE text LIKE ? ESCAPE '\\' AND deleted = 0 AND chat_jid IN (${placeholders})
+                  WHERE text LIKE ? ESCAPE '\\' AND deleted = 0 AND chat_jid NOT LIKE '%@newsletter' AND chat_jid <> 'status@broadcast' AND chat_jid IN (${placeholders})
                   ORDER BY ts DESC LIMIT ?`
             ).all(pattern, ...jids, limit);
         } else {
@@ -222,6 +221,45 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         }));
     }
 
+    // Statuses (status@broadcast), grouped by poster, newest first.
+    function statusPosters(sinceTs) {
+        return db.prepare(
+            `SELECT sender, MAX(push_name) AS push_name, COUNT(*) AS n, MAX(ts) AS last_ts
+               FROM webchat_messages
+              WHERE chat_jid = 'status@broadcast' AND from_me = 0 AND deleted = 0 AND ts > ?
+              GROUP BY sender ORDER BY last_ts DESC LIMIT 200`
+        ).all(Number(sinceTs) || 0).map((r) => ({
+            sender: r.sender, pushName: r.push_name || '', count: r.n, lastTs: r.last_ts,
+        }));
+    }
+
+    // One poster's statuses, oldest first.
+    function statusItems(sender, sinceTs) {
+        return db.prepare(
+            `SELECT msg_id, text, ts, push_name FROM webchat_messages
+              WHERE chat_jid = 'status@broadcast' AND sender = ? AND from_me = 0 AND deleted = 0 AND ts > ?
+              ORDER BY ts ASC LIMIT 100`
+        ).all(String(sender), Number(sinceTs) || 0).map((r) => ({
+            id: r.msg_id, text: r.text || '', ts: r.ts, pushName: r.push_name || '',
+        }));
+    }
+
+    function countStatusesSince(sender, sinceTs) {
+        const row = db.prepare(
+            "SELECT COUNT(*) AS n FROM webchat_messages WHERE chat_jid = 'status@broadcast' AND sender = ? AND from_me = 0 AND deleted = 0 AND ts > ?"
+        ).get(String(sender), Number(sinceTs) || 0);
+        return row ? row.n : 0;
+    }
+
+    // Channels (newsletters): one entry per channel, newest first.
+    function channelList(limit = 100) {
+        return db.prepare(
+            `SELECT chat_jid, MAX(ts) AS last_ts FROM webchat_messages
+              WHERE chat_jid LIKE '%@newsletter' AND deleted = 0
+              GROUP BY chat_jid ORDER BY last_ts DESC LIMIT ?`
+        ).all(limit).map((r) => ({ jid: r.chat_jid, lastTs: r.last_ts }));
+    }
+
     // One indexed message by id (used to quote a message after a restart).
     function getIndexed(chatJid, msgId) {
         const row = db.prepare(
@@ -235,7 +273,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         // Newest timestamp per chat (index-backed), then the row at that timestamp.
         return db.prepare(
             `SELECT w.chat_jid, w.msg_id, w.from_me, w.sender, w.push_name, w.text, w.ts
-               FROM (SELECT chat_jid, MAX(ts) AS mts FROM webchat_messages WHERE deleted = 0 GROUP BY chat_jid) m
+               FROM (SELECT chat_jid, MAX(ts) AS mts FROM webchat_messages WHERE deleted = 0 AND chat_jid NOT LIKE '%@newsletter' AND chat_jid <> 'status@broadcast' GROUP BY chat_jid) m
                JOIN webchat_messages w ON w.chat_jid = m.chat_jid AND w.ts = m.mts AND w.deleted = 0
               GROUP BY w.chat_jid
               ORDER BY w.ts DESC LIMIT ?`
@@ -406,6 +444,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         try {
             pruneStmt.run(Date.now() - RETENTION_MS);
             pruneMetaStmt.run(Date.now() - RETENTION_MS);
+            db.prepare("DELETE FROM webchat_messages WHERE chat_jid = 'status@broadcast' AND ts < ?").run(Date.now() - 2 * 24 * 60 * 60 * 1000);
             const count = countStmt.get().c;
             if (count > MAX_ROWS) pruneOverflowStmt.run(MAX_ROWS);
         } catch (_) {}
@@ -427,6 +466,10 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         pageBefore,
         latestPerChat,
         getIndexed,
+        statusPosters,
+        statusItems,
+        countStatusesSince,
+        channelList,
         countSince,
         senderName,
         phonebookName,

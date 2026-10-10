@@ -610,6 +610,7 @@ function attachChatUI(app, deps) {
             for (const c of (Array.isArray(chats) ? chats : [])) {
                 if (!c?.id || !c.name) continue;
                 if (String(c.id).endsWith('@g.us')) groupNames.set(getJidMap().canonical(String(c.id)), c.name);
+                else if (String(c.id).endsWith('@newsletter')) channelNames.set(String(c.id), c.name);
                 else handleContacts([{ id: c.id, name: c.name }]);
             }
             // History is not unread. A chat with no read point yet is marked read at the
@@ -739,13 +740,75 @@ function attachChatUI(app, deps) {
         });
     });
 
+    /* ── Updates: statuses (24h) and channels ──────────────────────────── */
+    const STATUS_WINDOW_MS = 24 * 60 * 60 * 1000;
+    const channelNames = new Map();
+    const statusNameFor = (sender, pushName) =>
+        chatStore.phonebookName(sender) || pushName || String(sender || '').split('@')[0];
+
+    app.get('/api/updates', requireAuth, (req, res) => {
+        const since = Date.now() - STATUS_WINDOW_MS;
+        const statuses = chatStore.statusPosters(since).map((p) => {
+            const read = chatStore.getRead('status:' + p.sender);
+            return {
+                sender: p.sender,
+                name: statusNameFor(p.sender, p.pushName),
+                count: p.count,
+                lastTs: p.lastTs,
+                unread: chatStore.countStatusesSince(p.sender, Math.max(read, since)),
+            };
+        });
+        const channels = chatStore.channelList(100).map((c) => {
+            const last = chatStore.pageBefore([c.jid], Number.MAX_SAFE_INTEGER, 1)[0];
+            return {
+                jid: c.jid,
+                name: channelNames.get(c.jid) || c.jid.split('@')[0],
+                lastTs: c.lastTs,
+                preview: String(last?.text || '').slice(0, 100),
+                unread: chatStore.countSince([c.jid], chatStore.getRead(c.jid)),
+            };
+        });
+        res.json({ ok: true, statuses, channels });
+    });
+
+    app.get('/api/updates/status', requireAuth, (req, res) => {
+        const sender = String(req.query.sender || '');
+        if (!JID_RE.test(sender)) return res.status(400).json({ ok: false, error: 'invalid sender' });
+        const items = chatStore.statusItems(sender, Date.now() - STATUS_WINDOW_MS);
+        res.json({
+            ok: true, sender,
+            name: statusNameFor(sender, items[items.length - 1]?.pushName),
+            items: items.map((i) => ({ id: i.id, text: i.text, ts: i.ts })),
+        });
+    });
+
+    app.post('/api/updates/viewed', requireAuth, jsonParser, async (req, res) => {
+        const { sender } = req.body || {};
+        if (typeof sender !== 'string' || !JID_RE.test(sender)) {
+            return res.status(400).json({ ok: false, error: 'invalid sender' });
+        }
+        const since = Date.now() - STATUS_WINDOW_MS;
+        const items = chatStore.statusItems(sender, Math.max(chatStore.getRead('status:' + sender), since));
+        chatStore.setRead('status:' + sender, Date.now());
+        try {
+            const sock = getSock();
+            if (sock && items.length && typeof sock.readMessages === 'function') {
+                // WhatsApp shows the poster that they were viewed, as WhatsApp Web does.
+                await sock.readMessages(items.slice(-50).map((i) => ({
+                    remoteJid: 'status@broadcast', id: i.id, participant: sender, fromMe: false,
+                })));
+            }
+        } catch (_) {}
+        res.json({ ok: true, viewed: items.length });
+    });
+
     app.get('/api/chats', requireAuth, (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
         const byJid = store?.messages;
         const merged = new Map(); // canonical jid → one chat entry
         if (byJid) {
             for (const [jid, msgs] of byJid) {
-                if (!jid || jid === 'status@broadcast' || !msgs || msgs.size === 0) continue;
+                if (!jid || jid === 'status@broadcast' || jid.endsWith('@newsletter') || !msgs || msgs.size === 0) continue;
                 const canon = getJidMap().canonical(jid);
                 const isGroup = jid.endsWith('@g.us');
                 const lastRead = chatStore.getRead(canon);
@@ -975,7 +1038,7 @@ function attachChatUI(app, deps) {
     app.get('/api/media', requireAuth, async (req, res) => {
         const jid = String(req.query.jid || '');
         const msgId = String(req.query.id || '');
-        if (!JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+        if (!JID_RE.test(jid) && jid !== 'status@broadcast') return res.status(400).json({ ok: false, error: 'invalid jid' });
         if (!MSG_ID_RE.test(msgId)) return res.status(400).json({ ok: false, error: 'invalid id' });
         try {
             const media = await resolveMedia(jid, msgId);
@@ -1417,6 +1480,9 @@ function attachChatUI(app, deps) {
     app.post('/api/send', requireAuth, sendParser, async (req, res) => {
         try {
             const { jid, text, media, quotedMsgId } = req.body || {};
+            if (typeof jid === 'string' && jid.endsWith('@newsletter')) {
+                return res.status(403).json({ ok: false, error: 'channels are read-only in the web view' });
+            }
             if (typeof jid !== 'string' || !JID_RE.test(jid)) {
                 return res.status(400).json({ ok: false, error: 'invalid jid' });
             }
