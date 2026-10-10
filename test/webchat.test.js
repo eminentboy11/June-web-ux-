@@ -1403,3 +1403,26 @@ test('updates: statuses and channels are separate from chats, and channels are r
     });
     assert.equal(send.status, 403);
 });
+
+test('status photos download after a restart (raw message kept in the index)', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const POSTER = '2347000000033@s.whatsapp.net';
+    const now = Math.floor(Date.now() / 1000);
+    // Only the index holds this status: the in-memory recent store is empty.
+    ctx.handle.logMessage({
+        key: { id: 'STIMG1', remoteJid: 'status@broadcast', fromMe: false, participant: POSTER },
+        message: { imageMessage: { mimetype: 'image/jpeg', caption: 'a photo', mediaKey: Buffer.from('k'), directPath: '/x', url: 'https://x' } },
+        messageTimestamp: now,
+        pushName: 'Poster',
+    });
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const r = await fetch(`${base}/api/media?jid=status%40broadcast&id=STIMG1`, { headers: { cookie } });
+    assert.equal(r.status, 200, await r.clone().text());
+    assert.ok(String(r.headers.get('content-type')).startsWith('image/'));
+});

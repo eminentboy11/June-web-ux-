@@ -52,6 +52,13 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             updated_ts INTEGER NOT NULL,
             PRIMARY KEY (chat_jid, msg_id)
         );
+        CREATE TABLE IF NOT EXISTS webchat_raw (
+            chat_jid TEXT NOT NULL,
+            msg_id   TEXT NOT NULL,
+            ts       INTEGER NOT NULL,
+            body     TEXT NOT NULL,
+            PRIMARY KEY (chat_jid, msg_id)
+        );
         CREATE TABLE IF NOT EXISTS webchat_read (
             chat_jid     TEXT PRIMARY KEY,
             last_read_ts INTEGER NOT NULL
@@ -260,6 +267,29 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         ).all(limit).map((r) => ({ jid: r.chat_jid, lastTs: r.last_ts }));
     }
 
+    // Raw message JSON (Buffers kept), so media can be downloaded after a restart.
+    const RAW_BUF = '__buf64';
+    function rawReplacer(k, v) {
+        if (v && v.type === 'Buffer' && Array.isArray(v.data)) return { [RAW_BUF]: Buffer.from(v.data).toString('base64') };
+        return v;
+    }
+    function rawReviver(k, v) {
+        if (v && typeof v === 'object' && typeof v[RAW_BUF] === 'string') return Buffer.from(v[RAW_BUF], 'base64');
+        return v;
+    }
+    function saveRaw(chatJid, msgId, ts, msg) {
+        try {
+            db.prepare('INSERT OR REPLACE INTO webchat_raw (chat_jid, msg_id, ts, body) VALUES (?, ?, ?, ?)')
+                .run(String(chatJid), String(msgId), Number(ts) || Date.now(), JSON.stringify(msg, rawReplacer));
+        } catch (_) {}
+    }
+    function getRaw(chatJid, msgId) {
+        try {
+            const row = db.prepare('SELECT body FROM webchat_raw WHERE chat_jid = ? AND msg_id = ?').get(String(chatJid), String(msgId));
+            return row ? JSON.parse(row.body, rawReviver) : null;
+        } catch (_) { return null; }
+    }
+
     // One indexed message by id (used to quote a message after a restart).
     function getIndexed(chatJid, msgId) {
         const row = db.prepare(
@@ -445,6 +475,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             pruneStmt.run(Date.now() - RETENTION_MS);
             pruneMetaStmt.run(Date.now() - RETENTION_MS);
             db.prepare("DELETE FROM webchat_messages WHERE chat_jid = 'status@broadcast' AND ts < ?").run(Date.now() - 2 * 24 * 60 * 60 * 1000);
+            db.prepare('DELETE FROM webchat_raw WHERE ts < ?').run(Date.now() - 2 * 24 * 60 * 60 * 1000);
             const count = countStmt.get().c;
             if (count > MAX_ROWS) pruneOverflowStmt.run(MAX_ROWS);
         } catch (_) {}
@@ -466,6 +497,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         pageBefore,
         latestPerChat,
         getIndexed,
+        saveRaw,
+        getRaw,
         statusPosters,
         statusItems,
         countStatusesSince,

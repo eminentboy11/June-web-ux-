@@ -659,7 +659,8 @@ function attachChatUI(app, deps) {
     }
 
     async function resolveMedia(jid, msgId) {
-        const msg = store?.messages?.get(jid)?.get(msgId);
+        let msg = store?.messages?.get(jid)?.get(msgId);
+        if (!msg && jid === 'status@broadcast') msg = chatStore.getRaw(jid, msgId);
         if (!msg) return { error: 404, message: 'message not in recent store (media expired)' };
         const media = extractMedia(unwrapMessage(msg.message || {}));
         if (!media) return { error: 400, message: 'not a media message' };
@@ -757,11 +758,13 @@ function attachChatUI(app, deps) {
             catch (_) {
                 try { meta = await withTimeout(sock.newsletterMetadata(jid), 4000); } catch (_) {}
             }
-            const tm = meta?.thread_metadata || meta || {};
-            const nm = tm?.name?.text ?? tm?.name;
+            // rc14 returns either the parsed shape (name, picture.directPath) or the raw
+            // WhatsApp shape (thread_metadata.name.text, thread_metadata.picture.direct_path).
+            const tm = meta?.thread_metadata || {};
+            const nm = meta?.name ?? tm?.name?.text;
             entry.name = typeof nm === 'string' ? nm : '';
-            const pic = tm?.picture?.url;
-            entry.pictureUrl = typeof pic === 'string' ? pic : '';
+            const dp = meta?.picture?.directPath ?? tm?.picture?.direct_path;
+            entry.pictureUrl = typeof dp === 'string' && dp.startsWith('/') ? 'https://pps.whatsapp.net' + dp : '';
         }
         channelMeta.set(jid, entry);
         return entry;
@@ -1597,6 +1600,9 @@ function attachChatUI(app, deps) {
             const inner = unwrapMessage(msg?.message || {});
             if (inner.protocolMessage) { handleProtocol(inner); return; }
             if (inner.pollUpdateMessage) { handlePollVote(msg, inner.pollUpdateMessage); return; }
+            if (msg?.key?.remoteJid === 'status@broadcast' && msg.key.id && extractMedia(inner)) {
+                chatStore.saveRaw('status@broadcast', msg.key.id, msgTs(msg), msg);
+            }
             // Index under the canonical chat so search + phonebook see one chat.
             const canon = msg?.key?.remoteJid ? canonicalChat(msg.key.remoteJid) : null;
             if (canon && canon !== msg.key.remoteJid) {
