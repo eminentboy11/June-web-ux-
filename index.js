@@ -1258,8 +1258,9 @@ async function startJunexBot() {
             return false;
         })(),
         generateHighQualityLinkPreview: false,
-        syncFullHistory: false,
-        downloadHistory: false,
+        // Full history from WhatsApp (sent when the device is linked), like WhatsApp Web.
+        syncFullHistory: true,
+        downloadHistory: true,
         msgRetryCounterCache,
         // Extra breathing room before a 408 fires on slower VPS/network conditions.
         connectTimeoutMs: 60000,
@@ -1284,6 +1285,9 @@ async function startJunexBot() {
     // Web chat UI: saved contact names (what the phone shows), not profile names.
     const onContacts = (list) => { try { webChatHandle?.handleContacts?.(list) } catch (_) {} }
     sock.ev.on('contacts.upsert', onContacts)
+    sock.ev.on('messaging-history.set', (payload) => {
+        try { webChatHandle?.handleHistorySync?.(payload) } catch (_) {}
+    })
     sock.ev.on('contacts.update', onContacts)
     sock.ev.on('lid-mapping.update', (mapping) => {
         try { webChatHandle?.handleLidMapping?.(mapping) } catch (_) {}

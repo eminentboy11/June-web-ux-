@@ -595,6 +595,22 @@ function attachChatUI(app, deps) {
         } catch (_) {}
     }
 
+    // Full history from WhatsApp (sent once after linking): chats, contacts and messages.
+    function handleHistorySync(payload) {
+        try {
+            const { chats = [], contacts = [], messages = [] } = payload || {};
+            handleContacts(contacts);
+            for (const c of (Array.isArray(chats) ? chats : [])) {
+                if (!c?.id || !c.name) continue;
+                if (String(c.id).endsWith('@g.us')) groupNames.set(getJidMap().canonical(String(c.id)), c.name);
+                else handleContacts([{ id: c.id, name: c.name }]);
+            }
+            for (const m of (Array.isArray(messages) ? messages : [])) {
+                if (m?.key) logMessage(m);
+            }
+        } catch (_) {}
+    }
+
     function handleLidMapping(mapping) {
         try {
             if (!mapping) return;
@@ -1639,7 +1655,7 @@ function attachChatUI(app, deps) {
 
     /* ── read receipts, reactions, edits etc. stay below ─────────────── */
 
-    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts };
+    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts, handleHistorySync };
 }
 
 module.exports = { attachChatUI };

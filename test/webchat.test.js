@@ -1290,3 +1290,26 @@ test('chat names come from the other person, and saved contact names win', async
     chat = (await list()).find((c) => c.jid === PN9);
     assert.equal(chat.name, 'Saved Friend');
 });
+
+test('full history from WhatsApp fills the index, chats and contact names', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const PN8 = '2348000000008@s.whatsapp.net';
+    ctx.handle.handleHistorySync({
+        chats: [{ id: PN8, name: 'Address Book Name' }, { id: GROUP, name: 'History Group' }],
+        contacts: [],
+        messages: [
+            makeMsg({ id: 'H1', jid: PN8, text: 'old one', ts: 1600000000, pushName: 'Profile' }),
+            makeMsg({ id: 'H2', jid: GROUP, text: 'old group', participant: PN8, ts: 1600000100, pushName: 'Profile' }),
+        ],
+    });
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const chats = (await (await fetch(`${base}/api/chats`, { headers: { cookie } })).json()).chats;
+    assert.equal(chats.find((c) => c.jid === PN8).name, 'Address Book Name');
+    assert.equal(chats.find((c) => c.jid === GROUP).name, 'History Group');
+});

@@ -18,8 +18,8 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const { messageText, msgTs, digits, unwrapMessage } = require('./webChatText');
 
-const MAX_ROWS = 100000;
-const RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // keep 30 days of history
+const MAX_ROWS = 500000;
+const RETENTION_MS = 365 * 24 * 60 * 60 * 1000; // keep a year of history, like WhatsApp
 
 function createWebChatStore({ dbPath, phonebookPath }) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
