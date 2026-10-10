@@ -1313,3 +1313,20 @@ test('full history from WhatsApp fills the index, chats and contact names', asyn
     assert.equal(chats.find((c) => c.jid === PN8).name, 'Address Book Name');
     assert.equal(chats.find((c) => c.jid === GROUP).name, 'History Group');
 });
+
+test('saved contact names apply to LID-only chats', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const LID9 = '71100000009999@lid';
+    ctx.chatStore.logMessage(makeMsg({ id: 'L1', jid: LID9, text: 'hello', ts: 1700000000, pushName: 'Profile' }));
+    // Contact arrives under its LID, with its phone number in another field.
+    ctx.handle.handleContacts([{ id: LID9, name: 'Saved LID Friend', phoneNumber: '2347000000099@s.whatsapp.net' }]);
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const chats = (await (await fetch(`${base}/api/chats`, { headers: { cookie } })).json()).chats;
+    assert.equal(chats.find((c) => c.jid === LID9).name, 'Saved LID Friend');
+});

@@ -586,11 +586,18 @@ function attachChatUI(app, deps) {
     function handleContacts(list) {
         try {
             for (const c of (Array.isArray(list) ? list : [])) {
-                const id = c?.id;
-                if (!id || !c.name) continue;
-                const canon = getJidMap().canonical(String(id));
-                if (!canon.endsWith('@s.whatsapp.net')) continue;
-                chatStore.setContactName(canon, c.name);
+                const name = c?.name;
+                if (!name) continue;
+                // A contact can arrive under its LID, its phone number, or both. Save the name
+                // under every address we know, so the chat shows it whichever address it uses.
+                const addresses = new Set();
+                for (const raw of [c?.id, c?.lid, c?.phoneNumber]) {
+                    const j = String(raw || '');
+                    if (!/@(s\.whatsapp\.net|lid)$/.test(j)) continue;
+                    addresses.add(j);
+                    addresses.add(getJidMap().canonical(j));
+                }
+                for (const j of addresses) chatStore.setContactName(j, name);
             }
         } catch (_) {}
     }
