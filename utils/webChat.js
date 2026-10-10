@@ -739,6 +739,25 @@ function attachChatUI(app, deps) {
                 if (existing.name === existing.number && name !== existing.number) existing.name = name;
             }
         }
+        // Chats that only exist in the SQLite index (memory is empty after a restart).
+        for (const row of chatStore.latestPerChat(200)) {
+            const canon = getJidMap().canonical(row.chatJid);
+            if (!canon || canon === 'status@broadcast' || merged.has(canon)) continue;
+            const isGroup = canon.endsWith('@g.us');
+            const lastRead = chatStore.getRead(canon);
+            const jids = getJidMap().related(canon);
+            const name = chatDisplayName(canon, row) || canon.split('@')[0];
+            merged.set(canon, {
+                jid: canon,
+                isGroup,
+                name,
+                number: canon.split('@')[0],
+                preview: String(row.text || '').slice(0, 100),
+                lastTs: row.ts || null,
+                count: 0,
+                unread: row.fromMe ? 0 : chatStore.countSince(jids, lastRead),
+            });
+        }
         const chats = Array.from(merged.values());
         chats.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
         refreshGroupNames(chats.slice(0, MAX_GROUP_NAME_FETCHES));
@@ -815,17 +834,34 @@ function attachChatUI(app, deps) {
         }
         const all = Array.from(byId.values()).sort((a, b) => (msgTs(a) || 0) - (msgTs(b) || 0));
         const list = all.slice(-limit);
+        // After a restart memory is empty: fill the newest page from the SQLite index.
+        const memIds = new Set(all.map((m) => m?.key?.id));
+        const dbFill = list.length < limit
+            ? chatStore.pageBefore(jids, Number.MAX_SAFE_INTEGER, limit).filter((r) => !memIds.has(r.id))
+            : [];
         // Ticks/reactions/poll meta can be keyed under either address — query both.
         const metas = new Map();
+        const metaIds = list.map((m) => m?.key?.id).concat(dbFill.map((r) => r.id));
         for (const j of jids) {
-            for (const [id, meta] of chatStore.getMsgMetas(j, list.map((m) => m?.key?.id))) {
+            for (const [id, meta] of chatStore.getMsgMetas(j, metaIds)) {
                 if (!metas.has(id)) metas.set(id, meta);
             }
         }
         // Opening a chat marks it read → the sender sees blue ticks.
         markChatRead(jid, all);
         const mine = myDigits();
-        const dtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id), mine));
+        const memDtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id), mine));
+        const indexDtos = dbFill.map((r) => {
+            const meta = metas.get(r.id) || {};
+            return {
+                ...r, media: null, status: meta.status ?? null, reactions: meta.reactions || [],
+                quoted: meta.quoted || null, edited: !!meta.edited, deleted: false,
+                mentions: [], forwarded: false, poll: null,
+            };
+        });
+        const dtos = indexDtos.concat(memDtos)
+            .sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.id).localeCompare(String(b.id)))
+            .slice(-limit);
         // Enrich quoted blocks with the sender's profile name when we have it.
         for (const d of dtos) {
             if (d.quoted?.id && !d.quoted.pushName) {

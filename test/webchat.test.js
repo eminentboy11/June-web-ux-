@@ -1237,3 +1237,28 @@ test('reactions never become message rows in the index', () => {
     assert.deepStrictEqual(after, ['T1']);
     fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('after a restart, chats and messages come from the SQLite index', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    // Only the index holds these messages: the in-memory store starts empty, as after a restart.
+    ctx.chatStore.logMessage(makeMsg({ id: 'IDX1', jid: DM, text: 'before restart', ts: 1700000000 }));
+    ctx.chatStore.logMessage(makeMsg({ id: 'IDX2', jid: DM, text: 'still there', ts: 1700000100 }));
+    ctx.chatStore.logMessage(makeMsg({ id: 'IDX3', jid: GROUP, text: 'group note', participant: DM, ts: 1700000050 }));
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+
+    const chats = await (await fetch(`${base}/api/chats`, { headers: { cookie } })).json();
+    const dm = chats.chats.find((c) => c.jid === DM);
+    assert.ok(dm, 'DM chat listed from the index');
+    assert.equal(dm.preview, 'still there');
+    assert.equal(dm.unread, 2);
+    assert.ok(chats.chats.find((c) => c.jid === GROUP), 'group chat listed from the index');
+
+    const page = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}&limit=50`, { headers: { cookie } })).json();
+    assert.deepStrictEqual(page.messages.map((m) => m.text), ['before restart', 'still there']);
+});

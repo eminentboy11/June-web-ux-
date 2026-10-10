@@ -220,6 +220,33 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         }));
     }
 
+    // Newest indexed message of every chat — chats that exist only in SQLite (after a restart).
+    function latestPerChat(limit = 200) {
+        return db.prepare(
+            `SELECT w.chat_jid, w.msg_id, w.from_me, w.sender, w.push_name, w.text, w.ts
+               FROM webchat_messages w
+              WHERE w.deleted = 0
+                AND w.ts = (SELECT MAX(ts) FROM webchat_messages x WHERE x.chat_jid = w.chat_jid AND x.deleted = 0)
+              GROUP BY w.chat_jid
+              ORDER BY w.ts DESC LIMIT ?`
+        ).all(limit).map((r) => ({
+            chatJid: r.chat_jid, id: r.msg_id, fromMe: !!r.from_me,
+            sender: r.sender, pushName: r.push_name, text: r.text, ts: r.ts,
+        }));
+    }
+
+    // Incoming messages newer than sinceTs — the unread count for a chat.
+    function countSince(chatJids, sinceTs) {
+        const list = (chatJids || []).filter(Boolean);
+        if (!list.length) return 0;
+        const placeholders = list.map(() => '?').join(',');
+        const row = db.prepare(
+            `SELECT COUNT(*) AS n FROM webchat_messages
+              WHERE chat_jid IN (${placeholders}) AND from_me = 0 AND deleted = 0 AND ts > ?`
+        ).get(...list, Number(sinceTs) || 0);
+        return row ? row.n : 0;
+    }
+
     function updateIndexText(chatJid, msgId, text) {
         try { updateTextStmt.run(String(text), chatJid, String(msgId)); } catch (_) {}
     }
@@ -365,6 +392,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         logMessage,
         search,
         pageBefore,
+        latestPerChat,
+        countSince,
         senderName,
         phonebookName,
         getMsgMeta,
