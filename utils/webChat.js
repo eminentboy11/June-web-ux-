@@ -1205,11 +1205,13 @@ function attachChatUI(app, deps) {
         if (!sock || typeof sock.groupMetadata !== 'function') return res.status(503).json({ ok: false, error: 'bot is not connected' });
         try {
             const meta = await withTimeout(sock.groupMetadata(jid), 6000);
+            const mine = myDigits();
             const list = (meta?.participants || [])
                 .map((p) => {
                     const id = String(p?.id || '');
                     const name = chatStore.phonebookName(canonicalChat(id)) || digits(canonicalChat(id)) || digits(id);
-                    return { jid: canonicalChat(id), name, admin: !!p?.admin };
+                    const me = mine.has(digits(id)) || [p?.lid, p?.phoneNumber].some((x) => x && mine.has(digits(x)));
+                    return { jid: canonicalChat(id), name, admin: !!p?.admin, me };
                 })
                 .filter((m) => m.jid);
             memberCache.set(jid, { ts: Date.now(), list });

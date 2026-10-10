@@ -151,8 +151,18 @@
   .emo-grid button{background:none;border:none;font-size:1.2rem;padding:4px 0;letter-spacing:0}
   .emo-grid button:hover{background:rgba(0,255,224,.12)}
   #send-form{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border);background:var(--panel);align-items:center;position:relative}
-  #send-form.restricted #send-text{font-style:italic;color:var(--orange)}
-  #send-form.restricted #send-text::placeholder{color:var(--orange);opacity:.85}
+  #send-form[hidden]{display:none}
+  #admin-only-bar{padding:14px 16px;text-align:center;font-size:.8rem;color:var(--muted);background:var(--panel);border-top:1px solid var(--border)}
+  #admin-only-bar[hidden]{display:none}
+  #admin-only-link{background:none;border:0;padding:0;font:inherit;font-weight:700;color:var(--cyan);cursor:pointer}
+  #admins-modal{align-items:flex-end;padding:0}
+  .admins-card{max-width:520px;width:100%;border-radius:16px 16px 0 0;max-height:80vh;padding:14px 14px 18px}
+  .admins-head{display:flex;align-items:center;justify-content:space-between}
+  .admins-x{background:none;border:1px solid var(--border);border-radius:50%;width:32px;height:32px;color:var(--muted);cursor:pointer}
+  #admins-list{display:flex;flex-direction:column;overflow-y:auto;min-height:120px}
+  .admin-item{display:flex;align-items:center;gap:10px;padding:10px 6px;border:0;border-bottom:1px solid var(--border);background:none;color:var(--text);text-align:left;font:inherit;cursor:pointer}
+  .admin-item:hover{background:rgba(0,255,224,.06)}
+  .admin-av{width:36px;height:36px;flex:none;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--cyan);color:#03060c;font-weight:700}
   #send-text{flex:1;min-width:0}
   #send-form button.tool{padding:.5rem .6rem;font-size:.95rem;letter-spacing:0}
   #logout{font-size:.62rem;padding:.3rem .6rem;margin-top:10px;align-self:flex-start}
@@ -238,11 +248,19 @@
       <button id="mic-btn" class="tool" type="button" title="voice note" disabled>🎙️</button>
       <button id="send-btn" type="submit" disabled>➤</button>
     </form>
+    <div id="admin-only-bar" hidden>Only <button id="admin-only-link" type="button">admins</button> can send messages</div>
   </main>
 </div>
 
 <div id="rx-bar"></div>
 
+<div id="admins-modal" class="modal" hidden>
+  <div class="modal-card admins-card">
+    <div class="admins-head"><h3>Message admin</h3><button id="admins-close" class="admins-x" type="button" aria-label="close">✕</button></div>
+    <input id="admins-search" placeholder="Search for an admin" autocomplete="off">
+    <div id="admins-list"></div>
+  </div>
+</div>
 <div id="poll-modal" class="modal" hidden>
   <div class="modal-card">
     <h3>NEW POLL</h3>
@@ -386,9 +404,9 @@ function setComposerEnabled() {
   }
   // Search stays available even when the group is admin-only.
   $('head-search').disabled = !(state.connected && !!state.currentJid);
-  const input = $('send-text');
-  input.placeholder = restricted ? 'Only admins can send messages' : 'type a message…';
-  $('send-form').classList.toggle('restricted', restricted);
+  // Locked group: no composer at all, just WhatsApp's "Only admins can send" bar.
+  $('send-form').hidden = restricted;
+  $('admin-only-bar').hidden = !restricted;
 }
 
 async function loadChats() {
@@ -907,6 +925,60 @@ async function reachMessage(id) {
   }
   return jumpToMessage(id);
 }
+
+/* ── message an admin (locked groups) ──────────────────────────────────── */
+
+let adminsList = [];
+
+function closeAdmins() { $('admins-modal').hidden = true; }
+
+async function openAdmins() {
+  if (!state.currentJid || !state.currentIsGroup) return;
+  const jid = state.currentJid;
+  $('admins-modal').hidden = false;
+  $('admins-search').value = '';
+  const list = $('admins-list');
+  list.textContent = '';
+  list.appendChild(el('div', 'empty', 'loading admins…'));
+  try {
+    const r = await api('/api/groupmembers?jid=' + encodeURIComponent(jid));
+    if (jid !== state.currentJid || $('admins-modal').hidden) return;
+    if (r.ok === false) throw new Error(r.error || 'failed');
+    adminsList = (r.members || []).filter((m) => m.admin && !m.me);
+    renderAdmins('');
+  } catch (_) {
+    list.textContent = '';
+    list.appendChild(el('div', 'empty', "couldn't load admins"));
+  }
+}
+
+function renderAdmins(query) {
+  const list = $('admins-list');
+  list.textContent = '';
+  const q = String(query || '').trim().toLowerCase();
+  const shown = adminsList.filter((m) => !q || String(m.name || '').toLowerCase().includes(q) || String(m.jid).toLowerCase().includes(q));
+  if (!shown.length) {
+    list.appendChild(el('div', 'empty', q ? 'no admin matches' : 'no admins found'));
+    return;
+  }
+  for (const m of shown) {
+    const name = m.name || String(m.jid).split('@')[0];
+    const row = el('button', 'admin-item');
+    row.type = 'button';
+    row.appendChild(el('span', 'admin-av', name.charAt(0).toUpperCase()));
+    row.appendChild(el('span', '', name));
+    row.addEventListener('click', () => {
+      closeAdmins();
+      openChat(m.jid, name, false);   // opens a direct chat with that admin
+    });
+    list.appendChild(row);
+  }
+}
+
+$('admin-only-link').addEventListener('click', openAdmins);
+$('admins-close').addEventListener('click', closeAdmins);
+$('admins-search').addEventListener('input', (e) => renderAdmins(e.target.value));
+$('admins-modal').addEventListener('click', (e) => { if (e.target.id === 'admins-modal') closeAdmins(); });
 
 $('head-search').addEventListener('click', () => {
   const box = $('in-search');

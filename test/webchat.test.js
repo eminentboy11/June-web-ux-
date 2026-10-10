@@ -318,6 +318,14 @@ test('web chat UI', async (t) => {
         assert.equal(sent.length, 0, 'nothing reached the socket');
     });
 
+    await t.test('group members mark the owner and their admin status', async () => {
+        const j = await (await fetch(`${base}/api/groupmembers?jid=${encodeURIComponent(ANN_ADMIN_GROUP)}`, { headers: { cookie } })).json();
+        const me = j.members.find((m) => m.me);
+        assert.ok(me, 'owner is flagged as me');
+        assert.equal(me.admin, true);
+        assert.equal(j.members.filter((m) => m.admin && !m.me).length, 0, 'no other admins in this fixture');
+    });
+
     await t.test('normal group stays open to everyone', async () => {
         const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(GROUP)}`, { headers: { cookie } })).json();
         assert.equal(j.groupAccess.canSend, true);
