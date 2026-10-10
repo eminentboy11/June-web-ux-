@@ -227,6 +227,17 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         return phonebook[digits(jid)]?.name || null;
     }
 
+    // Last WhatsApp display name seen for a sender address (LID or PN).
+    function senderName(jid) {
+        try {
+            const row = db.prepare(
+                `SELECT push_name FROM webchat_messages
+                  WHERE sender = ? AND push_name <> '' ORDER BY ts DESC LIMIT 1`
+            ).get(String(jid || ''));
+            return row?.push_name || null;
+        } catch (_) { return null; }
+    }
+
     /* ── message meta (status, reactions, quoted, edits, deletes, polls) ── */
 
     function parseJson(raw, fallback) {
@@ -349,6 +360,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         logMessage,
         search,
         pageBefore,
+        senderName,
         phonebookName,
         getMsgMeta,
         getMsgMetas,

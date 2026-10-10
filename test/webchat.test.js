@@ -32,6 +32,7 @@ const ANN_GROUP = '120363111000@g.us';
 const ANN_ADMIN_GROUP = '120363222000@g.us';
 const ANN_UNKNOWN_GROUP = '120363333000@g.us';
 const ANN_LID_GROUP = '120363444000@g.us';
+const ANN_NAME_GROUP = '120363555000@g.us';
 const OWNER_PN = '2348000000000@s.whatsapp.net';
 
 const voiceCalls = [];
@@ -137,6 +138,10 @@ async function startTestServer() {
             if (jid === ANN_GROUP) return { subject: 'Announce', announce: true, participants: [{ id: OWNER_PN }, { id: DM }] };
             if (jid === ANN_LID_GROUP) return { subject: 'LID admins', announce: true, participants: [
                 { id: '71100000005555@lid', phoneNumber: '2347000000009@s.whatsapp.net', admin: 'admin' },
+                { id: DM },
+            ] };
+            if (jid === ANN_NAME_GROUP) return { subject: 'Named admins', announce: true, participants: [
+                { id: '555000111@lid', admin: 'admin' },
                 { id: DM },
             ] };
             if (jid === ANN_UNKNOWN_GROUP) return { subject: 'Announce, owner not listed', announce: true, participants: [{ id: DM }] };
@@ -337,6 +342,16 @@ test('web chat UI', async (t) => {
         assert.equal(admin.jid, '2347000000009@s.whatsapp.net', 'opens the phone-number chat');
         assert.equal(admin.name, '+2347000000009');
         assert.ok(!j.members.some((m) => m.jid.endsWith('@lid')), 'no LID addresses in the list');
+    });
+
+    await t.test('an unnumbered admin still shows the name they use in the group', async () => {
+        handle.logMessage({
+            key: { id: 'NAMED1', remoteJid: ANN_NAME_GROUP, fromMe: false, participant: '555000111@lid' },
+            pushName: 'Kings Admin', message: { conversation: 'hello' }, messageTimestamp: 1700000600,
+        });
+        const j = await (await fetch(`${base}/api/groupmembers?jid=${encodeURIComponent(ANN_NAME_GROUP)}`, { headers: { cookie } })).json();
+        const admin = j.members.find((m) => m.admin);
+        assert.equal(admin.name, 'Kings Admin');
     });
 
     await t.test('normal group stays open to everyone', async () => {

@@ -1210,14 +1210,24 @@ function attachChatUI(app, deps) {
             const fromField = field ? (field.includes('@') ? field : digits(field) + '@s.whatsapp.net') : '';
             const pn = [fromField, id, canonicalChat(id)].find(isPn);
             if (pn) out.set(id, pn);
-            else if (id.endsWith('@lid')) needLive.push(id);
+            else if (id.endsWith('@lid')) needLive.push(p);
         }
-        await Promise.all(needLive.slice(0, 60).map((id) =>
-            withTimeout(getJidMap().enrich(id, sock), 1500).catch(() => {})));
-        for (const id of needLive) {
-            const pn = canonicalChat(id);
-            if (isPn(pn)) out.set(id, pn);
+        // Same retrying lookup the bot uses for group members: Baileys learns
+        // LID↔number pairs over a few seconds after a group is read.
+        if (needLive.length && sock) {
+            const jidHelper = require('./jidHelper');
+            await withTimeout(
+                jidHelper.preloadLidResolution(sock, needLive, { maxWaitMs: 4000, intervalMs: 800 }),
+                6000,
+            ).catch(() => {});
+            for (const p of needLive) {
+                const id = String(p.id);
+                const pn = canonicalChat(id);
+                if (isPn(pn)) out.set(id, pn);
+            }
         }
+        // Still unresolved: tell the caller, so the result is cached only briefly.
+        out.unresolved = needLive.filter((p) => !out.has(String(p.id))).length;
         return out;
     }
 
@@ -1225,7 +1235,7 @@ function attachChatUI(app, deps) {
         const jid = String(req.query.jid || '');
         if (!JID_RE.test(jid) || !jid.endsWith('@g.us')) return res.status(400).json({ ok: false, error: 'invalid group jid' });
         const cached = memberCache.get(jid);
-        if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return res.json({ ok: true, members: cached.list });
+        if (cached && Date.now() - cached.ts < (cached.ttl || 5 * 60 * 1000)) return res.json({ ok: true, members: cached.list });
         const sock = getSock();
         if (!sock || typeof sock.groupMetadata !== 'function') return res.status(503).json({ ok: false, error: 'bot is not connected' });
         try {
@@ -1240,12 +1250,16 @@ function attachChatUI(app, deps) {
                     const id = String(p?.id || '');
                     const pn = pnFor.get(id) || null;
                     const chatJid = pn || canonicalChat(id);
-                    const name = (pn && chatStore.phonebookName(pn)) || (pn ? '+' + digits(pn) : 'unknown number');
+                    const name = (pn && chatStore.phonebookName(pn))
+                        || chatStore.senderName(id)
+                        || (pn ? '+' + digits(pn) : 'unknown number');
                     const me = mine.has(digits(id)) || [p?.lid, p?.phoneNumber].some((x) => x && mine.has(digits(x)));
                     return { jid: chatJid, name, admin: !!p?.admin, me };
                 })
                 .filter((m) => m.jid && JID_RE.test(m.jid));
-            memberCache.set(jid, { ts: Date.now(), list });
+            // Incomplete lists are re-checked soon, so names fill in as Baileys learns them.
+            const ttl = pnFor.unresolved ? 30 * 1000 : 5 * 60 * 1000;
+            memberCache.set(jid, { ts: Date.now(), list, ttl });
             res.json({ ok: true, members: list });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });
