@@ -2643,9 +2643,13 @@ function startKeepAliveServer() {
 
     const server = http.createServer(app);
 
-    const PORTS_TO_TRY = process.env.PORT
-        ? [parseInt(process.env.PORT, 10)]
-        : [5000, 3000, 8000, 4000];
+    // Pterodactyl exposes the primary allocation as SERVER_PORT; other hosts
+    // (Render/Koyeb/Heroku) use PORT. Bind whichever the platform provides.
+    const PORTS_TO_TRY = process.env.SERVER_PORT
+        ? [parseInt(process.env.SERVER_PORT, 10)]
+        : process.env.PORT
+            ? [parseInt(process.env.PORT, 10)]
+            : [5000, 3000, 8000, 4000];
 
     let portIndex = 0;
 
@@ -2655,6 +2659,7 @@ function startKeepAliveServer() {
         server.listen(PORT, '0.0.0.0');
 
         server.once('listening', () => {
+            log(`[ WEB ] listening on 0.0.0.0:${PORT} — open /chat`, 'cyan');
             const selfPingUrl = process.env.APP_URL || `http://localhost:${PORT}/health`;
             setInterval(() => {
                 http.get(selfPingUrl, (r) => {}).on('error', () => {});
