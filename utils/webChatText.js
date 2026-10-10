@@ -124,9 +124,45 @@ function applyReaction(reactions, emoji, sender) {
     return list;
 }
 
+// Quoted-reply descriptor from a message node's contextInfo (incoming
+// replies carry stanzaId + participant + quotedMessage on the node).
+function quotedFromContext(inner) {
+    for (const value of Object.values(inner || {})) {
+        const ctx = value && typeof value === 'object' ? value.contextInfo : null;
+        if (!ctx || (!ctx.stanzaId && !ctx.quotedMessage)) continue;
+        const qm = ctx.quotedMessage || {};
+        const media = extractMedia(unwrapMessage(qm));
+        return {
+            id: String(ctx.stanzaId || ''),
+            sender: ctx.participant || '',
+            pushName: '',
+            text: media ? (media.caption || '') : messageText({ message: qm }),
+            mediaKind: media ? media.kind : null,
+            fromMe: null,
+        };
+    }
+    return null;
+}
+
+// Quoted-reply descriptor from a full message (fallback for sent echoes
+// that do not carry contextInfo).
+function quotedDescriptor(msg) {
+    const inner = unwrapMessage(msg?.message || {});
+    const media = extractMedia(inner);
+    return {
+        id: msg?.key?.id || '',
+        sender: msg?.key?.participant || msg?.key?.remoteJid || '',
+        pushName: msg?.pushName || '',
+        text: media ? (media.caption || '') : messageText(msg),
+        mediaKind: media ? media.kind : null,
+        fromMe: !!msg?.key?.fromMe,
+    };
+}
+
 // Slim DTO sent to the browser. Media messages carry a descriptor so the page
 // can render them via /api/media (the text is the caption, not a label).
-// `meta` (optional) attaches status ticks, reactions and edited/deleted flags.
+// `meta` (optional) attaches status ticks, reactions, quoted blocks and
+// edited/deleted flags.
 function slimMessage(m, meta) {
     const inner = unwrapMessage(m?.message || {});
     const media = extractMedia(inner);
@@ -145,6 +181,7 @@ function slimMessage(m, meta) {
             count: (r.senders || []).length,
             byMe: (r.senders || []).includes('me'),
         })),
+        quoted: quotedFromContext(inner) || (meta && meta.quoted) || null,
         edited: !!(meta && meta.edited),
         deleted: !!(meta && meta.deleted),
     };
@@ -161,5 +198,7 @@ module.exports = {
     msgTs,
     digits,
     applyReaction,
+    quotedFromContext,
+    quotedDescriptor,
     slimMessage,
 };

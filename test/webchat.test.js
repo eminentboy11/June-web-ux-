@@ -83,8 +83,8 @@ async function startTestServer() {
     let downloadCalls = 0;
     const sock = {
         user: { id: '2348000000000:5@s.whatsapp.net' },
-        sendMessage: async (jid, content) => {
-            sent.push({ jid, content });
+        sendMessage: async (jid, content, options) => {
+            sent.push({ jid, content, options });
             return {
                 key: { id: 'SENT' + sent.length, remoteJid: jid, fromMe: true },
                 message: content.text ? { conversation: content.text } : content,
@@ -596,6 +596,98 @@ test('web chat UI', async (t) => {
         handle.handlePresenceUpdate(LID2, { [LID2]: { lastKnownPresence: 'composing' } });
         const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(PN2)}`, { headers: { cookie } });
         assert.equal((await r.json()).presence, 'composing');
+    });
+
+    await t.test('send with a quoted reply passes the full message as quoted', async () => {
+        store.storeMessage(DM, makeMsg({ id: 'Q1', jid: DM, text: 'original message', ts: 1700000950 }));
+        const r = await fetch(`${base}/api/send`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, text: 'this is a reply', quotedMsgId: 'Q1' }),
+        });
+        assert.equal(r.status, 200);
+        const j = await r.json();
+        const last = sent.at(-1);
+        assert.equal(last.content.text, 'this is a reply');
+        assert.ok(last.options && last.options.quoted, 'quoted option passed to Baileys');
+        assert.equal(last.options.quoted.key.id, 'Q1');
+        assert.equal(last.options.quoted.message.conversation, 'original message');
+        // The sent message shows the quoted block (meta fallback — the mock
+        // echo carries no contextInfo).
+        const r2 = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        const m = (await r2.json()).messages.find((x) => x.id === j.id);
+        assert.ok(m.quoted, 'quoted block attached to the sent message');
+        assert.equal(m.quoted.text, 'original message');
+        assert.equal(m.quoted.pushName, 'Friend', 'quoted sender name enriched');
+    });
+
+    await t.test('send validates the quoted message', async () => {
+        const badId = await fetch(`${base}/api/send`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, text: 'hi', quotedMsgId: '../x' }),
+        });
+        assert.equal(badId.status, 400);
+        const unknown = await fetch(`${base}/api/send`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, text: 'hi', quotedMsgId: 'NOPE' }),
+        });
+        assert.equal(unknown.status, 404);
+    });
+
+    await t.test('incoming replies expose the quoted block', async () => {
+        const reply = makeMsg({ id: 'Q2', jid: DM, text: 'replying to you', ts: 1700001000 });
+        reply.message = {
+            extendedTextMessage: {
+                text: 'replying to you',
+                contextInfo: {
+                    stanzaId: 'Q1',
+                    participant: DM,
+                    quotedMessage: { conversation: 'original message' },
+                },
+            },
+        };
+        store.storeMessage(DM, reply);
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        const m = (await r.json()).messages.find((x) => x.id === 'Q2');
+        assert.ok(m.quoted, 'quoted block present');
+        assert.equal(m.quoted.id, 'Q1');
+        assert.equal(m.quoted.text, 'original message');
+        assert.equal(m.quoted.pushName, 'Friend', 'quoted sender name enriched from the store');
+        assert.equal(m.quoted.fromMe, false);
+    });
+
+    await t.test('quoted media shows its kind and caption', async () => {
+        const reply2 = makeMsg({ id: 'Q3', jid: DM, text: '', ts: 1700001050 });
+        reply2.message = {
+            imageMessage: {
+                mimetype: 'image/png',
+                caption: '',
+                contextInfo: {
+                    stanzaId: 'MEDIA1',
+                    participant: DM,
+                    quotedMessage: { imageMessage: { mimetype: 'image/png', caption: 'look at this', mediaKey: Buffer.from('k'), directPath: '/x', url: 'https://x' } },
+                },
+            },
+        };
+        store.storeMessage(DM, reply2);
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(DM)}`, { headers: { cookie } });
+        const m = (await r.json()).messages.find((x) => x.id === 'Q3');
+        assert.equal(m.quoted.mediaKind, 'image');
+        assert.equal(m.quoted.text, 'look at this', 'caption as the quoted text');
+    });
+
+    await t.test('quoting works across LID and PN buckets', async () => {
+        // P1 lives in the PN2 bucket; a reply from the LID twin can quote it.
+        const r = await fetch(`${base}/api/send`, {
+            method: 'POST',
+            headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: LID2, text: 'reply from lid', quotedMsgId: 'P1' }),
+        });
+        assert.equal(r.status, 200, 'quoted message found in the PN bucket');
+        const last = sent.at(-1);
+        assert.equal(last.options.quoted.key.id, 'P1');
     });
 
     await t.test('logout kills the session', async () => {

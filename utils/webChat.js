@@ -14,7 +14,7 @@
  *   GET  /api/search     full-text message search             (auth)
  *   GET  /api/media      download a media message             (auth)
  *   GET  /api/avatar     profile picture                      (auth)
- *   POST /api/send       send text or a media attachment      (auth)
+ *   POST /api/send       send text or media (quoted replies)   (auth)
  *   POST /api/typing     "owner is typing…" presence          (auth)
  *   POST /api/react      add/remove an emoji reaction          (auth)
  *   POST /api/logout     end session                          (auth)
@@ -42,7 +42,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 
-const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction } = require('./webChatText');
+const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor } = require('./webChatText');
 const { createWebChatStore } = require('./webChatStore');
 
 const PAGE_PATH = path.join(__dirname, 'webChatPage.html');
@@ -650,11 +650,24 @@ function attachChatUI(app, deps) {
         }
         // Opening a chat marks it read → the sender sees blue ticks.
         markChatRead(jid, all);
+        const dtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id)));
+        // Enrich quoted blocks with the sender's profile name when we have it.
+        for (const d of dtos) {
+            if (!d.quoted?.id || d.quoted.pushName) continue;
+            for (const j of jids) {
+                const qm = store?.messages?.get(j)?.get(d.quoted.id);
+                if (qm) {
+                    d.quoted.pushName = qm.pushName || '';
+                    d.quoted.fromMe = !!qm.key?.fromMe;
+                    break;
+                }
+            }
+        }
         res.json({
             ok: true,
             jid,
             presence: getPresenceAny(jids),
-            messages: list.map((m) => slimMessage(m, metas.get(m?.key?.id))),
+            messages: dtos,
         });
     });
 
@@ -773,9 +786,24 @@ function attachChatUI(app, deps) {
 
     app.post('/api/send', requireAuth, sendParser, async (req, res) => {
         try {
-            const { jid, text, media } = req.body || {};
+            const { jid, text, media, quotedMsgId } = req.body || {};
             if (typeof jid !== 'string' || !JID_RE.test(jid)) {
                 return res.status(400).json({ ok: false, error: 'invalid jid' });
+            }
+            // Quoted reply: Baileys needs the full stored message (key +
+            // message + timestamp) to render the quote on the other side.
+            let quoted = null;
+            if (quotedMsgId != null) {
+                if (typeof quotedMsgId !== 'string' || !MSG_ID_RE.test(quotedMsgId)) {
+                    return res.status(400).json({ ok: false, error: 'invalid quotedMsgId' });
+                }
+                for (const j of getJidMap().related(jid)) {
+                    quoted = store?.messages?.get(j)?.get(quotedMsgId) || null;
+                    if (quoted) break;
+                }
+                if (!quoted) {
+                    return res.status(404).json({ ok: false, error: 'quoted message not in recent store' });
+                }
             }
             const caption = typeof text === 'string' ? text : '';
             if (caption.length > MAX_TEXT_LEN) {
@@ -811,11 +839,19 @@ function attachChatUI(app, deps) {
             if (!sock || typeof sock.sendMessage !== 'function') {
                 return res.status(503).json({ ok: false, error: 'bot is not connected' });
             }
-            const sent = await sock.sendMessage(jid, payload);
+            const sent = await sock.sendMessage(jid, payload, quoted ? { quoted } : undefined);
             // Keep our own outgoing message in the recent store + search index.
             try { store?.storeMessage?.(jid, sent); } catch (_) {}
             try { chatStore.logMessage(sent); } catch (_) {}
             try { chatStore.setMsgMeta(jid, sent?.key?.id, { status: STATUS.PENDING }); } catch (_) {}
+            if (quoted) {
+                // Fallback descriptor if the sent echo lacks contextInfo.
+                try {
+                    if (!slimMessage(sent).quoted) {
+                        chatStore.setMsgMeta(jid, sent?.key?.id, { quoted: quotedDescriptor(quoted) });
+                    }
+                } catch (_) {}
+            }
             res.json({ ok: true, id: sent?.key?.id || null });
         } catch (e) {
             res.status(500).json({ ok: false, error: e.message });

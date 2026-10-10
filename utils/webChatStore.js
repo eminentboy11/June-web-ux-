@@ -47,6 +47,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             reactions  TEXT,
             edited     INTEGER DEFAULT 0,
             deleted    INTEGER DEFAULT 0,
+            quoted     TEXT,
             updated_ts INTEGER NOT NULL,
             PRIMARY KEY (chat_jid, msg_id)
         );
@@ -55,6 +56,9 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             last_read_ts INTEGER NOT NULL
         );
     `);
+
+    // Older databases predate the quoted column.
+    try { db.exec('ALTER TABLE webchat_meta ADD COLUMN quoted TEXT'); } catch (_) {}
 
     const insertStmt = db.prepare(
         'INSERT OR REPLACE INTO webchat_messages (chat_jid, msg_id, from_me, sender, push_name, text, ts) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -73,23 +77,24 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         'DELETE FROM webchat_messages WHERE ts < (SELECT ts FROM webchat_messages ORDER BY ts DESC LIMIT 1 OFFSET ?)'
     );
     const getMetaStmt = db.prepare(
-        'SELECT status, reactions, edited, deleted FROM webchat_meta WHERE chat_jid = ? AND msg_id = ?'
+        'SELECT status, reactions, edited, deleted, quoted FROM webchat_meta WHERE chat_jid = ? AND msg_id = ?'
     );
     const upsertMetaStmt = db.prepare(
-        `INSERT INTO webchat_meta (chat_jid, msg_id, status, reactions, edited, deleted, updated_ts)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO webchat_meta (chat_jid, msg_id, status, reactions, edited, deleted, quoted, updated_ts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(chat_jid, msg_id) DO UPDATE SET
             status = excluded.status,
             reactions = excluded.reactions,
             edited = excluded.edited,
             deleted = excluded.deleted,
+            quoted = excluded.quoted,
             updated_ts = excluded.updated_ts`
     );
     const metasStmtCache = new Map();
     const getMetasStmt = (n) => {
         if (!metasStmtCache.has(n)) {
             metasStmtCache.set(n, db.prepare(
-                `SELECT msg_id, status, reactions, edited, deleted
+                `SELECT msg_id, status, reactions, edited, deleted, quoted
                    FROM webchat_meta
                   WHERE chat_jid = ? AND msg_id IN (${Array(n).fill('?').join(',')})`
             ));
@@ -176,6 +181,15 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         }
     }
 
+    function parseQuoted(raw) {
+        try {
+            const v = JSON.parse(raw || 'null');
+            return v && typeof v === 'object' ? v : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
     function getMsgMeta(chatJid, msgId) {
         try {
             const row = getMetaStmt.get(chatJid, String(msgId));
@@ -185,6 +199,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                 reactions: parseReactions(row.reactions),
                 edited: !!row.edited,
                 deleted: !!row.deleted,
+                quoted: parseQuoted(row.quoted),
             };
         } catch (_) {
             return null;
@@ -203,6 +218,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                         reactions: parseReactions(row.reactions),
                         edited: !!row.edited,
                         deleted: !!row.deleted,
+                        quoted: parseQuoted(row.quoted),
                     });
                 }
             }
@@ -218,6 +234,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                 reactions: [],
                 edited: false,
                 deleted: false,
+                quoted: null,
             };
             let status = existing.status;
             if (typeof patch.status === 'number') {
@@ -231,6 +248,9 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                 reactions: patch.reactions !== undefined ? patch.reactions : existing.reactions,
                 edited: patch.edited !== undefined ? !!patch.edited : existing.edited,
                 deleted: patch.deleted !== undefined ? !!patch.deleted : existing.deleted,
+                quoted: patch.quoted !== undefined
+                    ? (patch.quoted ? JSON.stringify(patch.quoted) : null)
+                    : (existing.quoted ? JSON.stringify(existing.quoted) : null),
             };
             upsertMetaStmt.run(
                 chatJid,
@@ -239,6 +259,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                 JSON.stringify(next.reactions),
                 next.edited ? 1 : 0,
                 next.deleted ? 1 : 0,
+                next.quoted,
                 Date.now()
             );
         } catch (_) {}
