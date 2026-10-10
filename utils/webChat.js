@@ -612,8 +612,17 @@ function attachChatUI(app, deps) {
                 if (String(c.id).endsWith('@g.us')) groupNames.set(getJidMap().canonical(String(c.id)), c.name);
                 else handleContacts([{ id: c.id, name: c.name }]);
             }
+            // History is not unread. A chat with no read point yet is marked read at the
+            // newest imported message, so only messages that arrive after this count.
+            const newest = new Map();
             for (const m of (Array.isArray(messages) ? messages : [])) {
-                if (m?.key) logMessage(m);
+                if (!m?.key) continue;
+                logMessage(m);
+                const canon = getJidMap().canonical(String(m.key.remoteJid || ''));
+                if (canon) newest.set(canon, Math.max(newest.get(canon) || 0, msgTs(m) || 0));
+            }
+            for (const [canon, ts] of newest) {
+                if (ts && chatStore.getRead(canon) === 0) chatStore.setRead(canon, ts);
             }
         } catch (_) {}
     }

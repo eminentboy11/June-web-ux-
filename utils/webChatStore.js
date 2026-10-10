@@ -40,6 +40,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         );
         CREATE INDEX IF NOT EXISTS idx_webchat_text ON webchat_messages(text);
         CREATE INDEX IF NOT EXISTS idx_webchat_ts ON webchat_messages(ts);
+        CREATE INDEX IF NOT EXISTS idx_webchat_chat_ts ON webchat_messages(chat_jid, ts);
         CREATE TABLE IF NOT EXISTS webchat_meta (
             chat_jid   TEXT NOT NULL,
             msg_id     TEXT NOT NULL,
@@ -223,11 +224,11 @@ function createWebChatStore({ dbPath, phonebookPath }) {
 
     // Newest indexed message of every chat — chats that exist only in SQLite (after a restart).
     function latestPerChat(limit = 200) {
+        // Newest timestamp per chat (index-backed), then the row at that timestamp.
         return db.prepare(
             `SELECT w.chat_jid, w.msg_id, w.from_me, w.sender, w.push_name, w.text, w.ts
-               FROM webchat_messages w
-              WHERE w.deleted = 0
-                AND w.ts = (SELECT MAX(ts) FROM webchat_messages x WHERE x.chat_jid = w.chat_jid AND x.deleted = 0)
+               FROM (SELECT chat_jid, MAX(ts) AS mts FROM webchat_messages WHERE deleted = 0 GROUP BY chat_jid) m
+               JOIN webchat_messages w ON w.chat_jid = m.chat_jid AND w.ts = m.mts AND w.deleted = 0
               GROUP BY w.chat_jid
               ORDER BY w.ts DESC LIMIT ?`
         ).all(limit).map((r) => ({
