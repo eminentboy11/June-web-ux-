@@ -24,6 +24,9 @@ const { createWebChatStore } = require('../utils/webChatStore');
 
 const DM = '2348111111111@s.whatsapp.net';
 const GROUP = '120363000000@g.us';
+const PN2 = '2349000000001@s.whatsapp.net';
+const LID2 = '71109999999999@lid';
+const PN3 = '2349000000003@s.whatsapp.net';
 
 function makeMsg({ id, jid, fromMe = false, text, participant, ts, pushName }) {
     return {
@@ -31,6 +34,38 @@ function makeMsg({ id, jid, fromMe = false, text, participant, ts, pushName }) {
         message: { conversation: text },
         messageTimestamp: ts,
         pushName: pushName || (fromMe ? '' : 'Friend'),
+    };
+}
+
+// In-memory LID ↔ PN map with the same interface as the production adapter.
+function makeMemoryJidMap() {
+    const lidToPn = new Map();
+    const pnToLid = new Map();
+    const isLid = (j) => String(j).endsWith('@lid');
+    const isPn = (j) => String(j).endsWith('@s.whatsapp.net');
+    return {
+        link(a, b) {
+            let lid = null, pn = null;
+            if (isLid(a) && isPn(b)) { lid = String(a); pn = String(b); }
+            else if (isLid(b) && isPn(a)) { lid = String(b); pn = String(a); }
+            else return;
+            lidToPn.set(lid, pn);
+            pnToLid.set(pn, lid);
+        },
+        pnForLid(lid) { return lidToPn.get(String(lid)) || null; },
+        lidForPn(pn) { return pnToLid.get(String(pn)) || null; },
+        canonical(jid) {
+            const j = String(jid || '');
+            return isLid(j) ? (lidToPn.get(j) || j) : j;
+        },
+        related(jid) {
+            const j = String(jid || '');
+            const out = [j];
+            if (isLid(j)) { const p = lidToPn.get(j); if (p) out.push(p); }
+            else if (isPn(j)) { const l = pnToLid.get(j); if (l) out.push(l); }
+            return out;
+        },
+        async enrich() {},
     };
 }
 
@@ -65,11 +100,13 @@ async function startTestServer() {
         groupMetadata: async (jid) => ({ subject: 'Test Group ' + jid.slice(0, 6) }),
         profilePictureUrl: async (jid) => 'https://cdn.example.com/' + encodeURIComponent(jid) + '.jpg',
     };
+    const jidMap = makeMemoryJidMap();
     const handle = attachChatUI(app, {
         getSock: () => sock,
         getBotState: () => 'connected',
         store,
         chatStore,
+        jidMap,
         log: () => {},
         downloadMedia: async () => {
             downloadCalls++;
@@ -81,7 +118,7 @@ async function startTestServer() {
     });
     const port = server.address().port;
     return {
-        server, port, store, chatStore, sent, presenceCalls, readCalls, sock,
+        server, port, store, chatStore, jidMap, sent, presenceCalls, readCalls, sock,
         getDownloadCalls: () => downloadCalls,
         handle,
         cleanup: () => {
@@ -489,6 +526,76 @@ test('web chat UI', async (t) => {
         const r = await fetch(`${base}/api/chats`, { headers: { cookie } });
         const dm = (await r.json()).chats.find((c) => c.jid === DM);
         assert.ok(dm.unread >= 1, `unread badge count, got ${dm.unread}`);
+    });
+
+    await t.test('LID and PN buckets merge into one chat view', async () => {
+        const inMsg = makeMsg({ id: 'L1', jid: LID2, text: 'good morning', ts: 1700000600 });
+        inMsg.key.remoteJidAlt = PN2; // WhatsApp tells us the phone twin
+        handle.logMessage(inMsg);
+        store.storeMessage(LID2, inMsg);
+        store.storeMessage(PN2, makeMsg({ id: 'P1', jid: PN2, fromMe: true, text: 'hi', ts: 1700000590 }));
+
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(PN2)}`, { headers: { cookie } });
+        const j = await r.json();
+        assert.deepEqual(j.messages.map((m) => m.id), ['P1', 'L1'], 'merged + sorted by time');
+        assert.equal(j.messages[1].text, 'good morning');
+    });
+
+    await t.test('chat list merges LID and PN into one entry', async () => {
+        handle.handleLidMapping({ pn: PN2, lid: LID2 });
+        store.storeMessage(LID2, makeMsg({ id: 'L2', jid: LID2, text: 'fresh reply', ts: Math.floor(Date.now() / 1000) + 30 }));
+        const r = await fetch(`${base}/api/chats`, { headers: { cookie } });
+        const chats = (await r.json()).chats;
+        assert.equal(chats.filter((c) => c.jid === PN2).length, 1, 'one PN entry');
+        assert.equal(chats.filter((c) => c.jid === LID2).length, 0, 'no separate LID entry');
+        const entry = chats.find((c) => c.jid === PN2);
+        assert.equal(entry.name, 'Friend', 'the real name beats the bare number');
+        assert.equal(entry.count, 3);
+        assert.ok(entry.unread >= 1, 'unread counts merge across buckets');
+    });
+
+    await t.test('status updates stored under the LID show on the PN chat', async () => {
+        handle.handleMessageUpdate([{ key: { id: 'P1', remoteJid: LID2, fromMe: true }, update: { status: 4 } }]);
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(PN2)}`, { headers: { cookie } });
+        const m = (await r.json()).messages.find((x) => x.id === 'P1');
+        assert.equal(m.status, 4, 'meta keyed under either address is found');
+    });
+
+    await t.test('lid-mapping.update events teach the web chat', async () => {
+        const PN4 = '2349000000004@s.whatsapp.net';
+        const LID4 = '71107777777777@lid';
+        handle.handleLidMapping({ pn: PN4, lid: LID4 });
+        store.storeMessage(LID4, makeMsg({ id: 'L9', jid: LID4, text: 'mapped hi', ts: 1700000700 }));
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(PN4)}`, { headers: { cookie } });
+        const ids = (await r.json()).messages.map((m) => m.id);
+        assert.ok(ids.includes('L9'), 'LID bucket merged via the reported mapping');
+    });
+
+    await t.test('search results canonicalize LID chats to the PN chat', async () => {
+        const r = await fetch(`${base}/api/search?q=${encodeURIComponent('good morning')}`, { headers: { cookie } });
+        const j = await r.json();
+        const hit = j.results.find((x) => x.msgId === 'L1');
+        assert.ok(hit, 'the LID-indexed message is found');
+        assert.equal(hit.chatJid, PN2, 'and shown under the canonical PN chat');
+    });
+
+    await t.test('reaction stanzas are not chat previews', async () => {
+        store.storeMessage(PN3, makeMsg({ id: 'T1', jid: PN3, text: 'real message', ts: 1700000800 }));
+        store.storeMessage(PN3, {
+            key: { id: 'T2', remoteJid: PN3, fromMe: false },
+            message: { reactionMessage: { key: { id: 'T1', remoteJid: PN3 }, text: '❤️' } },
+            messageTimestamp: 1700000900,
+            pushName: 'Friend',
+        });
+        const r = await fetch(`${base}/api/chats`, { headers: { cookie } });
+        const c = (await r.json()).chats.find((x) => x.jid === PN3);
+        assert.equal(c.preview, 'real message', 'preview skips reaction stanzas');
+    });
+
+    await t.test('presence on the LID shows in the PN chat', async () => {
+        handle.handlePresenceUpdate(LID2, { [LID2]: { lastKnownPresence: 'composing' } });
+        const r = await fetch(`${base}/api/messages?jid=${encodeURIComponent(PN2)}`, { headers: { cookie } });
+        assert.equal((await r.json()).presence, 'composing');
     });
 
     await t.test('logout kills the session', async () => {

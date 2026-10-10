@@ -1280,6 +1280,10 @@ async function startJunexBot() {
     store.bind(sock.ev)
     // Web chat UI: index every message (in + out) for search, and keep the
     // phonebook (number → WhatsApp name) fresh.
+    // Web chat UI: LID ↔ PN identity mapping (one person, two addresses).
+    sock.ev.on('lid-mapping.update', (mapping) => {
+        try { webChatHandle?.handleLidMapping?.(mapping) } catch (_) {}
+    })
     // Web chat UI: message status ticks, reactions and group read receipts.
     sock.ev.on('messages.update', (updates) => {
         try { webChatHandle?.handleMessageUpdate?.(updates) } catch (_) {}

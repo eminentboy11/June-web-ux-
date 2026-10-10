@@ -19,6 +19,9 @@
  *   POST /api/react      add/remove an emoji reaction          (auth)
  *   POST /api/logout     end session                          (auth)
  *
+ * Chat identity: a person's LID and PN jids are merged into one chat (the
+ *   mapping is shared with the bot via utils/jidHelper.js).
+ *
  * Auth: set WEB_PASSWORD in the environment. If it is not set, a random
  * password is generated at boot and printed once to the console — the chat
  * UI is never exposed without a password.
@@ -29,7 +32,8 @@
  *
  * attachChatUI() returns a handle used by index.js to feed the module:
  *   { logMessage(msg), handlePresenceUpdate(id, presences),
- *     handleMessageUpdate(updates), handleReactions(list), handleReceiptUpdate(receipts) }
+ *     handleMessageUpdate(updates), handleReactions(list), handleReceiptUpdate(receipts),
+ *     handleLidMapping(mapping) }
  */
 'use strict';
 
@@ -177,6 +181,71 @@ function attachChatUI(app, deps) {
         phonebookPath: path.join(__dirname, '..', 'database', 'webchat-phonebook.json'),
     });
 
+    // LID ↔ PN identity map. WhatsApp is moving DMs to LID addressing, so one
+    // person can appear as both 234…@s.whatsapp.net and 711…@lid. The bot
+    // already keeps this mapping (utils/jidHelper.js → SQLite lid_map, shared
+    // with every command); reuse it instead of keeping a second copy. Tests
+    // inject a lightweight in-memory jidMap with the same interface.
+    let jidMap = deps.jidMap || null;
+    function getJidMap() {
+        if (jidMap) return jidMap;
+        const helper = require('./jidHelper');
+        const isLid = (j) => helper.isLidJid(j);
+        const isPn = (j) => helper.isPnJid(j);
+        jidMap = {
+            link(a, b) {
+                try {
+                    let lid = null, pn = null;
+                    if (isLid(a) && isPn(b)) { lid = a; pn = b; }
+                    else if (isLid(b) && isPn(a)) { lid = b; pn = a; }
+                    else return;
+                    helper.rememberLidMapping(lid, pn);
+                } catch (_) {}
+            },
+            pnForLid(lid) {
+                try {
+                    const pn = helper.normalizeJidWithLid(String(lid));
+                    return pn && isPn(pn) ? pn : null;
+                } catch (_) { return null; }
+            },
+            lidForPn(pn) {
+                try {
+                    const user = helper.jidUser(pn);
+                    const lidUser = user && helper.getLidMappingValue(user, 'pnToLid');
+                    return lidUser ? `${lidUser}@lid` : null;
+                } catch (_) { return null; }
+            },
+            canonical(jid) {
+                const j = String(jid || '');
+                if (isLid(j)) return this.pnForLid(j) || j;
+                return j;
+            },
+            related(jid) {
+                const j = String(jid || '');
+                const out = [j];
+                try {
+                    if (isLid(j)) { const pn = this.pnForLid(j); if (pn) out.push(pn); }
+                    else if (isPn(j)) { const lid = this.lidForPn(j); if (lid) out.push(lid); }
+                } catch (_) {}
+                return out;
+            },
+            async enrich(jid, sock) {
+                // Best-effort live lookup in Baileys' signal store; persists
+                // into the shared lid_map so the whole bot benefits.
+                try {
+                    const j = String(jid || '');
+                    if (isLid(j)) { await helper.resolvePhone(sock, j); return; }
+                    const lm = sock?.signalRepository?.lidMapping;
+                    if (isPn(j) && lm && typeof lm.getLIDForPN === 'function') {
+                        const lid = await lm.getLIDForPN(j);
+                        if (lid) this.link(lid, j);
+                    }
+                } catch (_) {}
+            },
+        };
+        return jidMap;
+    }
+
     // Password: WEB_PASSWORD env var, otherwise a random one printed once.
     let webPassword = process.env.WEB_PASSWORD ? String(process.env.WEB_PASSWORD) : null;
     if (!webPassword) {
@@ -280,20 +349,28 @@ function attachChatUI(app, deps) {
     // shows blue ticks. Keys are deduped for the lifetime of this session.
     function markChatRead(jid, msgs) {
         try {
-            chatStore.setRead(jid, Date.now());
+            // Read state is keyed by the canonical chat so LID/PN twins share it.
+            chatStore.setRead(getJidMap().canonical(jid), Date.now());
             const sock = getSock();
             if (!sock || typeof sock.readMessages !== 'function') return;
             if (readMarked.size > 5000) readMarked.clear();
             const keys = [];
             for (const m of msgs) {
                 if (!m?.key || m.key.fromMe || m.message?.reactionMessage) continue;
-                const k = `${jid}|${m.key.id}`;
+                const k = `${m.key.remoteJid}|${m.key.id}`;
                 if (readMarked.has(k)) continue;
                 readMarked.add(k);
                 keys.push(m.key);
                 if (keys.length >= 50) break;
             }
             if (keys.length) Promise.resolve(sock.readMessages(keys)).catch(() => {});
+        } catch (_) {}
+    }
+
+    // Messages often carry the chat's other address (LID ↔ PN) — learn it.
+    function linkKey(key) {
+        try {
+            if (key?.remoteJid && key?.remoteJidAlt) getJidMap().link(key.remoteJid, key.remoteJidAlt);
         } catch (_) {}
     }
 
@@ -317,6 +394,7 @@ function attachChatUI(app, deps) {
         try {
             for (const { key, update } of updates || []) {
                 if (!key?.id || !key?.remoteJid) continue;
+                linkKey(key);
                 const chatJid = key.remoteJid;
                 const msgId = String(key.id);
                 if (typeof update?.status === 'number') {
@@ -342,6 +420,8 @@ function attachChatUI(app, deps) {
                 const reactedTo = item?.key;
                 const reaction = item?.reaction || {};
                 if (!reactedTo?.id || !reactedTo?.remoteJid) continue;
+                linkKey(reactedTo);
+                linkKey(reaction?.key);
                 applyReactionUpdate(
                     reactedTo.remoteJid,
                     String(reactedTo.id),
@@ -364,6 +444,19 @@ function attachChatUI(app, deps) {
                     : STATUS.DELIVERY_ACK;
                 chatStore.setMsgMeta(key.remoteJid, String(key.id), { status });
             }
+        } catch (_) {}
+    }
+
+    // lid-mapping.update — Baileys reports { pn, lid } for one person.
+    function handleLidMapping(mapping) {
+        try {
+            if (!mapping) return;
+            let pn = mapping.pn || mapping.pnJid || null;
+            let lid = mapping.lid || mapping.lidJid || null;
+            if (!pn || !lid) return;
+            if (!String(pn).includes('@')) pn = `${pn}@s.whatsapp.net`;
+            if (!String(lid).includes('@')) lid = `${lid}@lid`;
+            getJidMap().link(lid, pn);
         } catch (_) {}
     }
 
@@ -423,8 +516,9 @@ function attachChatUI(app, deps) {
     /* ── shared name resolution ─────────────────────────────────────────── */
 
     function chatDisplayName(jid, lastMsg) {
-        if (jid.endsWith('@g.us')) return groupNames.get(jid) || null;
-        return chatStore.phonebookName(jid) || lastMsg?.pushName || null;
+        const canon = getJidMap().canonical(jid);
+        if (canon.endsWith('@g.us')) return groupNames.get(canon) || null;
+        return chatStore.phonebookName(canon) || lastMsg?.pushName || null;
     }
 
     /* ── public: login ────────────────────────────────────────────────────── */
@@ -467,54 +561,99 @@ function attachChatUI(app, deps) {
 
     app.get('/api/chats', requireAuth, (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
-        const chats = [];
         const byJid = store?.messages;
+        const merged = new Map(); // canonical jid → one chat entry
         if (byJid) {
             for (const [jid, msgs] of byJid) {
                 if (!jid || jid === 'status@broadcast' || !msgs || msgs.size === 0) continue;
-                let last = null;
-                for (const m of msgs.values()) last = m; // insertion order → last is newest
+                const canon = getJidMap().canonical(jid);
                 const isGroup = jid.endsWith('@g.us');
-                const lastRead = chatStore.getRead(jid);
-                let unread = 0;
+                const lastRead = chatStore.getRead(canon);
+                let last = null, unread = 0, count = 0;
                 for (const m of msgs.values()) {
-                    if (!m?.key || m.key.fromMe || m.message?.reactionMessage) continue;
-                    if (msgTs(m) > lastRead) unread++;
+                    if (!m?.key || m.message?.reactionMessage) continue; // reactions aren't previews
+                    count++;
+                    last = m; // insertion order → last non-reaction is newest
+                    if (!m.key.fromMe && msgTs(m) > lastRead) unread++;
                 }
-                chats.push({
-                    jid,
-                    isGroup,
-                    name: chatDisplayName(jid, last) || jid.split('@')[0],
-                    number: jid.split('@')[0],
-                    preview: String(slimMessage(last).text || '').slice(0, 100),
-                    lastTs: last?.messageTimestamp ? Number(last.messageTimestamp) * 1000 : null,
-                    count: msgs.size,
-                    unread,
-                });
+                if (!last) continue;
+                const name = chatDisplayName(jid, last) || jid.split('@')[0];
+                const lastTs = last.messageTimestamp ? Number(last.messageTimestamp) * 1000 : null;
+                const preview = String(slimMessage(last).text || '').slice(0, 100);
+                const existing = merged.get(canon);
+                if (!existing) {
+                    merged.set(canon, {
+                        jid: canon,
+                        isGroup,
+                        name,
+                        number: canon.split('@')[0],
+                        preview,
+                        lastTs,
+                        count,
+                        unread,
+                    });
+                    continue;
+                }
+                // Same person under two addresses (LID ↔ PN) — merge the buckets.
+                if ((existing.lastTs || 0) < (lastTs || 0)) {
+                    existing.preview = preview;
+                    existing.lastTs = lastTs;
+                }
+                existing.count += count;
+                existing.unread += unread;
+                // Prefer a real name over a bare number.
+                if (existing.name === existing.number && name !== existing.number) existing.name = name;
             }
         }
+        const chats = Array.from(merged.values());
         chats.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
         refreshGroupNames(chats.slice(0, MAX_GROUP_NAME_FETCHES));
         res.json({ ok: true, chats: chats.slice(0, limit) });
     });
 
-    app.get('/api/messages', requireAuth, (req, res) => {
+    // Presence can arrive under either address of a chat — check them all.
+    function getPresenceAny(jids) {
+        for (const j of jids) {
+            const p = getPresence(j);
+            if (p) return p;
+        }
+        return null;
+    }
+
+    app.get('/api/messages', requireAuth, async (req, res) => {
         const jid = String(req.query.jid || '');
         if (!JID_RE.test(jid)) {
             return res.status(400).json({ ok: false, error: 'invalid jid' });
         }
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
-        const msgs = store?.messages?.get(jid);
-        // Reactions are noise in a chat view — skip them.
-        const all = (msgs ? Array.from(msgs.values()) : []).filter((m) => !m?.message?.reactionMessage);
+        // LID ↔ PN: one person can chat under both addresses. Best-effort
+        // live lookup, then merge every bucket that maps to this chat.
+        await withTimeout(getJidMap().enrich(jid, getSock()), 1500).catch(() => {});
+        const jids = getJidMap().related(jid);
+        const byId = new Map();
+        for (const j of jids) {
+            const msgs = store?.messages?.get(j);
+            if (!msgs) continue;
+            for (const m of msgs.values()) {
+                if (m?.message?.reactionMessage) continue; // reactions are noise here
+                if (m?.key?.id && !byId.has(m.key.id)) byId.set(m.key.id, m);
+            }
+        }
+        const all = Array.from(byId.values()).sort((a, b) => (msgTs(a) || 0) - (msgTs(b) || 0));
         const list = all.slice(-limit);
-        const metas = chatStore.getMsgMetas(jid, list.map((m) => m?.key?.id));
+        // Ticks/reactions meta can be keyed under either address — query both.
+        const metas = new Map();
+        for (const j of jids) {
+            for (const [id, meta] of chatStore.getMsgMetas(j, list.map((m) => m?.key?.id))) {
+                if (!metas.has(id)) metas.set(id, meta);
+            }
+        }
         // Opening a chat marks it read → the sender sees blue ticks.
         markChatRead(jid, all);
         res.json({
             ok: true,
             jid,
-            presence: getPresence(jid),
+            presence: getPresenceAny(jids),
             messages: list.map((m) => slimMessage(m, metas.get(m?.key?.id))),
         });
     });
@@ -523,11 +662,21 @@ function attachChatUI(app, deps) {
         const q = String(req.query.q || '').trim();
         if (!q) return res.status(400).json({ ok: false, error: 'empty query' });
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
-        const results = chatStore.search(q, limit).map((r) => ({
-            ...r,
-            chatName: chatDisplayName(r.chatJid, { pushName: r.pushName }) || r.chatJid.split('@')[0],
-            isGroup: r.chatJid.endsWith('@g.us'),
-        }));
+        const seen = new Set();
+        const results = [];
+        for (const r of chatStore.search(q, limit)) {
+            // LID ↔ PN: show one canonical chat per person.
+            const cj = getJidMap().canonical(r.chatJid);
+            const key = `${cj}|${r.msgId}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            results.push({
+                ...r,
+                chatJid: cj,
+                chatName: chatDisplayName(cj, { pushName: r.pushName }) || cj.split('@')[0],
+                isGroup: cj.endsWith('@g.us'),
+            });
+        }
         refreshGroupNames(results.slice(0, MAX_GROUP_NAME_FETCHES));
         res.json({ ok: true, q, results });
     });
@@ -683,10 +832,20 @@ function attachChatUI(app, deps) {
     /* ── handle returned to index.js ────────────────────────────────────── */
 
     function logMessage(msg) {
-        try { chatStore.logMessage(msg); } catch (_) {}
+        try {
+            // Learn LID ↔ PN pairs from the message's alternate address.
+            linkKey(msg?.key);
+            // Index under the canonical chat so search + phonebook see one chat.
+            const canon = msg?.key?.remoteJid ? getJidMap().canonical(msg.key.remoteJid) : null;
+            if (canon && canon !== msg.key.remoteJid) {
+                chatStore.logMessage({ ...msg, key: { ...msg.key, remoteJid: canon } });
+            } else {
+                chatStore.logMessage(msg);
+            }
+        } catch (_) {}
     }
 
-    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate };
+    return { logMessage, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping };
 }
 
 module.exports = { attachChatUI };
