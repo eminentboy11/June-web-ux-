@@ -124,6 +124,23 @@
   .bubble-actions button:hover{color:var(--cyan);background:none}
   #rx-bar{position:fixed;z-index:60;display:none;gap:2px;background:var(--panel);border:1px solid var(--border);border-radius:20px;padding:4px 7px;box-shadow:0 6px 18px rgba(0,0,0,.55)}
   #rx-bar.show{display:flex}
+  #rx-bar{flex-wrap:wrap;max-width:min(92vw,300px)}
+  #rx-bar button.rx-more{font-weight:700;color:var(--cyan)}
+  #msg-menu{position:fixed;z-index:70;min-width:200px;max-width:260px;background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+  #msg-menu button{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;border-bottom:1px solid var(--border);color:var(--text);font:inherit;font-size:.9rem;padding:11px 14px;text-align:left;cursor:pointer}
+  #msg-menu button:last-child{border-bottom:0}
+  #msg-menu button:hover{background:rgba(0,255,224,.06)}
+  #msg-menu button.danger{color:#ff5c5c}
+  #msg-menu button.back{color:var(--cyan)}
+  #msg-menu .ic{width:20px;text-align:center;opacity:.9}
+  #toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);z-index:90;background:var(--panel);border:1px solid var(--cyan);color:var(--text);padding:8px 14px;border-radius:20px;font-size:.8rem;white-space:nowrap;max-width:92vw;overflow:hidden;text-overflow:ellipsis}
+  .info-row{display:flex;justify-content:space-between;gap:12px;font-size:.85rem;padding:7px 0;border-bottom:1px solid var(--border)}
+  .info-k{color:var(--muted)}
+  .info-v{text-align:right}
+  @media (hover:none){
+    .bubble-actions{display:none!important}
+    .bubble{-webkit-touch-callout:none;user-select:none;-webkit-user-select:none}
+  }
   #rx-bar button{background:none;border:none;font-size:1.05rem;padding:2px 5px;cursor:pointer;border-radius:6px;letter-spacing:0;line-height:1.3}
   #rx-bar button:hover{background:rgba(0,255,224,.15)}
   .flash .bubble{box-shadow:0 0 0 2px var(--cyan),0 0 18px rgba(0,255,224,.35)}
@@ -601,6 +618,7 @@ function renderMessages(scrollToBottomIfNear) {
   }
   if (scrollToBottomIfNear && nearBottom) box.scrollTop = box.scrollHeight;
   else box.scrollTop = Math.max(0, box.scrollHeight - distanceFromBottom);
+  refreshOpenMenus();
 }
 
 function renderRow(m, cont) {
@@ -654,12 +672,7 @@ function renderRow(m, cont) {
   if (m.fromMe && m.status != null && !m.deleted) ts.appendChild(ticksEl(m.status));
   bubble.appendChild(ts);
 
-  // Tap a bubble to show its actions (phones have no hover).
-  bubble.addEventListener('click', (ev) => {
-    if (ev.target.closest('button, a, .quote, audio, video, img, .wave')) return;
-    document.querySelectorAll('.msg-row.show-actions').forEach((r) => { if (r !== row) r.classList.remove('show-actions'); });
-    row.classList.toggle('show-actions');
-  });
+  attachMessageGestures(row, bubble, m);
 
   row.appendChild(bubble);
   return row;
@@ -1028,34 +1041,314 @@ async function runInChatSearch(q) {
 
 let rxTarget = null;
 const RX_QUICK = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
-function closeRxBar() { $('rx-bar').classList.remove('show'); rxTarget = null; }
-function openRxBar(m, bubble) {
-  rxTarget = m;
+let rxBubble = null;
+function closeRxBar() { $('rx-bar').classList.remove('show'); rxTarget = null; rxBubble = null; }
+function positionRxBar(bubble) {
   const bar = $('rx-bar');
-  bar.classList.add('show');
   const rect = bubble.getBoundingClientRect();
   const w = bar.offsetWidth, h = bar.offsetHeight;
   bar.style.left = Math.min(Math.max(8, rect.right - w - 6), window.innerWidth - w - 8) + 'px';
   bar.style.top = Math.max(8, rect.top - h - 8) + 'px';
 }
-for (const e of RX_QUICK) {
-  const b = el('button', '', e);
-  b.title = 'react ' + e;
+function openRxBar(m, bubble) {
+  rxTarget = m; rxBubble = bubble;
+  fillRxBar(RX_QUICK);
+  $('rx-bar').classList.add('show');
+  positionRxBar(bubble);
+}
+const RX_MORE = ['🔥', '🎉', '👏', '😍', '🤣', '😡', '🤔', '💯', '👀', '🙌', '😭', '🥰', '👎', '🤝', '😎', '✅', '❌', '🫡', '🥳', '💔', '😅', '🤦', '🤷', '🙈'];
+function rxButton(emoji) {
+  const b = el('button', '', emoji);
+  b.title = 'react ' + emoji;
   b.addEventListener('click', async (ev) => {
     ev.stopPropagation();
     if (!rxTarget || !state.currentJid) return;
     const msgId = rxTarget.id;
     closeRxBar();
-    try { await postJson('/api/react', { jid: state.currentJid, msgId, emoji: e }); loadMessages(); }
+    try { await postJson('/api/react', { jid: state.currentJid, msgId, emoji }); loadMessages(); }
     catch (err) { alert(err.message || 'react failed'); }
   });
-  $('rx-bar').appendChild(b);
+  return b;
 }
+function fillRxBar(list) {
+  const bar = $('rx-bar');
+  bar.textContent = '';
+  for (const e of list) bar.appendChild(rxButton(e));
+  if (list === RX_QUICK) {
+    const more = el('button', 'rx-more', '+');
+    more.type = 'button';
+    more.title = 'more reactions';
+    more.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      fillRxBar(RX_MORE);
+      if (rxBubble) positionRxBar(rxBubble);
+    });
+    bar.appendChild(more);
+  }
+}
+fillRxBar(RX_QUICK);
 document.addEventListener('click', (e) => {
-  if (!$('rx-bar').contains(e.target)) closeRxBar();
-  if (!e.target.closest('.msg-row')) document.querySelectorAll('.msg-row.show-actions').forEach((r) => r.classList.remove('show-actions'));
+  const justOpened = Date.now() - menuOpenedAt < 400;   // ignore the click that ends a long press
+  if (!justOpened && !$('rx-bar').contains(e.target)) closeRxBar();
+  if (!justOpened && !msgMenuEl.contains(e.target)) closeMsgMenu();
   if (!e.target.closest('#emoji-panel, #emoji-btn')) $('emoji-panel').hidden = true;
   if (!e.target.closest('#mention-list, #send-text')) $('mention-list').hidden = true;
+});
+
+/* ── message menu: long-press / double-tap (phones), right-click (desktop) ─ */
+
+const LONG_PRESS_MS = 450;
+const DOUBLE_TAP_MS = 320;
+const MOVE_TOLERANCE = 10;
+let pressTimer = null;
+let pressState = null;
+let lastTap = { row: null, at: 0 };
+let menuTarget = null, menuBubble = null, menuPage = 'main', menuOpenedAt = 0;
+
+const msgMenuEl = el('div', '');
+msgMenuEl.id = 'msg-menu';
+msgMenuEl.hidden = true;
+document.body.appendChild(msgMenuEl);
+
+const toastEl = el('div', '');
+toastEl.id = 'toast';
+toastEl.hidden = true;
+document.body.appendChild(toastEl);
+let toastTimer = null;
+function toast(text) {
+  toastEl.textContent = text;
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.hidden = true; }, 1800);
+}
+
+function localSet(name) {
+  try { return new Set(JSON.parse(localStorage.getItem(name) || '[]')); } catch (_) { return new Set(); }
+}
+function saveLocalSet(name, set) {
+  try { localStorage.setItem(name, JSON.stringify([...set])); } catch (_) {}
+}
+const starredSet = localSet('webchat-starred');
+const pinnedSet = localSet('webchat-pinned');
+
+const STATUS_TEXT = { 0: 'failed to send', 1: 'sending', 2: 'sent', 3: 'delivered', 4: 'read', 5: 'played' };
+
+function isInteractive(target) {
+  return !!(target && target.closest && target.closest('button, a, .quote, audio, video, img, .wave, .rx-pill, input, textarea'));
+}
+
+function attachMessageGestures(row, bubble, m) {
+  if (m.deleted) return;
+  bubble.addEventListener('touchstart', (ev) => {
+    pressState = null;
+    clearTimeout(pressTimer);
+    if (ev.touches.length !== 1 || isInteractive(ev.target)) return;
+    const t = ev.touches[0];
+    const current = { x: t.clientX, y: t.clientY, fired: false, moved: false };
+    pressState = current;
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      if (pressState !== current || current.moved) return;
+      current.fired = true;
+      if (navigator.vibrate) navigator.vibrate(12);
+      openRxBar(m, bubble);
+      openMsgMenu(m, bubble);
+    }, LONG_PRESS_MS);
+  }, { passive: true });
+
+  bubble.addEventListener('touchmove', (ev) => {
+    if (!pressState || pressState.moved) return;
+    const t = ev.touches[0];
+    if (Math.hypot(t.clientX - pressState.x, t.clientY - pressState.y) > MOVE_TOLERANCE) {
+      pressState.moved = true;
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  }, { passive: true });
+
+  bubble.addEventListener('touchend', (ev) => {
+    clearTimeout(pressTimer);
+    pressTimer = null;
+    const st = pressState;
+    pressState = null;
+    if (!st) return;
+    if (st.fired) { ev.preventDefault(); return; }   // long press done: no click after it
+    if (st.moved) return;
+    const now = Date.now();
+    if (lastTap.row === row && now - lastTap.at < DOUBLE_TAP_MS) {
+      lastTap = { row: null, at: 0 };
+      ev.preventDefault();
+      openRxBar(m, bubble);                           // double tap: quick reactions
+      return;
+    }
+    lastTap = { row, at: now };
+  });
+
+  bubble.addEventListener('touchcancel', () => { clearTimeout(pressTimer); pressTimer = null; pressState = null; });
+
+  bubble.addEventListener('dblclick', (ev) => {
+    if (isInteractive(ev.target)) return;
+    ev.preventDefault();
+    openRxBar(m, bubble);
+  });
+
+  bubble.addEventListener('contextmenu', (ev) => {
+    if (isInteractive(ev.target)) return;
+    ev.preventDefault();
+    openMsgMenu(m, bubble);
+  });
+}
+
+function openMsgMenu(m, bubble) {
+  menuTarget = m; menuBubble = bubble; menuPage = 'main'; menuOpenedAt = Date.now();
+  renderMsgMenu();
+}
+
+function closeMsgMenu() {
+  msgMenuEl.hidden = true;
+  menuTarget = null; menuBubble = null;
+}
+
+function renderMsgMenu() {
+  const m = menuTarget;
+  if (!m) return;
+  msgMenuEl.textContent = '';
+  const age = Date.now() - (m.ts || 0);
+  const add = (icon, label, fn, cls) => {
+    const b = el('button', cls || '');
+    b.type = 'button';
+    b.appendChild(el('span', 'ic', icon));
+    b.appendChild(el('span', '', label));
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); fn(); });
+    msgMenuEl.appendChild(b);
+  };
+  if (menuPage === 'main') {
+    add('↩', 'Reply', () => { closeMsgMenu(); setReply(m); });
+    add('↪', 'Forward', () => { closeMsgMenu(); openForward(m); });
+    add('⧉', 'Copy', () => { closeMsgMenu(); copyMessage(m); });
+    if (m.fromMe && m.text && !m.media && !m.poll && age < MY_EDIT_MS) {
+      add('✎', 'Edit', () => { closeMsgMenu(); setEditing(m); });
+    }
+    if (m.fromMe && age < MY_DELETE_MS) {
+      add('🗑', 'Delete', () => { closeMsgMenu(); deleteMessage(m); }, 'danger');
+    }
+    add('⋯', 'More…', () => { menuPage = 'more'; renderMsgMenu(); });
+  } else {
+    add('‹', 'Back', () => { menuPage = 'main'; renderMsgMenu(); }, 'back');
+    add('📌', pinnedSet.has(m.id) ? 'Unpin' : 'Pin', () => { closeMsgMenu(); togglePin(m); });
+    add('ⓘ', 'Info', () => { closeMsgMenu(); openInfo(m); });
+    add('★', starredSet.has(m.id) ? 'Unstar' : 'Star', () => { closeMsgMenu(); toggleStar(m); });
+  }
+  msgMenuEl.hidden = false;
+  positionMsgMenu();
+}
+
+function positionMsgMenu() {
+  if (!menuBubble || msgMenuEl.hidden) return;
+  const rect = menuBubble.getBoundingClientRect();
+  const w = msgMenuEl.offsetWidth, h = msgMenuEl.offsetHeight;
+  const left = menuTarget && menuTarget.fromMe ? rect.right - w : rect.left;
+  // Bubble in the top half: menu goes below it. Bubble in the lower half: menu goes
+  // above it, clear of the reaction bar that sits just above the bubble.
+  const top = rect.top < window.innerHeight / 2 ? rect.bottom + 8 : rect.top - h - 56;
+  msgMenuEl.style.left = Math.min(Math.max(8, left), window.innerWidth - w - 8) + 'px';
+  msgMenuEl.style.top = Math.min(Math.max(8, top), window.innerHeight - h - 8) + 'px';
+}
+
+// Keep an open menu or reaction bar on the right bubble after the 2.5s refresh.
+function refreshOpenMenus() {
+  const bubbleFor = (id) => {
+    const row = id ? document.querySelector('#messages .msg-row[data-msg-id="' + CSS.escape(id) + '"]') : null;
+    return row ? row.querySelector('.bubble') : null;
+  };
+  if (!msgMenuEl.hidden && menuTarget) {
+    const b = bubbleFor(menuTarget.id);
+    if (!b) closeMsgMenu(); else { menuBubble = b; positionMsgMenu(); }
+  }
+  if ($('rx-bar').classList.contains('show') && rxTarget) {
+    const b = bubbleFor(rxTarget.id);
+    if (!b) closeRxBar(); else { rxBubble = b; positionRxBar(b); }
+  }
+}
+
+async function copyMessage(m) {
+  const text = m.text || '';
+  if (!text) { toast('nothing to copy'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('copied');
+  } catch (_) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) {}
+    ta.remove();
+    toast(ok ? 'copied' : "couldn't copy");
+  }
+}
+
+async function togglePin(m) {
+  const pin = !pinnedSet.has(m.id);
+  try {
+    await postJson('/api/pin', { jid: state.currentJid, msgId: m.id, pin });
+    if (pin) pinnedSet.add(m.id); else pinnedSet.delete(m.id);
+    saveLocalSet('webchat-pinned', pinnedSet);
+    toast(pin ? 'pinned for 24 hours' : 'unpinned');
+  } catch (err) { toast(err.message || 'pin failed'); }
+}
+
+async function toggleStar(m) {
+  const star = !starredSet.has(m.id);
+  try {
+    await postJson('/api/star', { jid: state.currentJid, msgId: m.id, star });
+    if (star) starredSet.add(m.id); else starredSet.delete(m.id);
+    saveLocalSet('webchat-starred', starredSet);
+    toast(star ? 'starred' : 'unstarred');
+  } catch (err) { toast(err.message || 'star failed'); }
+}
+
+function openInfo(m) {
+  let modal = document.getElementById('info-modal');
+  if (!modal) {
+    modal = el('div', 'modal');
+    modal.id = 'info-modal';
+    modal.hidden = true;
+    const card = el('div', 'modal-card');
+    card.appendChild(el('h3', '', 'Message info'));
+    const body = el('div', '');
+    body.id = 'info-body';
+    card.appendChild(body);
+    const row = el('div', 'modal-row');
+    const close = el('button', '', 'close');
+    close.type = 'button';
+    close.addEventListener('click', () => { modal.hidden = true; });
+    row.appendChild(close);
+    card.appendChild(row);
+    modal.appendChild(card);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
+    document.body.appendChild(modal);
+  }
+  const body = $('info-body');
+  body.textContent = '';
+  const add = (k, v) => {
+    const r = el('div', 'info-row');
+    r.appendChild(el('span', 'info-k', k));
+    r.appendChild(el('span', 'info-v', v));
+    body.appendChild(r);
+  };
+  add('Sent by', m.fromMe ? 'you' : (m.pushName || (m.sender || '').split('@')[0] || 'unknown'));
+  add(m.fromMe ? 'Sent' : 'Received', m.ts ? new Date(m.ts).toLocaleString() : 'unknown');
+  if (m.fromMe) add('Status', STATUS_TEXT[m.status] || 'unknown');
+  if (m.edited) add('Edited', 'yes');
+  add('Starred', starredSet.has(m.id) ? 'yes' : 'no');
+  add('Pinned', pinnedSet.has(m.id) ? 'yes' : 'no');
+  modal.hidden = false;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeMsgMenu(); closeRxBar(); }
 });
 
 /* ── reply / edit / delete / forward ───────────────────────────────────── */

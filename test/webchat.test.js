@@ -36,6 +36,7 @@ const ANN_NAME_GROUP = '120363555000@g.us';
 const OWNER_PN = '2348000000000@s.whatsapp.net';
 
 const voiceCalls = [];
+const starCalls = [];
 const relayCalls = [];
 const pollSecret = Buffer.from('0123456789abcdef0123456789abcdef');
 
@@ -129,6 +130,9 @@ async function startTestServer() {
         relayMessage: async (jid, message, opts) => {
             relayCalls.push({ jid, message, opts });
             return 'RELAY' + relayCalls.length;
+        },
+        star: async (jid, messages, star) => {
+            starCalls.push({ jid, messages, star });
         },
         readMessages: async (keys) => {
             readCalls.push(keys);
@@ -358,6 +362,38 @@ test('web chat UI', async (t) => {
         const j = await (await fetch(`${base}/api/messages?jid=${encodeURIComponent(GROUP)}`, { headers: { cookie } })).json();
         assert.equal(j.groupAccess.canSend, true);
         assert.equal(j.groupAccess.announce, false);
+    });
+
+    await t.test('pin and star use the stored message key', async () => {
+        const bad = await fetch(`${base}/api/pin`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'MEDIA1', pin: 'yes' }),
+        });
+        assert.equal(bad.status, 400);
+
+        const missing = await fetch(`${base}/api/pin`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'NOPE-404', pin: true }),
+        });
+        assert.equal(missing.status, 404);
+
+        const pinned = await fetch(`${base}/api/pin`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'MEDIA1', pin: true }),
+        });
+        assert.equal(pinned.status, 200);
+        assert.equal(sent.at(-1).content.pin.type, 1);
+        assert.equal(sent.at(-1).content.pin.time, 86400);
+        assert.equal(sent.at(-1).content.pin.key.id, 'MEDIA1');
+        sent.length = 0;
+
+        const starred = await fetch(`${base}/api/star`, {
+            method: 'POST', headers: { cookie, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jid: DM, msgId: 'MEDIA1', star: true }),
+        });
+        assert.equal(starred.status, 200);
+        assert.equal(starCalls.at(-1).star, true);
+        assert.equal(starCalls.at(-1).messages[0].id, 'MEDIA1');
     });
 
     await t.test('send validates the jid', async () => {

@@ -1050,6 +1050,45 @@ function attachChatUI(app, deps) {
         }
     });
 
+    // Pin / unpin for everyone. WhatsApp keeps a pin for a fixed time; 24 hours here.
+    app.post('/api/pin', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, msgId, pin } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            if (typeof msgId !== 'string' || !MSG_ID_RE.test(msgId)) return res.status(400).json({ ok: false, error: 'invalid msgId' });
+            if (typeof pin !== 'boolean') return res.status(400).json({ ok: false, error: 'pin must be true or false' });
+            const found = findStored(jid, msgId);
+            if (!found) return res.status(404).json({ ok: false, error: 'message not in recent store' });
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            await sock.sendMessage(found.msg.key.remoteJid, {
+                pin: { type: pin ? 1 : 0, time: 86400, key: found.msg.key },
+            });
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // Star / unstar. Synced to the phone's starred messages (Baileys chatModify).
+    app.post('/api/star', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, msgId, star } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            if (typeof msgId !== 'string' || !MSG_ID_RE.test(msgId)) return res.status(400).json({ ok: false, error: 'invalid msgId' });
+            if (typeof star !== 'boolean') return res.status(400).json({ ok: false, error: 'star must be true or false' });
+            const found = findStored(jid, msgId);
+            if (!found) return res.status(404).json({ ok: false, error: 'message not in recent store' });
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            if (typeof sock.star !== 'function') return res.status(501).json({ ok: false, error: 'starring is not supported by this bot version' });
+            await sock.star(found.msg.key.remoteJid, [{ id: found.msg.key.id, fromMe: !!found.msg.key.fromMe }], star);
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
     // Edit (WhatsApp: own text messages within 15 minutes).
     app.post('/api/edit', requireAuth, jsonParser, async (req, res) => {
         try {
