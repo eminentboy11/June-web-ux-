@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>June-X · Web Chat</title>
+<style>
+  :root{
+    --bg:#03060c; --panel:rgba(10,20,28,.88); --cyan:#00ffe0; --orange:#ff6b35;
+    --text:#e2f0ff; --muted:#7f9eb5; --border:rgba(0,255,224,.18); --red:#e94560;
+    --me:rgba(0,255,224,.14); --them:rgba(255,255,255,.06);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  [hidden]{display:none!important}
+  body{background:radial-gradient(circle at 20% 30%,#0a0f1e,var(--bg));color:var(--text);
+    font-family:'Inter',-apple-system,'Segoe UI',system-ui,sans-serif;
+    height:100vh;height:100dvh;overflow:hidden}
+  #app{display:flex;height:100vh;height:100dvh}
+  #sidebar{width:320px;min-width:320px;border-right:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column}
+  .side-head{padding:14px 16px;border-bottom:1px solid var(--border)}
+  .brand{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:1.1rem;
+    background:linear-gradient(135deg,var(--cyan),var(--orange));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand small{display:block;font-size:.58rem;letter-spacing:2px;color:var(--muted);margin-top:2px;-webkit-text-fill-color:var(--muted)}
+  .conn{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:.72rem;color:var(--muted)}
+  .conn .dot{width:8px;height:8px;border-radius:50%;background:var(--red);flex:none}
+  .side-tools{display:flex;gap:6px;margin-top:10px}
+  .side-tools input{flex:1;min-width:0}
+  input{background:rgba(0,0,0,.35);border:1px solid rgba(0,255,224,.25);color:var(--text);
+    padding:.5rem .7rem;font-size:.82rem;outline:none;border-radius:2px}
+  input:focus{border-color:var(--cyan)}
+  input::placeholder{color:#5a7c8c}
+  button{background:rgba(0,255,224,.1);color:var(--cyan);border:1px solid rgba(0,255,224,.4);
+    padding:.5rem .8rem;font-size:.75rem;cursor:pointer;border-radius:2px;letter-spacing:1px}
+  button:hover{background:rgba(0,255,224,.22)}
+  button:disabled{opacity:.4;cursor:default}
+  #search-wrap{padding:10px 12px;border-bottom:1px solid var(--border)}
+  #chat-list{flex:1;overflow-y:auto}
+  .chat-item{padding:11px 14px;border-bottom:1px solid rgba(0,255,224,.07);cursor:pointer;display:flex;align-items:center;gap:10px}
+  .chat-item:hover{background:rgba(0,255,224,.05)}
+  .chat-item.active{background:rgba(0,255,224,.1);border-left:2px solid var(--cyan)}
+  .chat-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .chat-item .row1{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .chat-item .name{font-size:.86rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chat-item .time{font-size:.62rem;color:var(--muted);flex:none;font-family:'JetBrains Mono',monospace}
+  .chat-item .preview{font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .search-head{padding:10px 14px;font-size:.6rem;letter-spacing:2px;color:var(--muted);border-bottom:1px solid var(--border);text-transform:uppercase}
+  .empty{padding:18px 14px;font-size:.75rem;color:var(--muted);text-align:center}
+  .avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;flex:none;border:1px solid var(--border);display:block;background:rgba(0,255,224,.08)}
+  .avatar-fallback{display:flex;align-items:center;justify-content:center;color:var(--cyan);
+    font-weight:600;font-size:.85rem;font-family:'JetBrains Mono',monospace}
+  .avatar.sm{width:34px;height:34px}
+  #main{flex:1;display:flex;flex-direction:column;min-width:0}
+  #chat-head{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:2px;background:var(--panel)}
+  .head-row{display:flex;align-items:center;gap:10px;min-width:0}
+  #back-btn{display:none;background:none;border:none;color:var(--cyan);font-size:1.3rem;line-height:1;cursor:pointer;padding:0;letter-spacing:0}
+  .head-names{display:flex;flex-direction:column;min-width:0;flex:1}
+  #chat-title{font-weight:600;font-size:.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #chat-presence{font-size:.7rem;color:var(--muted);min-height:.9rem}
+  #chat-presence.typing{color:var(--orange)}
+  #chat-presence.online{color:var(--cyan)}
+  #chat-sub{font-size:.66rem;color:var(--muted);font-family:'JetBrains Mono',monospace;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .notice{padding:10px 18px;background:rgba(255,107,53,.12);border-bottom:1px solid rgba(255,107,53,.4);
+    color:#ffb703;font-size:.78rem}
+  #messages{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:8px}
+  .date-sep{align-self:center;background:rgba(0,255,224,.08);border:1px solid var(--border);color:var(--muted);
+    font-size:.62rem;letter-spacing:1px;padding:4px 12px;border-radius:20px;font-family:'JetBrains Mono',monospace;margin:6px 0}
+  .msg-row{display:flex}
+  .msg-row.me{justify-content:flex-end}
+  .msg-row.cont{margin-top:-5px}
+  .bubble{max-width:72%;padding:8px 12px;border-radius:10px;font-size:.86rem;line-height:1.4;word-break:break-word;white-space:pre-wrap}
+  .msg-row.me .bubble{background:var(--me);border:1px solid rgba(0,255,224,.25);border-bottom-right-radius:3px}
+  .msg-row.them .bubble{background:var(--them);border:1px solid rgba(255,255,255,.08);border-bottom-left-radius:3px}
+  .msg-row.me.cont .bubble{border-top-right-radius:3px}
+  .msg-row.them.cont .bubble{border-top-left-radius:3px}
+  .bubble .sender{font-size:.66rem;color:var(--orange);margin-bottom:2px;font-weight:600}
+  .bubble .ts{font-size:.6rem;color:var(--muted);margin-top:4px;text-align:right;font-family:'JetBrains Mono',monospace}
+  .media{margin-bottom:4px}
+  .media-img{max-width:260px;max-height:300px;border-radius:8px;display:block;cursor:pointer;border:1px solid var(--border)}
+  .media-video{max-width:300px;border-radius:8px;display:block;border:1px solid var(--border)}
+  .media-audio{max-width:280px;display:block}
+  .doc-card{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.3);border:1px solid var(--border);
+    border-radius:8px;padding:10px 12px;text-decoration:none;color:var(--text);max-width:280px}
+  .doc-card:hover{border-color:var(--cyan)}
+  .doc-ic{font-size:1.3rem}
+  .doc-col{display:flex;flex-direction:column;min-width:0}
+  .doc-name{font-size:.8rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .doc-sub{font-size:.64rem;color:var(--muted)}
+  #send-form{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--border);background:var(--panel);align-items:center}
+  #send-text{flex:1}
+  #attach-btn{padding:.5rem .7rem}
+  #logout{font-size:.62rem;padding:.3rem .6rem;margin-top:10px;align-self:flex-start}
+  #logged-out{position:fixed;inset:0;z-index:100;background:rgba(3,6,12,.97);display:flex;align-items:center;justify-content:center;padding:2rem}
+  .lo-card{max-width:420px;width:100%;text-align:center;background:var(--panel);border:1px solid rgba(233,69,96,.5);
+    box-shadow:0 0 30px rgba(233,69,96,.3);padding:2.5rem 2rem;display:flex;flex-direction:column;gap:1rem;align-items:center}
+  .lo-title{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:2rem;color:var(--red);letter-spacing:2px}
+  .lo-sub{font-size:.85rem;color:var(--muted);line-height:1.5}
+
+  /* ── mobile: one pane at a time (like WhatsApp mobile) ─────────────────── */
+  @media (max-width:720px){
+    #sidebar{width:100%;min-width:100%;border-right:none}
+    #main{display:none}
+    #app.chat-open #sidebar{display:none}
+    #app.chat-open #main{display:flex}
+    #back-btn{display:block}
+    input{font-size:16px} /* prevent iOS zoom-on-focus */
+    .bubble{max-width:85%}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="side-head">
+      <div class="brand">June-X<small>WEB CHAT · OWNER ONLY</small></div>
+      <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connecting…</span></div>
+      <div class="side-tools">
+        <input id="new-chat-input" placeholder="new chat: 234…" maxlength="20">
+        <button id="new-chat-btn" title="open chat">➤</button>
+      </div>
+      <button id="logout">logout</button>
+    </div>
+    <div id="search-wrap"><input id="search" placeholder="search messages…" style="width:100%"></div>
+    <div id="chat-list"><div class="empty">loading…</div></div>
+  </aside>
+  <main id="main">
+    <div id="chat-head">
+      <div class="head-row">
+        <button id="back-btn" title="back to chats">←</button>
+        <span class="avatar" id="head-avatar"></span>
+        <div class="head-names">
+          <span id="chat-title">select a chat</span>
+          <span id="chat-presence"></span>
+        </div>
+      </div>
+      <span id="chat-sub">recent chats appear here as the bot sees messages</span>
+    </div>
+    <div id="notice" class="notice" hidden></div>
+    <div id="messages"></div>
+    <form id="send-form">
+      <button id="attach-btn" type="button" title="attach image / video / document" disabled>📎</button>
+      <input id="attach-input" type="file" hidden>
+      <input id="send-text" placeholder="type a message…" autocomplete="off" maxlength="4000" disabled>
+      <button id="send-btn" type="submit" disabled>➤</button>
+    </form>
+  </main>
+</div>
+<div id="logged-out" hidden>
+  <div class="lo-card">
+    <div class="lo-title">LOGGED OUT</div>
+    <div class="lo-sub">inject a new session (SESSION_ID) or pair manually in the terminal, then restart the bot</div>
+    <button id="lo-reload">reload page</button>
+  </div>
+</div>
+<script>
+'use strict';
+const state = { chats: [], currentJid: null, currentName: '', currentIsGroup: false, filter: '', connected: false };
+
+const $ = (id) => document.getElementById(id);
+
+let noticeShown = false;
+function showNotice(text) {
+  if (noticeShown) return;
+  noticeShown = true;
+  const n = $('notice');
+  n.textContent = text;
+  n.hidden = false;
+}
+
+async function api(path, opts = {}) {
+  let r;
+  try {
+    r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  } catch (e) {
+    showNotice('⚠️ can\'t reach the bot server — if you opened this HTML file directly, open the page from your bot instead (…/chat)');
+    throw e;
+  }
+  if (r.status === 401) { window.location = '/login'; throw new Error('unauthorized'); }
+  return r.json();
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const yest = new Date(now); yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === now.toDateString()) return 'TODAY';
+  if (d.toDateString() === yest.toDateString()) return 'YESTERDAY';
+  const opts = { weekday: 'short', day: 'numeric', month: 'short' };
+  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return d.toLocaleDateString([], opts).toUpperCase();
+}
+
+// Avatar with an initial-letter fallback when there is no profile picture.
+function setAvatar(container, jid, name) {
+  container.textContent = '';
+  const img = el('img', 'avatar');
+  img.alt = '';
+  img.src = '/api/avatar?jid=' + encodeURIComponent(jid);
+  const fallback = el('span', 'avatar avatar-fallback', (name || '?').trim().charAt(0).toUpperCase() || '?');
+  img.onload = () => fallback.remove();
+  img.onerror = () => img.remove();
+  container.appendChild(img);
+  container.appendChild(fallback);
+}
+
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    state.connected = s.botState === 'connected';
+    const loggedOut = s.loggedOut === true || s.botState === 'logged_out';
+    $('logged-out').hidden = !loggedOut;
+    $('conn-dot').style.background = loggedOut ? 'var(--red)' : (state.connected ? 'var(--cyan)' : (s.botState === 'connecting' ? '#ffb703' : 'var(--red)'));
+    $('conn-text').textContent = loggedOut ? 'logged out' : (state.connected ? 'online as +' + (s.number || '…') : String(s.botState));
+    const canSend = state.connected && !!state.currentJid;
+    $('send-text').disabled = !canSend;
+    $('send-btn').disabled = !canSend;
+    $('attach-btn').disabled = !canSend;
+  } catch (_) {}
+}
+
+async function loadChats() {
+  try {
+    const r = await api('/api/chats?limit=100');
+    state.chats = r.chats || [];
+    if (!state.filter.trim()) renderChats();
+  } catch (_) {}
+}
+
+function renderChats() {
+  const list = $('chat-list');
+  list.textContent = '';
+  if (!state.chats.length) { list.appendChild(el('div', 'empty', 'no chats yet — they appear here once the bot sees messages')); return; }
+  for (const c of state.chats) {
+    const item = el('div', 'chat-item' + (c.jid === state.currentJid ? ' active' : ''));
+    const av = el('span', 'avatar');
+    setAvatar(av, c.jid, c.name || c.number);
+    const col = el('div', 'chat-col');
+    const row1 = el('div', 'row1');
+    row1.appendChild(el('span', 'name', c.isGroup ? '👥 ' + c.name : c.name));
+    row1.appendChild(el('span', 'time', fmtTime(c.lastTs)));
+    col.appendChild(row1);
+    col.appendChild(el('div', 'preview', c.preview));
+    item.appendChild(av);
+    item.appendChild(col);
+    item.addEventListener('click', () => openChat(c.jid, c.name, c.isGroup));
+    list.appendChild(item);
+  }
+}
+
+function openChat(jid, name, isGroup) {
+  state.currentJid = jid;
+  state.currentName = name || jid.split('@')[0];
+  state.currentIsGroup = !!isGroup;
+  $('app').classList.add('chat-open');
+  $('chat-title').textContent = state.currentName;
+  $('chat-sub').textContent = jid;
+  setAvatar($('head-avatar'), jid, state.currentName);
+  $('chat-presence').textContent = '';
+  $('chat-presence').className = '';
+  $('messages').textContent = '';
+  const canSend = state.connected;
+  $('send-text').disabled = !canSend;
+  $('send-btn').disabled = !canSend;
+  $('attach-btn').disabled = !canSend;
+  loadMessages();
+  $('send-text').focus();
+}
+
+function closeChat() {
+  stopTyping();
+  $('app').classList.remove('chat-open');
+  state.currentJid = null;
+  $('messages').textContent = '';
+  $('chat-title').textContent = 'select a chat';
+  $('chat-sub').textContent = 'recent chats appear here as the bot sees messages';
+  $('chat-presence').textContent = '';
+  $('head-avatar').textContent = '';
+  $('send-text').disabled = true;
+  $('send-btn').disabled = true;
+  $('attach-btn').disabled = true;
+}
+
+/* ── typing indicators ─────────────────────────────────────────────────── */
+let typingState = false;
+let lastTypingSent = 0;
+function sendTyping(composing) {
+  if (!state.currentJid || !state.connected) return;
+  const now = Date.now();
+  if (composing && typingState && now - lastTypingSent < 2000) return; // throttle
+  typingState = composing;
+  lastTypingSent = now;
+  api('/api/typing', { method: 'POST', body: JSON.stringify({ jid: state.currentJid, composing }) }).catch(() => {});
+}
+function stopTyping() {
+  if (!typingState) return;
+  typingState = false;
+  if (!state.currentJid) return;
+  api('/api/typing', { method: 'POST', body: JSON.stringify({ jid: state.currentJid, composing: false }) }).catch(() => {});
+}
+
+/* ── messages ──────────────────────────────────────────────────────────── */
+function mediaSrc(m) {
+  return '/api/media?jid=' + encodeURIComponent(state.currentJid) + '&id=' + encodeURIComponent(m.id);
+}
+
+async function loadMessages() {
+  if (!state.currentJid) return;
+  try {
+    const r = await api('/api/messages?jid=' + encodeURIComponent(state.currentJid) + '&limit=200');
+    const box = $('messages');
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    box.textContent = '';
+    if (!r.messages.length) {
+      box.appendChild(el('div', 'empty', 'no recent messages — the store keeps the latest per chat'));
+    }
+    // Typing indicator in the header.
+    const pc = $('chat-presence');
+    if (r.presence === 'composing') { pc.textContent = 'typing…'; pc.className = 'typing'; }
+    else if (r.presence === 'available') { pc.textContent = 'online'; pc.className = 'online'; }
+    else { pc.textContent = ''; pc.className = ''; }
+
+    let prev = null;
+    let lastDay = null;
+    for (const m of r.messages) {
+      // Date separator pill (WhatsApp-style).
+      const day = m.ts ? new Date(m.ts).toDateString() : null;
+      if (day && day !== lastDay) {
+        box.appendChild(el('div', 'date-sep', dayLabel(m.ts)));
+        lastDay = day;
+      }
+      // Group consecutive messages from the same sender.
+      const cont = !!prev && prev.sender === m.sender && prev.fromMe === m.fromMe &&
+        !prev.media && !m.media && (!m.ts || !prev.ts || m.ts - prev.ts < 10 * 60 * 1000);
+      const row = el('div', 'msg-row ' + (m.fromMe ? 'me' : 'them') + (cont ? ' cont' : ''));
+      const bubble = el('div', 'bubble');
+      if (!m.fromMe && state.currentIsGroup && m.sender && !cont) {
+        bubble.appendChild(el('div', 'sender', m.pushName || m.sender.split('@')[0]));
+      }
+      if (m.media) {
+        const mediaBox = el('div', 'media');
+        const src = mediaSrc(m);
+        if (m.media.kind === 'image' || m.media.kind === 'sticker') {
+          const img = el('img', 'media-img');
+          img.src = src;
+          img.alt = m.media.fileName || 'image';
+          img.addEventListener('click', () => window.open(src, '_blank'));
+          mediaBox.appendChild(img);
+        } else if (m.media.kind === 'video') {
+          const v = el('video', 'media-video');
+          v.controls = true;
+          v.src = src;
+          mediaBox.appendChild(v);
+        } else if (m.media.kind === 'audio') {
+          const a = el('audio', 'media-audio');
+          a.controls = true;
+          a.src = src;
+          mediaBox.appendChild(a);
+        } else {
+          const card = el('a', 'doc-card');
+          card.href = src;
+          card.target = '_blank';
+          card.appendChild(el('span', 'doc-ic', '📄'));
+          const col = el('span', 'doc-col');
+          col.appendChild(el('span', 'doc-name', m.media.fileName || 'document'));
+          col.appendChild(el('span', 'doc-sub', (m.media.mime || 'file') + ' · tap to download'));
+          card.appendChild(col);
+          mediaBox.appendChild(card);
+        }
+        bubble.appendChild(mediaBox);
+        if (m.text) bubble.appendChild(el('div', 'text', m.text));
+      } else {
+        bubble.appendChild(el('div', 'text', m.text));
+      }
+      bubble.appendChild(el('div', 'ts', fmtTime(m.ts)));
+      row.appendChild(bubble);
+      box.appendChild(row);
+      prev = m;
+    }
+    if (nearBottom) box.scrollTop = box.scrollHeight;
+  } catch (_) {}
+}
+
+/* ── server-side message search ────────────────────────────────────────── */
+let searchTimer = null;
+$('search').addEventListener('input', (e) => {
+  state.filter = e.target.value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    const q = state.filter.trim();
+    if (q) runSearch(q); else renderChats();
+  }, 350);
+});
+
+async function runSearch(q) {
+  try {
+    const r = await api('/api/search?q=' + encodeURIComponent(q) + '&limit=50');
+    renderSearchResults(q, r.results || []);
+  } catch (_) {}
+}
+
+function renderSearchResults(q, results) {
+  const list = $('chat-list');
+  list.textContent = '';
+  list.appendChild(el('div', 'search-head', 'messages · ' + results.length + ' result' + (results.length === 1 ? '' : 's')));
+  if (!results.length) {
+    list.appendChild(el('div', 'empty', 'no messages match "' + q + '"'));
+    return;
+  }
+  for (const r of results) {
+    const item = el('div', 'chat-item');
+    const col = el('div', 'chat-col');
+    const row1 = el('div', 'row1');
+    row1.appendChild(el('span', 'name', (r.isGroup ? '👥 ' : '') + r.chatName));
+    row1.appendChild(el('span', 'time', fmtTime(r.ts)));
+    col.appendChild(row1);
+    col.appendChild(el('div', 'preview', (r.fromMe ? 'you: ' : '') + r.text));
+    item.appendChild(col);
+    item.addEventListener('click', () => {
+      $('search').value = '';
+      state.filter = '';
+      openChat(r.chatJid, r.chatName, r.isGroup);
+    });
+    list.appendChild(item);
+  }
+}
+
+/* ── new chat / navigation / logout ────────────────────────────────────── */
+function openNewChat() {
+  const raw = $('new-chat-input').value.replace(/\D/g, '');
+  if (raw.length < 5) return;
+  $('new-chat-input').value = '';
+  openChat(raw + '@s.whatsapp.net', raw, false);
+}
+$('new-chat-btn').addEventListener('click', openNewChat);
+$('new-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); openNewChat(); } });
+$('back-btn').addEventListener('click', closeChat);
+
+$('logout').addEventListener('click', async () => {
+  try { await api('/api/logout', { method: 'POST' }); } catch (_) {}
+  window.location = '/login';
+});
+$('lo-reload').addEventListener('click', () => window.location.reload());
+
+/* ── sending: text + attachments ───────────────────────────────────────── */
+$('send-text').addEventListener('input', () => sendTyping(true));
+$('send-text').addEventListener('blur', stopTyping);
+window.addEventListener('blur', stopTyping);
+
+$('send-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $('send-text').value.trim();
+  if (!text || !state.currentJid) return;
+  $('send-text').value = '';
+  stopTyping();
+  try {
+    await api('/api/send', { method: 'POST', body: JSON.stringify({ jid: state.currentJid, text }) });
+    loadMessages();
+  } catch (err) {
+    alert(err.message || 'send failed');
+  }
+});
+
+$('attach-btn').addEventListener('click', () => {
+  if (state.currentJid && state.connected) $('attach-input').click();
+});
+$('attach-input').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file || !state.currentJid) return;
+  if (file.size > 15 * 1024 * 1024) { alert('file too large (max 15MB)'); return; }
+  let base64;
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    base64 = String(dataUrl).split(',')[1];
+  } catch (_) {
+    alert('could not read the file');
+    return;
+  }
+  $('send-btn').disabled = true;
+  $('attach-btn').disabled = true;
+  try {
+    await api('/api/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        jid: state.currentJid,
+        media: { mime: file.type || 'application/octet-stream', fileName: file.name, data: base64 },
+      }),
+    });
+    loadMessages();
+  } catch (err) {
+    alert(err.message || 'upload failed');
+  } finally {
+    const canSend = state.connected && !!state.currentJid;
+    $('send-btn').disabled = !canSend;
+    $('attach-btn').disabled = !canSend;
+  }
+});
+
+setInterval(() => { if (!document.hidden) { loadStatus(); loadChats(); } }, 5000);
+setInterval(() => { if (!document.hidden) loadMessages(); }, 2500);
+
+loadStatus();
+loadChats();
+</script>
+</body>
+</html>

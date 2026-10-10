@@ -994,11 +994,17 @@ function checkEnvStatus() {
 // ─── In-memory Message Store ──────────────────────────────────────────────────
 
 // ─── In-Memory Message Store (LRU-bounded) ───────────────────────────────────
-// Per-chat capped at 20, total chats capped (JUNE_MAX_STORED_CHATS, default 300).
-// An unbounded chat list made this Map grow for the process's whole life,
-// which is what pushed the Heroku dyno into R14 (memory quota).
+// Per-chat capped (JUNE_MAX_STORED_MSGS_PER_CHAT, default 100 — the web chat UI
+// at /chat renders this history), total chats capped (JUNE_MAX_STORED_CHATS,
+// default 300). An unbounded chat list made this Map grow for the process's
+// whole life, which is what pushed the Heroku dyno into R14 (memory quota).
 const STORE_MAX_CHATS = Math.max(50, parseInt(process.env.JUNE_MAX_STORED_CHATS, 10) || 300)
-const store = createMessageStore({ maxPerChat: 20, maxChats: STORE_MAX_CHATS })
+const STORE_MAX_MSGS_PER_CHAT = Math.max(20, parseInt(process.env.JUNE_MAX_STORED_MSGS_PER_CHAT, 10) || 100)
+const store = createMessageStore({ maxPerChat: STORE_MAX_MSGS_PER_CHAT, maxChats: STORE_MAX_CHATS })
+
+// Handle to the web chat UI (utils/webChat.js) — set when the keep-alive
+// server boots; fed with messages + presence for search/typing indicators.
+let webChatHandle = null
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
@@ -1272,6 +1278,13 @@ async function startJunexBot() {
     })
 
     store.bind(sock.ev)
+    // Web chat UI: index every message (in + out) for search, and keep the
+    // phonebook (number → WhatsApp name) fresh.
+    sock.ev.on('messages.upsert', ({ messages }) => {
+        for (const m of messages || []) {
+            try { webChatHandle?.logMessage?.(m) } catch (_) {}
+        }
+    })
     sock.botStore = store
     global.currentSock = sock
 
@@ -1323,6 +1336,7 @@ async function startJunexBot() {
             }
 
             if (loggedOut) {
+                global.juneLoggedOut = true
                 log(chalk.white.bgRedBright(`💥 Disconnected [${statusCode}] — logged out. Clearing session...`), 'white')
                 // Remember only a hash so an expired SESSION_ID can't cause an endless relogin loop.
                 const configuredSessionId = process.env.SESSION_ID?.trim()
@@ -1482,6 +1496,7 @@ async function startJunexBot() {
             global._lastConflictLogTime = 0
             
             global.botState = 'connected'
+            global.juneLoggedOut = false
             global.connectedAt = Date.now()
             // From here on this store's auth is trusted for the Session Server fast path.
             try {
@@ -1901,6 +1916,7 @@ if (groupInvites.length > 0) {
     if (!global.presenceStore) global.presenceStore = {}
 
     sock.ev.on('presence.update', ({ id, presences }) => {
+        try { webChatHandle?.handlePresenceUpdate?.(id, presences) } catch (_) {}
         try {
             for (const [jid, data] of Object.entries(presences)) {
                 global.presenceStore[jid] = {
@@ -2369,8 +2385,12 @@ function startKeepAliveServer() {
         const platform = detectPlatform();
         const connected = global.botState === 'connected';
         const botNum = global.currentSock?.user?.id?.split(':')[0];
-        const statusLabel = connected ? 'OPERATIONAL • ACTIVE' : (global.botState === 'connecting' ? 'CONNECTING' : 'OFFLINE');
+        const loggedOut = global.juneLoggedOut === true;
+        const statusLabel = loggedOut ? 'LOGGED OUT' : (connected ? 'OPERATIONAL • ACTIVE' : (global.botState === 'connecting' ? 'CONNECTING' : 'OFFLINE'));
         const statusColor = connected ? '#00ffe0' : (global.botState === 'connecting' ? '#ffb703' : '#e94560');
+        const loggedOutBanner = loggedOut
+            ? '<div class="card" style="border-color:rgba(233,69,96,.65);box-shadow:0 0 24px rgba(233,69,96,.35)"><div class="card-title">⚠️ SESSION ENDED</div><div class="card-value small" style="color:#e94560">LOGGED OUT</div><div class="card-sub">inject a new session (SESSION_ID) or pair manually in the terminal, then restart the bot</div></div>'
+            : ';';
 
         res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -2501,6 +2521,7 @@ function startKeepAliveServer() {
 </head>
 <body>
 <div class="wrapper">
+  ${loggedOutBanner}
   <div class="header">
     <div class="bot-name">June-X Ultra</div>
     <div class="tagline">Autonomous Bot Matrix</div>
@@ -2597,6 +2618,18 @@ function startKeepAliveServer() {
             res.status(503).json({ ok: false, error: error.message });
         }
     });
+
+    // ── Web Chat UI: owner can read/send WhatsApp messages from a browser ──
+    try {
+        webChatHandle = require('./utils/webChat').attachChatUI(app, {
+            getSock: () => global.currentSock || null,
+            getBotState: () => global.botState || 'unknown',
+            store,
+            log,
+        });
+    } catch (e) {
+        log('[ WEB ] Chat UI unavailable:', e.message, 'red');
+    }
 
     const server = http.createServer(app);
 
