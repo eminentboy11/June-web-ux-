@@ -585,7 +585,9 @@ function attachChatUI(app, deps) {
     // Saved contact names from the address book. LID entries are stored under their phone number.
     function handleContacts(list) {
         try {
-            for (const c of (Array.isArray(list) ? list : [])) {
+            const items = Array.isArray(list) ? list : [];
+            console.log(`[webchat] contacts event: ${items.length} contacts, ${items.filter((c) => c?.name).length} with saved names`);
+            for (const c of items) {
                 const name = c?.name;
                 if (!name) continue;
                 // A contact can arrive under its LID, its phone number, or both. Save the name
@@ -606,6 +608,7 @@ function attachChatUI(app, deps) {
     function handleHistorySync(payload) {
         try {
             const { chats = [], contacts = [], messages = [] } = payload || {};
+            console.log(`[webchat] history sync: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} messages`);
             handleContacts(contacts);
             for (const c of (Array.isArray(chats) ? chats : [])) {
                 if (!c?.id || !c.name) continue;
@@ -1293,7 +1296,9 @@ function attachChatUI(app, deps) {
         const rows = chatStore.listCalls(100).map((c) => {
             let name = '';
             try { name = chatDisplayName(c.jid, null) || ''; } catch (_) {}
-            return { ...c, name: name || c.jid.split('@')[0], number: c.jid.split('@')[0] };
+            // A call still "ringing" after 3 minutes never got a final event from WhatsApp.
+            const outcome = c.outcome === 'ringing' && Date.now() - c.ts > 3 * 60 * 1000 ? 'ended' : c.outcome;
+            return { ...c, outcome, name: name || c.jid.split('@')[0], number: c.jid.split('@')[0] };
         });
         res.json({ ok: true, calls: rows });
     });
@@ -1725,11 +1730,14 @@ function attachChatUI(app, deps) {
             const video = !!call.isVideo;
             const ts = (Number(call.date) || Math.floor(Date.now() / 1000)) * 1000;
             const callChat = canonicalChat(chatId);
+            // Incoming rejects are calls the caller ended before you answered: WhatsApp shows them as missed.
             const finalOutcome = {
                 accept: 'answered',
                 timeout: outgoing ? 'no answer' : 'missed',
-                reject: outgoing ? 'rejected' : 'declined',
+                reject: outgoing ? 'rejected' : 'missed',
             }[call.status];
+            // Counts only (no numbers) so the logs show whether call events reach the bot.
+            console.log(`[webchat] call event: status=${call.status} ${dir} video=${video}`);
             if (finalOutcome) chatStore.recordCall(call.id, callChat, dir, finalOutcome, video, ts, true);
             else if (call.status === 'offer' || call.status === 'ringing') chatStore.recordCall(call.id, callChat, dir, 'ringing', video, ts, false);
             else if (call.status === 'terminate') chatStore.recordCall(call.id, callChat, dir, 'ended', video, ts, false);
