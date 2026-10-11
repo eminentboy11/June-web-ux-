@@ -1486,3 +1486,14 @@ test('pinned chats are flagged and listed first', async (t) => {
     assert.equal(j.chats[0].pinned, true);
     assert.equal(j.chats[1].pinned, false);
 });
+
+test('newest stored message is found without the memory store', async (t) => {
+    const ctx = await startTestServer();
+    t.after(() => ctx.cleanup());
+    const now = Math.floor(Date.now() / 1000);
+    ctx.handle.logMessage(makeMsg({ id: 'LK1', jid: DM, text: 'older', ts: now - 60 }));
+    ctx.handle.logMessage(makeMsg({ id: 'LK2', jid: DM, text: 'newest', ts: now }));
+    const lk = ctx.chatStore.latestKey(DM);
+    assert.equal(lk.id, 'LK2');
+    assert.equal(ctx.chatStore.latestKey('2340000000000@s.whatsapp.net'), null);
+});

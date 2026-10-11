@@ -529,7 +529,9 @@ function renderChats() {
     const row = el('div', 'archive-row');
     row.appendChild(el('span', 'archive-ico', '🗄'));
     row.appendChild(el('span', 'archive-label', 'Archived'));
-    row.appendChild(el('span', 'archive-count', String(archived.length)));
+    // Total unread messages across archived chats (what WhatsApp shows in the Archived row).
+    const unread = archived.reduce((n, c) => n + (c.unread || 0), 0);
+    if (unread > 0) row.appendChild(el('span', 'archive-count', String(unread)));
     row.addEventListener('click', () => { state.showArchived = true; renderChats(); });
     list.appendChild(row);
   }

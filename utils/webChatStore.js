@@ -487,6 +487,16 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         } catch (_) { return false; }
     }
 
+    // Newest stored message of a chat (works after a restart, unlike the memory store).
+    function latestKey(chatJid) {
+        try {
+            const r = db.prepare(
+                'SELECT msg_id, from_me, ts, sender FROM webchat_messages WHERE chat_jid = ? AND deleted = 0 ORDER BY ts DESC LIMIT 1'
+            ).get(String(chatJid));
+            return r ? { id: r.msg_id, fromMe: r.from_me === 1, ts: r.ts, sender: r.sender || null } : null;
+        } catch (_) { return null; }
+    }
+
     function setRead(chatJid, ts) {
         try {
             setReadStmt.run(chatJid, ts);
@@ -551,6 +561,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         isArchived,
         setFlag,
         getFlag,
+        latestKey,
         flush,
         close,
     };

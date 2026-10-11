@@ -1278,6 +1278,16 @@ function attachChatUI(app, deps) {
         }
     });
 
+    // Builds the lastMessages entry chatModify needs, or null when a field is missing.
+    function lastMessageForSync(chatJid, id, fromMe, participant, tsMs) {
+        if (!chatJid || !id || typeof fromMe !== 'boolean' || !tsMs || !Number.isFinite(Number(tsMs))) return null;
+        const isGroup = String(chatJid).endsWith('@g.us');
+        if (isGroup && !fromMe && !participant) return null;
+        const key = { remoteJid: String(chatJid), id: String(id), fromMe };
+        if (participant) key.participant = String(participant);
+        return [{ key, messageTimestamp: Math.floor(Number(tsMs) / 1000) }];
+    }
+
     // Swipe actions on a chat row. Each one is synced to the phone with chatModify.
     app.post('/api/chat/action', requireAuth, jsonParser, async (req, res) => {
         try {
@@ -1285,10 +1295,6 @@ function attachChatUI(app, deps) {
             if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
             const ACTIONS = ['archive', 'unarchive', 'pin', 'unpin', 'markRead', 'markUnread'];
             if (!ACTIONS.includes(action)) return res.status(400).json({ ok: false, error: 'unknown action' });
-            // Archiving from the web logged the linked device out, so it is paused. Unarchive still works.
-            if (action === 'archive') {
-                return res.status(501).json({ ok: false, error: 'Archiving from the web is paused while a logout issue is investigated. Unarchive still works.' });
-            }
             const sock = getSock();
             if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
             if (typeof sock.chatModify !== 'function') return res.status(501).json({ ok: false, error: 'chat actions are not supported by this bot version' });
@@ -1297,26 +1303,26 @@ function attachChatUI(app, deps) {
             // WhatsApp needs the newest message to sync archive and read state.
             let lastMessages = null;
             if (['archive', 'unarchive', 'markRead', 'markUnread'].includes(action)) {
+                // WhatsApp can log every linked device out if chatModify gets incomplete data
+                // (Baileys docs). So the last message must be complete, or the action is skipped.
                 for (const k of getJidMap().related(canon)) {
                     const msgs = store?.messages?.get(k);
                     if (!msgs || !msgs.size) continue;
                     const last = Array.from(msgs.values()).filter((m) => m?.key).pop();
-                    if (last) {
-                        lastMessages = [{ key: last.key, messageTimestamp: last.messageTimestamp }];
-                        break;
-                    }
+                    lastMessages = lastMessageForSync(k, last?.key?.id, last?.key?.fromMe, last?.key?.participant, msgTs(last));
+                    if (lastMessages) break;
                 }
-                // Archived chats are often not in memory any more; use the newest stored message instead.
+                // Archived chats are often not in memory any more; use the newest stored message.
                 if (!lastMessages) {
                     for (const k of getJidMap().related(canon)) {
                         const lk = chatStore.latestKey(k);
-                        if (lk) {
-                            lastMessages = [{ key: { remoteJid: k, id: lk.id, fromMe: lk.fromMe }, messageTimestamp: Math.floor(lk.ts / 1000) }];
-                            break;
-                        }
+                        if (!lk) continue;
+                        const participant = lk.sender && lk.sender !== k ? lk.sender : null;
+                        lastMessages = lastMessageForSync(k, lk.id, lk.fromMe, participant, lk.ts);
+                        if (lastMessages) break;
                     }
                 }
-                if (!lastMessages) return res.status(409).json({ ok: false, error: 'no recent message to sync this chat with' });
+                if (!lastMessages) return res.status(409).json({ ok: false, error: 'not enough stored message data to sync this chat safely, so nothing was changed' });
             }
 
             const modify = {
