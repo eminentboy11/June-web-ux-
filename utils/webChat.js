@@ -896,8 +896,17 @@ function attachChatUI(app, deps) {
                 unread: row.fromMe ? 0 : chatStore.countSince(jids, lastRead),
             });
         }
-        const chats = Array.from(merged.values()).map((c) => ({ ...c, archived: chatStore.isArchived(c.jid) }));
-        chats.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
+        const chats = Array.from(merged.values()).map((c) => {
+            const manual = chatStore.getFlag(c.jid, 'manual_unread');
+            return {
+                ...c,
+                archived: chatStore.isArchived(c.jid),
+                pinned: chatStore.getFlag(c.jid, 'pinned'),
+                manualUnread: manual,
+                unread: c.unread > 0 ? c.unread : (manual ? 1 : 0),
+            };
+        });
+        chats.sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || ((b.lastTs || 0) - (a.lastTs || 0)));
         refreshGroupNames(chats.slice(0, MAX_GROUP_NAME_FETCHES));
         res.json({ ok: true, chats: chats.slice(0, limit) });
     });
@@ -1269,6 +1278,54 @@ function attachChatUI(app, deps) {
         }
     });
 
+    // Swipe actions on a chat row. Each one is synced to the phone with chatModify.
+    app.post('/api/chat/action', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, action } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            const ACTIONS = ['archive', 'unarchive', 'pin', 'unpin', 'markRead', 'markUnread'];
+            if (!ACTIONS.includes(action)) return res.status(400).json({ ok: false, error: 'unknown action' });
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            if (typeof sock.chatModify !== 'function') return res.status(501).json({ ok: false, error: 'chat actions are not supported by this bot version' });
+
+            const canon = getJidMap().canonical(jid);
+            // WhatsApp needs the newest message to sync archive and read state.
+            let lastMessages = null;
+            if (['archive', 'unarchive', 'markRead', 'markUnread'].includes(action)) {
+                for (const k of getJidMap().related(canon)) {
+                    const msgs = store?.messages?.get(k);
+                    if (!msgs || !msgs.size) continue;
+                    const last = Array.from(msgs.values()).filter((m) => m?.key).pop();
+                    if (last) {
+                        lastMessages = [{ key: last.key, messageTimestamp: last.messageTimestamp }];
+                        break;
+                    }
+                }
+                if (!lastMessages) return res.status(409).json({ ok: false, error: 'no recent message to sync this chat with' });
+            }
+
+            const modify = {
+                archive: { archive: true, lastMessages },
+                unarchive: { archive: false, lastMessages },
+                pin: { pin: true },
+                unpin: { pin: false },
+                markRead: { markRead: true, lastMessages },
+                markUnread: { markRead: false, lastMessages },
+            }[action];
+            await sock.chatModify(modify, canon);
+
+            // Local state follows only after WhatsApp accepted the change.
+            if (action === 'archive' || action === 'unarchive') chatStore.setArchived(canon, action === 'archive');
+            if (action === 'pin' || action === 'unpin') chatStore.setFlag(canon, 'pinned', action === 'pin');
+            if (action === 'markRead') { chatStore.setRead(canon, Date.now()); chatStore.setFlag(canon, 'manual_unread', false); }
+            if (action === 'markUnread') chatStore.setFlag(canon, 'manual_unread', true);
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
     // Star / unstar. Synced to the phone's starred messages (Baileys chatModify).
     app.post('/api/star', requireAuth, jsonParser, async (req, res) => {
         try {
@@ -1601,7 +1658,9 @@ function attachChatUI(app, deps) {
             const items = Array.isArray(list) ? list : [];
             let flagged = 0, archived = 0;
             for (const c of items) {
-                if (!c?.id || typeof c.archived !== 'boolean') continue;
+                if (!c?.id) continue;
+                if ('pinned' in c) chatStore.setFlag(canonicalChat(c.id), 'pinned', !!c.pinned);
+                if (typeof c.archived !== 'boolean') continue;
                 flagged++;
                 if (c.archived) archived++;
                 chatStore.setArchived(canonicalChat(c.id), c.archived);

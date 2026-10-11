@@ -67,6 +67,11 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             chat_jid TEXT PRIMARY KEY,
             archived INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS webchat_flags (
+            chat_jid      TEXT PRIMARY KEY,
+            pinned        INTEGER NOT NULL DEFAULT 0,
+            manual_unread INTEGER NOT NULL DEFAULT 0
+        );
     `);
     // Reaction rows written by earlier builds show up as "❤️ Reaction" bubbles. Remove them.
     db.prepare('DELETE FROM webchat_messages WHERE text = ?').run('❤️ Reaction');
@@ -468,6 +473,20 @@ function createWebChatStore({ dbPath, phonebookPath }) {
 
     /* ── read state (unread badges) ────────────────────────────────────── */
 
+    // Pinned and manually-marked-unread flags, kept beside the archive flag.
+    function setFlag(chatJid, column, on) {
+        try {
+            db.prepare(`INSERT INTO webchat_flags (chat_jid, ${column}) VALUES (?, ?)
+                ON CONFLICT(chat_jid) DO UPDATE SET ${column} = excluded.${column}`)
+                .run(String(chatJid), on ? 1 : 0);
+        } catch (_) {}
+    }
+    function getFlag(chatJid, column) {
+        try {
+            return db.prepare(`SELECT ${column} AS v FROM webchat_flags WHERE chat_jid = ?`).get(String(chatJid))?.v === 1;
+        } catch (_) { return false; }
+    }
+
     function setRead(chatJid, ts) {
         try {
             setReadStmt.run(chatJid, ts);
@@ -530,6 +549,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         getRead,
         setArchived,
         isArchived,
+        setFlag,
+        getFlag,
         flush,
         close,
     };

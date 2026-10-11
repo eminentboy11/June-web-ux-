@@ -1466,3 +1466,23 @@ test('archived chats are flagged from chat events', async (t) => {
     assert.equal(dm.archived, true);
     assert.equal(pn.archived, false);
 });
+
+test('pinned chats are flagged and listed first', async (t) => {
+    const PN9 = '2349000000009@s.whatsapp.net';
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const now = Math.floor(Date.now() / 1000);
+    ctx.handle.logMessage(makeMsg({ id: 'PIN1', jid: DM, text: 'newer', ts: now }));
+    ctx.handle.logMessage(makeMsg({ id: 'PIN2', jid: PN9, text: 'older', ts: now - 500 }));
+    ctx.handle.handleChats([{ id: PN9, pinned: 1700000000 }]);
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const j = await (await fetch(`${base}/api/chats`, { headers: { cookie } })).json();
+    assert.equal(j.chats[0].jid, PN9);
+    assert.equal(j.chats[0].pinned, true);
+    assert.equal(j.chats[1].pinned, false);
+});
