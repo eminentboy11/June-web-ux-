@@ -1348,6 +1348,8 @@ async function startJunexBot() {
             ).toLowerCase()
             // A 401 with "conflict" is recoverable and must not erase the verified session.
             const isConflict401 = statusCode === 401 && disconnectMessage.includes('conflict')
+            // Full reason for every disconnect, so a logout can be traced to its cause.
+            console.log(`[disconnect] code=${statusCode} reason="${lastDisconnect?.error?.message || 'none'}" lastWebChatAction=${global.lastWebChatAction || 'none'} at=${new Date().toISOString()}`)
 
             // 403 means WhatsApp refused the account outright — almost always a ban.
             const isForbidden = statusCode === 403

@@ -1285,6 +1285,10 @@ function attachChatUI(app, deps) {
             if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
             const ACTIONS = ['archive', 'unarchive', 'pin', 'unpin', 'markRead', 'markUnread'];
             if (!ACTIONS.includes(action)) return res.status(400).json({ ok: false, error: 'unknown action' });
+            // Archiving from the web logged the linked device out, so it is paused. Unarchive still works.
+            if (action === 'archive') {
+                return res.status(501).json({ ok: false, error: 'Archiving from the web is paused while a logout issue is investigated. Unarchive still works.' });
+            }
             const sock = getSock();
             if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
             if (typeof sock.chatModify !== 'function') return res.status(501).json({ ok: false, error: 'chat actions are not supported by this bot version' });
@@ -1302,6 +1306,16 @@ function attachChatUI(app, deps) {
                         break;
                     }
                 }
+                // Archived chats are often not in memory any more; use the newest stored message instead.
+                if (!lastMessages) {
+                    for (const k of getJidMap().related(canon)) {
+                        const lk = chatStore.latestKey(k);
+                        if (lk) {
+                            lastMessages = [{ key: { remoteJid: k, id: lk.id, fromMe: lk.fromMe }, messageTimestamp: Math.floor(lk.ts / 1000) }];
+                            break;
+                        }
+                    }
+                }
                 if (!lastMessages) return res.status(409).json({ ok: false, error: 'no recent message to sync this chat with' });
             }
 
@@ -1313,7 +1327,15 @@ function attachChatUI(app, deps) {
                 markRead: { markRead: true, lastMessages },
                 markUnread: { markRead: false, lastMessages },
             }[action];
-            await sock.chatModify(modify, canon);
+            global.lastWebChatAction = `${action} @ ${new Date().toISOString()}`;
+            console.log(`[webchat] chat action ${action}: sending (${lastMessages ? 'with last message' : 'no last message'})`);
+            try {
+                await sock.chatModify(modify, canon);
+            } catch (err) {
+                console.log(`[webchat] chat action ${action} failed: ${err?.message || err}`);
+                throw err;
+            }
+            console.log(`[webchat] chat action ${action}: accepted by WhatsApp`);
 
             // Local state follows only after WhatsApp accepted the change.
             if (action === 'archive' || action === 'unarchive') chatStore.setArchived(canon, action === 'archive');
