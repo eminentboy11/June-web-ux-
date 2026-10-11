@@ -381,7 +381,7 @@
 <script>
 'use strict';
 const state = {
-  pending: [], loadingJid: null, tab: 'chats', showArchived: false, readOnly: false, updates: null,
+  pending: [], loadingJid: null, tab: 'chats', showArchived: false, swiping: false, chatsDirty: true, readOnly: false, updates: null,
   chats: [], currentJid: null, currentName: '', currentIsGroup: false, filter: '', connected: false,
   memory: [],          // latest page from the live store
   history: [],         // older pages loaded automatically (or by scrolling up / search)
@@ -500,8 +500,15 @@ function setComposerEnabled() {
 async function loadChats() {
   try {
     const r = await api('/api/chats?limit=100');
-    state.chats = r.chats || [];
-    if (!state.filter.trim()) renderChats();
+    const next = r.chats || [];
+    const changed = JSON.stringify(next) !== JSON.stringify(state.chats);
+    state.chats = next;
+    if (changed) state.chatsDirty = true;
+    if (!state.chatsDirty || state.filter.trim()) return;
+    // The 5-second refresh must not rebuild rows under a finger or hide a revealed row.
+    if (state.swiping || document.querySelector('.swipe-wrap.open-left, .swipe-wrap.open-right')) return;
+    state.chatsDirty = false;
+    renderChats();
   } catch (_) {}
 }
 
@@ -606,6 +613,7 @@ function attachChatSwipe(wrap, item) {
     x0 = t.clientX; y0 = t.clientY; dx = 0; locked = false;
     startOpen = wrap.classList.contains('open-left') ? -OPEN : wrap.classList.contains('open-right') ? OPEN : 0;
     item.style.transition = 'none';
+    state.swiping = true;
   }, { passive: true });
   item.addEventListener('touchmove', (ev) => {
     if (x0 == null) return;
@@ -620,7 +628,8 @@ function attachChatSwipe(wrap, item) {
     item.style.transform = `translateX(${pos}px)`;
   }, { passive: true });
   const end = () => {
-    if (x0 == null && !locked) return;
+    state.swiping = false;
+    if (x0 == null && !locked) { if (state.chatsDirty) renderChats(); return; }
     const pos = startOpen + dx;
     x0 = null; locked = false;
     item.style.transition = '';
@@ -630,6 +639,10 @@ function attachChatSwipe(wrap, item) {
     else if (pos >= SNAP) { wrap.classList.add('open-right'); item.style.transform = `translateX(${OPEN}px)`; }
     else item.style.transform = '';
     dx = 0;
+    if (state.chatsDirty && !document.querySelector('.swipe-wrap.open-left, .swipe-wrap.open-right')) {
+      state.chatsDirty = false;
+      renderChats();
+    }
   };
   item.addEventListener('touchend', end);
   item.addEventListener('touchcancel', end);
