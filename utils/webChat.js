@@ -896,7 +896,7 @@ function attachChatUI(app, deps) {
                 unread: row.fromMe ? 0 : chatStore.countSince(jids, lastRead),
             });
         }
-        const chats = Array.from(merged.values());
+        const chats = Array.from(merged.values()).map((c) => ({ ...c, archived: chatStore.isArchived(c.jid) }));
         chats.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
         refreshGroupNames(chats.slice(0, MAX_GROUP_NAME_FETCHES));
         res.json({ ok: true, chats: chats.slice(0, limit) });
@@ -1595,6 +1595,16 @@ function attachChatUI(app, deps) {
 
     // Calls from the `call` event. Only unanswered incoming calls are kept, as a
     // "Missed voice call" row in the chat they came from.
+    // chats.upsert / chats.update / chats.set — keep the archived flag per chat.
+    function handleChats(list) {
+        try {
+            for (const c of (Array.isArray(list) ? list : [])) {
+                if (!c?.id || typeof c.archived !== 'boolean') continue;
+                chatStore.setArchived(canonicalChat(c.id), c.archived);
+            }
+        } catch (_) {}
+    }
+
     function logCall(call) {
         try {
             if (!call || (call.status !== 'timeout' && call.status !== 'reject')) return;
@@ -1806,7 +1816,7 @@ function attachChatUI(app, deps) {
 
     /* ── read receipts, reactions, edits etc. stay below ─────────────── */
 
-    return { logMessage, logCall, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts, handleHistorySync };
+    return { logMessage, logCall, handleChats, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts, handleHistorySync };
 }
 
 module.exports = { attachChatUI };

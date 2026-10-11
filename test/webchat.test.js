@@ -1445,3 +1445,24 @@ test('unanswered incoming calls appear as missed-call rows; answered ones do not
     assert.equal(calls.length, 1);
     assert.equal(calls[0].text, '📞 Missed voice call');
 });
+
+test('archived chats are flagged from chat events', async (t) => {
+    const PN9 = '2349000000009@s.whatsapp.net';
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const now = Math.floor(Date.now() / 1000);
+    ctx.handle.logMessage(makeMsg({ id: 'AR1', jid: DM, text: 'old chat', ts: now }));
+    ctx.handle.logMessage(makeMsg({ id: 'AR2', jid: PN9, text: 'active chat', ts: now - 10 }));
+    ctx.handle.handleChats([{ id: DM, archived: true }, { id: PN9 }]); // no flag → untouched
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const j = await (await fetch(`${base}/api/chats`, { headers: { cookie } })).json();
+    const dm = j.chats.find((c) => c.jid === DM);
+    const pn = j.chats.find((c) => c.jid === PN9);
+    assert.equal(dm.archived, true);
+    assert.equal(pn.archived, false);
+});

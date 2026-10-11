@@ -46,6 +46,10 @@
   .search-head{padding:10px 14px;font-size:.6rem;letter-spacing:2px;color:var(--muted);border-bottom:1px solid var(--border);text-transform:uppercase}
   .e2e-notice{align-self:center;max-width:92%;margin:6px 0 10px;padding:8px 12px;border-radius:8px;background:rgba(255,214,102,.12);border:1px solid rgba(255,214,102,.25);color:var(--text,#e8f1f0);font-size:.7rem;line-height:1.35;text-align:center}
   .swipe-hint{position:absolute;left:4px;top:50%;transform:translateY(-50%);font-size:1rem;opacity:0;pointer-events:none}
+  .archive-row{display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;color:var(--cyan);font-size:.8rem;border-bottom:1px solid var(--border)}
+  .archive-row:hover{background:rgba(0,255,224,.05)}
+  .archive-label{flex:1}
+  .archive-count{color:var(--muted);font-size:.72rem}
   .empty{padding:18px 14px;font-size:.75rem;color:var(--muted);text-align:center}
   .avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;flex:none;border:1px solid var(--border);display:block;background:rgba(0,255,224,.08)}
   .avatar-fallback{display:flex;align-items:center;justify-content:center;color:var(--cyan);font-weight:600;font-size:.85rem;font-family:'JetBrains Mono',monospace}
@@ -367,7 +371,7 @@
 <script>
 'use strict';
 const state = {
-  pending: [], loadingJid: null, tab: 'chats', readOnly: false, updates: null,
+  pending: [], loadingJid: null, tab: 'chats', showArchived: false, readOnly: false, updates: null,
   chats: [], currentJid: null, currentName: '', currentIsGroup: false, filter: '', connected: false,
   memory: [],          // latest page from the live store
   history: [],         // older pages loaded automatically (or by scrolling up / search)
@@ -494,8 +498,30 @@ async function loadChats() {
 function renderChats() {
   const list = $('chat-list');
   list.textContent = '';
-  if (!state.chats.length) { list.appendChild(el('div', 'empty', 'no chats yet — they appear here once the bot sees messages')); return; }
-  for (const c of state.chats) {
+  const archived = state.chats.filter((c) => c.archived);
+  const active = state.chats.filter((c) => !c.archived);
+  if (state.showArchived && !archived.length) state.showArchived = false;
+  if (state.showArchived) {
+    const back = el('div', 'archive-row', '← Archived');
+    back.addEventListener('click', () => { state.showArchived = false; renderChats(); });
+    list.appendChild(back);
+    drawChatItems(list, archived, 'no archived chats');
+    return;
+  }
+  if (archived.length) {
+    const row = el('div', 'archive-row');
+    row.appendChild(el('span', 'archive-ico', '🗄'));
+    row.appendChild(el('span', 'archive-label', 'Archived'));
+    row.appendChild(el('span', 'archive-count', String(archived.length)));
+    row.addEventListener('click', () => { state.showArchived = true; renderChats(); });
+    list.appendChild(row);
+  }
+  drawChatItems(list, active, 'no chats yet — they appear here once the bot sees messages');
+}
+
+function drawChatItems(list, chats, emptyText) {
+  if (!chats.length) { list.appendChild(el('div', 'empty', emptyText)); return; }
+  for (const c of chats) {
     const item = el('div', 'chat-item' + (c.jid === state.currentJid ? ' active' : ''));
     const av = el('span', 'avatar');
     setAvatar(av, c.jid, c.name || c.number);

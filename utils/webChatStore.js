@@ -63,6 +63,10 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             chat_jid     TEXT PRIMARY KEY,
             last_read_ts INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS webchat_archived (
+            chat_jid TEXT PRIMARY KEY,
+            archived INTEGER NOT NULL
+        );
     `);
     // Reaction rows written by earlier builds show up as "❤️ Reaction" bubbles. Remove them.
     db.prepare('DELETE FROM webchat_messages WHERE text = ?').run('❤️ Reaction');
@@ -121,6 +125,15 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         'INSERT INTO webchat_read (chat_jid, last_read_ts) VALUES (?, ?) ON CONFLICT(chat_jid) DO UPDATE SET last_read_ts = excluded.last_read_ts'
     );
     const getReadStmt = db.prepare('SELECT last_read_ts FROM webchat_read WHERE chat_jid = ?');
+    const setArchivedStmt = db.prepare('INSERT OR REPLACE INTO webchat_archived (chat_jid, archived) VALUES (?, ?)');
+    const getArchivedStmt = db.prepare('SELECT archived FROM webchat_archived WHERE chat_jid = ?');
+
+    function setArchived(chatJid, archived) {
+        try { setArchivedStmt.run(String(chatJid), archived ? 1 : 0); } catch (_) {}
+    }
+    function isArchived(chatJid) {
+        try { return getArchivedStmt.get(String(chatJid))?.archived === 1; } catch (_) { return false; }
+    }
     const updateTextStmt = db.prepare('UPDATE webchat_messages SET text = ? WHERE chat_jid = ? AND msg_id = ?');
     const markDeletedStmt = db.prepare('UPDATE webchat_messages SET deleted = 1 WHERE chat_jid = ? AND msg_id = ?');
 
@@ -515,6 +528,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         markIndexDeleted,
         setRead,
         getRead,
+        setArchived,
+        isArchived,
         flush,
         close,
     };
