@@ -1497,3 +1497,32 @@ test('newest stored message is found without the memory store', async (t) => {
     assert.equal(lk.id, 'LK2');
     assert.equal(ctx.chatStore.latestKey('2340000000000@s.whatsapp.net'), null);
 });
+
+test('calls tab lists answered, missed and outgoing unanswered calls', async (t) => {
+    const ctx = await startTestServer();
+    const base = `http://127.0.0.1:${ctx.port}`;
+    t.after(() => ctx.cleanup());
+    const now = Math.floor(Date.now() / 1000);
+    const ME = '2348000000000@s.whatsapp.net'; // the bot's own number in this harness
+    // Incoming, ringing then answered.
+    ctx.handle.logCall({ id: 'K1', chatId: DM, from: DM, date: now, isVideo: false, status: 'offer' });
+    ctx.handle.logCall({ id: 'K1', chatId: DM, from: DM, date: now, isVideo: false, status: 'accept' });
+    // Incoming, not answered.
+    ctx.handle.logCall({ id: 'K2', chatId: DM, from: DM, date: now + 1, isVideo: true, status: 'timeout' });
+    // Outgoing, nobody answered.
+    ctx.handle.logCall({ id: 'K3', chatId: DM, from: ME, date: now + 2, isVideo: false, status: 'offer' });
+    ctx.handle.logCall({ id: 'K3', chatId: DM, from: ME, date: now + 2, isVideo: false, status: 'timeout' });
+    const login = await fetch(`${base}/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: 'test-pass' }),
+    });
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const j = await (await fetch(`${base}/api/calls`, { headers: { cookie } })).json();
+    const byId = Object.fromEntries(j.calls.map((c) => [c.id, c]));
+    assert.equal(byId.K1.outcome, 'answered');
+    assert.equal(byId.K1.direction, 'incoming');
+    assert.equal(byId.K2.outcome, 'missed');
+    assert.equal(byId.K2.isVideo, true);
+    assert.equal(byId.K3.outcome, 'no answer');
+    assert.equal(byId.K3.direction, 'outgoing');
+});

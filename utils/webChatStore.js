@@ -67,6 +67,14 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             chat_jid TEXT PRIMARY KEY,
             archived INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS webchat_calls (
+            call_id   TEXT PRIMARY KEY,
+            chat_jid  TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            outcome   TEXT NOT NULL,
+            is_video  INTEGER NOT NULL,
+            ts        INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS webchat_flags (
             chat_jid      TEXT PRIMARY KEY,
             pinned        INTEGER NOT NULL DEFAULT 0,
@@ -487,6 +495,23 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         } catch (_) { return false; }
     }
 
+    // Call history. A final outcome overrides an earlier "ringing"; otherwise the first write wins.
+    function recordCall(callId, chatJid, direction, outcome, isVideo, ts, final) {
+        try {
+            const sql = final
+                ? `INSERT INTO webchat_calls (call_id, chat_jid, direction, outcome, is_video, ts) VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(call_id) DO UPDATE SET outcome = excluded.outcome`
+                : 'INSERT OR IGNORE INTO webchat_calls (call_id, chat_jid, direction, outcome, is_video, ts) VALUES (?, ?, ?, ?, ?, ?)';
+            db.prepare(sql).run(String(callId), String(chatJid), direction, outcome, isVideo ? 1 : 0, Number(ts) || Date.now());
+        } catch (_) {}
+    }
+    function listCalls(limit = 100) {
+        try {
+            return db.prepare('SELECT call_id, chat_jid, direction, outcome, is_video, ts FROM webchat_calls ORDER BY ts DESC LIMIT ?')
+                .all(limit).map((r) => ({ id: r.call_id, jid: r.chat_jid, direction: r.direction, outcome: r.outcome, isVideo: r.is_video === 1, ts: r.ts }));
+        } catch (_) { return []; }
+    }
+
     // Newest stored message of a chat (works after a restart, unlike the memory store).
     function latestKey(chatJid) {
         try {
@@ -562,6 +587,8 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         setFlag,
         getFlag,
         latestKey,
+        recordCall,
+        listCalls,
         flush,
         close,
     };

@@ -1288,6 +1288,16 @@ function attachChatUI(app, deps) {
         return [{ key, messageTimestamp: Math.floor(Number(tsMs) / 1000) }];
     }
 
+    // Calls tab: newest first, with a readable name for each chat.
+    app.get('/api/calls', requireAuth, (req, res) => {
+        const rows = chatStore.listCalls(100).map((c) => {
+            let name = '';
+            try { name = chatDisplayName(c.jid, null) || ''; } catch (_) {}
+            return { ...c, name: name || c.jid.split('@')[0], number: c.jid.split('@')[0] };
+        });
+        res.json({ ok: true, calls: rows });
+    });
+
     // Swipe actions on a chat row. Each one is synced to the phone with chatModify.
     app.post('/api/chat/action', requireAuth, jsonParser, async (req, res) => {
         try {
@@ -1295,6 +1305,10 @@ function attachChatUI(app, deps) {
             if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
             const ACTIONS = ['archive', 'unarchive', 'pin', 'unpin', 'markRead', 'markUnread'];
             if (!ACTIONS.includes(action)) return res.status(400).json({ ok: false, error: 'unknown action' });
+            // Archive and unarchive from the web are paused: they coincided with session conflicts that force a relink.
+            if (action === 'archive' || action === 'unarchive') {
+                return res.status(501).json({ ok: false, error: 'Archive and unarchive from the web are paused while a session conflict is investigated. Nothing was changed.' });
+            }
             const sock = getSock();
             if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
             if (typeof sock.chatModify !== 'function') return res.status(501).json({ ok: false, error: 'chat actions are not supported by this bot version' });
@@ -1700,9 +1714,27 @@ function attachChatUI(app, deps) {
 
     function logCall(call) {
         try {
-            if (!call || (call.status !== 'timeout' && call.status !== 'reject')) return;
+            if (!call?.id || call.isGroup) return;
             const chatId = call.chatId || call.from;
-            if (!chatId || call.isGroup) return;
+            if (!chatId) return;
+            // Call history for the Calls tab.
+            const sock = getSock();
+            const fromDigits = digits(call.from);
+            const outgoing = !!fromDigits && (fromDigits === digits(sock?.user?.id) || fromDigits === digits(sock?.user?.lid));
+            const dir = outgoing ? 'outgoing' : 'incoming';
+            const video = !!call.isVideo;
+            const ts = (Number(call.date) || Math.floor(Date.now() / 1000)) * 1000;
+            const callChat = canonicalChat(chatId);
+            const finalOutcome = {
+                accept: 'answered',
+                timeout: outgoing ? 'no answer' : 'missed',
+                reject: outgoing ? 'rejected' : 'declined',
+            }[call.status];
+            if (finalOutcome) chatStore.recordCall(call.id, callChat, dir, finalOutcome, video, ts, true);
+            else if (call.status === 'offer' || call.status === 'ringing') chatStore.recordCall(call.id, callChat, dir, 'ringing', video, ts, false);
+            else if (call.status === 'terminate') chatStore.recordCall(call.id, callChat, dir, 'ended', video, ts, false);
+
+            if (call.status !== 'timeout' && call.status !== 'reject') return;
             logMessage({
                 key: { id: 'CALL-' + String(call.id), remoteJid: chatId, fromMe: false },
                 message: { callLogMessage: { isVideo: !!call.isVideo } },
