@@ -1307,9 +1307,9 @@ async function startJunexBot() {
         try { webChatHandle?.handleReceiptUpdate?.(receipts) } catch (_) {}
     })
     for (const ev of ['chats.upsert', 'chats.update']) {
-        sock.ev.on(ev, (list) => { try { webChatHandle?.handleChats?.(list) } catch (_) {} })
+        sock.ev.on(ev, (list) => { try { webChatHandle?.handleChats?.(list, ev) } catch (_) {} })
     }
-    sock.ev.on('chats.set', ({ chats } = {}) => { try { webChatHandle?.handleChats?.(chats) } catch (_) {} })
+    sock.ev.on('chats.set', ({ chats } = {}) => { try { webChatHandle?.handleChats?.(chats, 'chats.set') } catch (_) {} })
     sock.ev.on('call', (calls) => {
         for (const c of calls || []) {
             try { webChatHandle?.logCall?.(c) } catch (_) {}

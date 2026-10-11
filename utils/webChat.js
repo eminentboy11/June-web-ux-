@@ -1596,12 +1596,18 @@ function attachChatUI(app, deps) {
     // Calls from the `call` event. Only unanswered incoming calls are kept, as a
     // "Missed voice call" row in the chat they came from.
     // chats.upsert / chats.update / chats.set — keep the archived flag per chat.
-    function handleChats(list) {
+    function handleChats(list, source) {
         try {
-            for (const c of (Array.isArray(list) ? list : [])) {
+            const items = Array.isArray(list) ? list : [];
+            let flagged = 0, archived = 0;
+            for (const c of items) {
                 if (!c?.id || typeof c.archived !== 'boolean') continue;
+                flagged++;
+                if (c.archived) archived++;
                 chatStore.setArchived(canonicalChat(c.id), c.archived);
             }
+            // Counts only (no chat IDs) so the log shows whether WhatsApp sends archive flags.
+            console.log(`[webchat] ${source || 'chats'} event: ${items.length} chats, ${flagged} with archive flag, ${archived} archived`);
         } catch (_) {}
     }
 
