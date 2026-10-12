@@ -468,6 +468,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
             editText: extra.editText ?? null,
             poll: extra.poll ?? null,
             pollSecret: extra.pollSecret ?? null,
+            messageSecret: extra.messageSecret ?? null,
         };
     }
 
@@ -513,6 +514,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                 editText: pick('editText'),
                 poll: pick('poll'),
                 pollSecret: pick('pollSecret'),
+                messageSecret: pick('messageSecret'),
             };
             upsertMetaStmt.run(
                 chatJid,

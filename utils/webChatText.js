@@ -78,6 +78,21 @@ function boldItalic(text) {
     });
 }
 
+// Protocol types arrive as numbers (0, 14) or as enum names ("REVOKE", "MESSAGE_EDIT").
+const PROTO_TYPE_NAMES = { REVOKE: 0, MESSAGE_EDIT: 14 };
+function protoTypeOf(proto) {
+    const t = proto?.type;
+    if (typeof t === 'number') return t;
+    if (typeof t === 'string' && t in PROTO_TYPE_NAMES) return PROTO_TYPE_NAMES[t];
+    return NaN;
+}
+
+// Edit whose new text is encrypted (secretEncryptedMessage, secretEncType MESSAGE_EDIT).
+function secretEditOf(inner) {
+    const sem = inner?.secretEncryptedMessage;
+    return sem && sem.secretEncType === 'MESSAGE_EDIT' ? sem : null;
+}
+
 const NOTICE_TEXT = {
     deleted: boldItalic('The message above was deleted but June x got you covered') + ' 😂',
     edited: boldItalic('The message above was edited but June x got you covered') + ' ✏️',
@@ -100,11 +115,12 @@ function messageText(msg) {
     }
     if (inner.protocolMessage) {
         // Delete-for-everyone and edit notices read as June notes, not system messages.
-        const t = Number(inner.protocolMessage.type);
+        const t = protoTypeOf(inner.protocolMessage);
         if (t === 0) return NOTICE_TEXT.deleted;
         if (t === 14) return NOTICE_TEXT.edited;
         return '⚙️ System message';
     }
+    if (secretEditOf(inner)) return NOTICE_TEXT.edited;
     if (msg.messageStubType != null) return '⚙️ Notification';
     return '· Unsupported message ·';
 }
@@ -243,20 +259,31 @@ function editedTextFromProtocol(inner) {
 // the message that was deleted.
 function revokedTargetKey(inner) {
     const proto = inner?.protocolMessage;
-    if (!proto || Number(proto.type) !== 0 || !proto.key) return null;
+    if (!proto || protoTypeOf(proto) !== 0 || !proto.key) return null;
     return proto.key;
 }
 
 // Delete / edit notice: which message it is about (the quote target).
-function noticeOf(inner) {
+function noticeOf(inner, outerKey) {
+    const senderChat = String(outerKey?.remoteJid || '');
+    const sem = secretEditOf(inner);
+    if (sem && sem.targetMessageKey?.id) {
+        return {
+            kind: 'edited',
+            targetId: String(sem.targetMessageKey.id),
+            targetChat: String(sem.targetMessageKey.remoteJid || ''),
+            senderChat,
+        };
+    }
     const proto = inner?.protocolMessage;
     if (!proto || !proto.key?.id) return null;
-    const t = Number(proto.type);
+    const t = protoTypeOf(proto);
     if (t !== 0 && t !== 14) return null;
     return {
         kind: t === 0 ? 'deleted' : 'edited',
         targetId: String(proto.key.id),
         targetChat: String(proto.key.remoteJid || ''),
+        senderChat,
     };
 }
 
@@ -294,7 +321,7 @@ function slimMessage(m, meta, meJids) {
         mentions: extractMentions(inner),
         forwarded: isForwardedMsg(inner),
         poll: pollDto(inner, meta, meJids),
-        notice: noticeOf(inner),
+        notice: noticeOf(inner, m?.key),
         history: false,
     };
 }
@@ -318,5 +345,7 @@ module.exports = {
     editedTextFromProtocol,
     revokedTargetKey,
     noticeOf,
+    protoTypeOf,
+    secretEditOf,
     slimMessage,
 };

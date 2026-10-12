@@ -44,7 +44,9 @@ const express = require('express');
 
 const { spawn } = require('child_process');
 const pollCrypto = require('./webChatPoll');
-const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits } = require('./webChatText');
+const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits, protoTypeOf, secretEditOf, messageText } = require('./webChatText');
+const { decryptEdit } = require('./msgSecret');
+const { proto: waProto } = require('@whiskeysockets/baileys');
 const { createWebChatStore } = require('./webChatStore');
 
 const PAGE_PATH = path.join(__dirname, 'webChatPage.html');
@@ -1060,7 +1062,14 @@ function attachChatUI(app, deps) {
         // Ticks/reactions/poll meta can be keyed under either address — query both.
         const metas = new Map();
         const metaIds = list.map((m) => m?.key?.id).concat(dbFill.map((r) => r.id));
-        for (const j of jids) {
+        // Also the addresses each message was stored under (LID or phone number), so
+        // edits/deletes keyed by either address apply even before the JID link is known.
+        const metaJids = new Set(jids);
+        for (const m of list) {
+            if (m?.key?.remoteJid) metaJids.add(String(m.key.remoteJid));
+            if (m?.key?.remoteJidAlt) metaJids.add(String(m.key.remoteJidAlt));
+        }
+        for (const j of metaJids) {
             for (const [id, meta] of chatStore.getMsgMetas(j, metaIds)) {
                 if (!metas.has(id)) metas.set(id, meta);
             }
@@ -1087,10 +1096,13 @@ function attachChatUI(app, deps) {
             }
             // Delete/edit notices quote the message they are about.
             if (d.notice && !d.quoted) {
-                const found = findStored(d.notice.targetChat, d.notice.targetId);
+                const found = findStored(d.notice.targetChat, d.notice.targetId)
+                    || (d.notice.senderChat ? findStored(d.notice.senderChat, d.notice.targetId) : null);
                 if (found) {
                     const q = quotedDescriptor(found.msg);
-                    for (const [, meta] of chatStore.getMsgMetas(found.chat, [d.notice.targetId])) {
+                    const addrs = new Set([found.chat, found.msg?.key?.remoteJid, d.notice.targetChat, d.notice.senderChat].filter(Boolean));
+                    for (const a of addrs) {
+                        const meta = chatStore.getMsgMetas(a, [d.notice.targetId]).get(String(d.notice.targetId));
                         if (meta && meta.editText != null) q.text = meta.editText;
                     }
                     d.quoted = { id: q.id, sender: q.sender, pushName: q.pushName, text: q.text, mediaKind: q.mediaKind, fromMe: q.fromMe };
@@ -1238,6 +1250,14 @@ function attachChatUI(app, deps) {
         for (const j of getJidMap().related(String(jid))) {
             const msg = store?.messages?.get(j)?.get(String(msgId));
             if (msg) return { msg, chat: j };
+        }
+        // Last resort in memory: the id alone (WhatsApp message ids are unique), for
+        // protocol keys that name a chat address we do not store the message under.
+        if (store?.messages instanceof Map) {
+            for (const [chatKey, byId] of store.messages) {
+                const msg = byId?.get?.(String(msgId));
+                if (msg) return { msg, chat: chatKey };
+            }
         }
         // After a restart the recent store is empty: quote from the SQLite index instead.
         for (const j of getJidMap().related(String(jid))) {
@@ -1890,7 +1910,9 @@ function attachChatUI(app, deps) {
             // Learn LID ↔ PN pairs from the message's alternate address.
             linkKey(msg?.key);
             const inner = unwrapMessage(msg?.message || {});
-            if (inner.protocolMessage) { handleProtocol(inner); return; }
+            rememberSecret(msg, inner);
+            if (inner.protocolMessage) { handleProtocol(inner, msg); return; }
+            if (secretEditOf(inner)) { handleSecretEdit(msg, secretEditOf(inner)); return; }
             if (inner.pollUpdateMessage) { handlePollVote(msg, inner.pollUpdateMessage); return; }
             // Some reactions arrive as ordinary messages. Apply them like messages.reaction
             // (applying the same reaction twice is harmless: one reaction per person).
@@ -2006,21 +2028,93 @@ function attachChatUI(app, deps) {
         chatStore.markIndexDeleted(chat, String(key.id));
     }
 
-    function handleProtocol(inner) {
+    // Every address a chat can be keyed under (LID and phone number). Protocol keys
+    // do not always use the address the message was stored under.
+    function addressesOf(...jids) {
+        const out = new Set();
+        for (const j of jids) {
+            if (!j) continue;
+            out.add(canonicalChat(j));
+            for (const r of getJidMap().related(String(j))) out.add(r);
+        }
+        return [...out];
+    }
+
+    // Keep the message secret: edits to this message are encrypted with it.
+    function rememberSecret(msg, inner) {
+        const key = msg?.key;
+        if (!key?.id || !key.remoteJid || inner.protocolMessage) return;
+        let secret = msg.message?.messageContextInfo?.messageSecret ?? inner.messageContextInfo?.messageSecret;
+        if (!secret) return;
+        if (typeof secret !== 'string') {
+            secret = Buffer.isBuffer(secret) || secret instanceof Uint8Array
+                ? Buffer.from(secret).toString('base64')
+                : (Array.isArray(secret.data) ? Buffer.from(secret.data).toString('base64') : null);
+            if (!secret) return;
+        }
+        chatStore.setMsgMeta(canonicalChat(key.remoteJid), String(key.id), { messageSecret: secret });
+    }
+
+    // Encrypted edit (secretEncryptedMessage, MESSAGE_EDIT): decrypt with the original
+    // message's secret, then show the new text on the original message.
+    function handleSecretEdit(msg, sem) {
+        const target = sem?.targetMessageKey || {};
+        if (!target.id) return;
+        const id = String(target.id);
+        const chats = addressesOf(target.remoteJid, msg?.key?.remoteJid);
+        let secret = null;
+        for (const c of chats) {
+            const meta = chatStore.getMsgMetas(c, [id]).get(id);
+            if (meta?.messageSecret) { secret = meta.messageSecret; break; }
+        }
+        if (!secret) {
+            const found = findStored(target.remoteJid, id) || findStored(msg?.key?.remoteJid, id);
+            const ms = found?.msg?.message?.messageContextInfo?.messageSecret;
+            if (ms) secret = typeof ms === 'string' ? ms : Buffer.from(ms).toString('base64');
+        }
+        if (!secret) {
+            console.log(`[WEBCHAT] edit ${id}: original message secret not found, cannot decrypt`);
+            return;
+        }
+        const editor = [msg?.key?.remoteJid, msg?.key?.remoteJidAlt, msg?.key?.participant]
+            .filter((j) => j && !String(j).endsWith('@g.us'));
+        const plain = decryptEdit({
+            encPayload: sem.encPayload, encIv: sem.encIv, targetId: id, secret,
+            origSenders: [...new Set([...editor, target.remoteJid].filter(Boolean))],
+            modSenders: [...new Set(editor)],
+        });
+        if (!plain) {
+            console.log(`[WEBCHAT] edit ${id}: could not decrypt`);
+            return;
+        }
+        const text = messageText({ message: waProto.Message.decode(plain) });
+        for (const c of chats) {
+            chatStore.setMsgMeta(c, id, { editText: text, edited: true });
+            chatStore.updateIndexText(c, id, text);
+        }
+    }
+
+    function handleProtocol(inner, msg) {
         const proto = inner.protocolMessage;
         const target = proto?.key;
-        if (!target?.id || !target?.remoteJid) return;
-        const type = Number(proto.type);
+        if (!target?.id) return;
+        const type = protoTypeOf(proto);
+        const chats = addressesOf(target.remoteJid, msg?.key?.remoteJid);
+        const id = String(target.id);
         if (type === 0) { // REVOKE — "delete for everyone"
-            markDeletedEverywhere(target);
+            for (const c of chats) {
+                chatStore.setMsgMeta(c, id, { deleted: true });
+                chatStore.markIndexDeleted(c, id);
+            }
             return;
         }
         if (type === 14) { // MESSAGE_EDIT — the new text replaces the old one
             const text = editedTextFromProtocol(inner);
             if (text == null) return;
-            const chat = canonicalChat(target.remoteJid);
-            chatStore.setMsgMeta(chat, String(target.id), { editText: text, edited: true });
-            chatStore.updateIndexText(chat, String(target.id), text);
+            for (const c of chats) {
+                chatStore.setMsgMeta(c, id, { editText: text, edited: true });
+                chatStore.updateIndexText(c, id, text);
+            }
         }
     }
 
