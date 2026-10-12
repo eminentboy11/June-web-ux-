@@ -975,6 +975,12 @@ async function loadMessages() {
   try {
     const r = await api('/api/messages?jid=' + encodeURIComponent(jid) + '&limit=200');
     if (jid !== state.currentJid) return;
+    // The poll runs every 1.2 s. Rebuilding the list each time recreates every video and
+    // image, so only re-render when something actually changed.
+    const sig = jid + '|' + JSON.stringify(r.messages || []);
+    // Pending bubbles expire by time, so keep refreshing while any are waiting.
+    const unchanged = sig === state.lastMsgSig && !state.pending.length;
+    state.lastMsgSig = sig;
     state.memory = r.messages || [];
     if (!state.history.length) state.hasMore = !!r.hasMore;
     if (r.groupAccess) state.groupCanSend = r.groupAccess.canSend !== false;
@@ -982,7 +988,7 @@ async function loadMessages() {
     state.presence = r.presence || null;
     state.lastSeen = r.lastSeen || null;
     renderPresence();
-    renderMessages(true);
+    if (!unchanged) renderMessages(true);
   } catch (_) {} finally {
     if (state.loadingJid === jid) state.loadingJid = null;
   }
@@ -1150,7 +1156,21 @@ function renderMedia(m) {
   } else if (m.media.kind === 'video') {
     const v = el('video', 'media-video');
     v.controls = true;
+    v.playsInline = true;
+    v.preload = 'metadata';
     v.src = src;
+    // If this browser cannot play the file, offer a download instead of a blank box.
+    v.addEventListener('error', () => {
+      const card = el('a', 'doc-card');
+      card.href = src;
+      card.target = '_blank';
+      card.appendChild(el('span', 'doc-ic', '🎬'));
+      const col = el('span', 'doc-col');
+      col.appendChild(el('span', 'doc-name', m.media.fileName || 'video'));
+      col.appendChild(el('span', 'doc-sub', "can't play here · tap to open"));
+      card.appendChild(col);
+      v.replaceWith(card);
+    });
     mediaBox.appendChild(v);
   } else {
     const card = el('a', 'doc-card');
