@@ -41,7 +41,11 @@
   .nc-search svg{flex:none;stroke:var(--muted)}
   .nc-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:.95rem;color:var(--text);padding:0}
   .nc-search input::placeholder{color:var(--muted)}
-  #nc-body{flex:1;overflow-y:auto;padding:0 0 24px}
+  #nc-body{flex:1;overflow-y:auto;padding:0 22px 24px 0;position:relative}
+  .nc-sheet{position:relative}
+  .nc-index{position:absolute;right:2px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;gap:0;z-index:2;max-height:100%}
+  .nc-index button{background:none;border:0;padding:0;width:18px;font-size:.6rem;line-height:1.35;color:var(--cyan);cursor:pointer;font-family:'JetBrains Mono',monospace}
+  .nc-index button:disabled{color:rgba(127,158,181,.35);cursor:default}
   .nc-card{background:rgba(0,255,224,.03);border:1px solid var(--border);border-radius:12px;margin:0 12px 14px;overflow:hidden}
   .nc-row{display:flex;align-items:center;gap:14px;padding:10px 14px;cursor:pointer;min-height:56px}
   .nc-row + .nc-row{border-top:1px solid rgba(0,255,224,.08)}
@@ -347,6 +351,7 @@
       <input id="new-chat-input" placeholder="Name, number, @username" maxlength="40" autocomplete="off">
     </div>
     <div id="nc-body"></div>
+    <div id="nc-index" class="nc-index" aria-label="Jump to letter"></div>
   </div>
 </div>
 <div id="nc-screen" class="nc-overlay" hidden>
@@ -2072,6 +2077,31 @@ function ncNote(text) {
   note.textContent = text;
 }
 
+// First letter of a name, for the A to Z headings. Names that do not start with a letter go under #.
+function letterOf(c) {
+  const ch = nameOf(c).trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(ch) ? ch : '#';
+}
+function nameOf(c) { return c.name || c.number || (c.jid || '').split('@')[0] || ''; }
+
+// Right-hand A to Z bar. Tapping a letter scrolls to its heading; letters with no contacts are greyed out.
+function renderNcIndex(present) {
+  const bar = $('nc-index');
+  bar.textContent = '';
+  const all = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','#'];
+  for (const letter of all) {
+    const b = el('button', null, letter);
+    b.type = 'button';
+    b.disabled = !present.has(letter);
+    b.addEventListener('click', () => {
+      const target = document.getElementById('nc-letter-' + letter);
+      if (target) target.scrollIntoView({ block: 'start' });
+    });
+    bar.appendChild(b);
+  }
+  bar.hidden = present.size === 0;
+}
+
 function renderNewChat() {
   const raw = $('new-chat-input').value.trim();
   const q = raw.toLowerCase();
@@ -2104,18 +2134,38 @@ function renderNewChat() {
     }
   }
 
-  const everyone = people.filter(matches)
-    .sort((a, b) => (isSelf(b) - isSelf(a)) || (a.name || a.number || '').localeCompare(b.name || b.number || ''));
+  const everyone = people.filter(matches);
+  const selfChats = everyone.filter(isSelf);
+  const others = everyone.filter((c) => !isSelf(c))
+    .sort((a, b) => letterOf(a).localeCompare(letterOf(b)) || nameOf(a).localeCompare(nameOf(b)));
+  const letters = new Set();
   if (everyone.length) {
     body.appendChild(el('div', 'nc-label', 'Contacts on WhatsApp'));
-    const card3 = el('div', 'nc-card');
-    for (const c of everyone) {
+    const selfCard = el('div', 'nc-card');
+    for (const c of selfChats) {
       const r = ncPersonRow(c);
-      if (isSelf(c)) r.querySelector('.nc-text').appendChild(el('div', 'nc-sub', 'Message yourself'));
-      card3.appendChild(r);
+      r.querySelector('.nc-text').appendChild(el('div', 'nc-sub', 'Message yourself'));
+      selfCard.appendChild(r);
     }
-    body.appendChild(card3);
+    if (selfChats.length) body.appendChild(selfCard);
+
+    // One heading per letter, with the contacts for that letter under it.
+    let current = null, card = null;
+    for (const c of others) {
+      const letter = letterOf(c);
+      if (letter !== current) {
+        current = letter;
+        letters.add(letter);
+        const heading = el('div', 'nc-label', letter);
+        heading.id = 'nc-letter-' + letter;
+        body.appendChild(heading);
+        card = el('div', 'nc-card');
+        body.appendChild(card);
+      }
+      card.appendChild(ncPersonRow(c));
+    }
   }
+  renderNcIndex(letters);
 
   // A number typed in the search that is not a saved chat can still be opened.
   if (digits.length >= 5 && !everyone.some((c) => String(c.number || c.jid).replace(/\D/g, '') === digits)) {
