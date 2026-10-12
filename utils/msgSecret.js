@@ -6,23 +6,6 @@
 //                      info = origMsgId + origSender + modSender + "Message Edit")
 //   data = AES-256-GCM(key, iv, payload) with no additional data (tag is the last 16 bytes).
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-
-// Debug file: one JSON line per encrypted edit, with the exact values received.
-// Temporary; remove together with the debug logging once edits are confirmed.
-const DEBUG_FILE = path.join(__dirname, '..', 'debug', 'secret-edits.jsonl');
-
-function writeEditDebug(record) {
-    try {
-        fs.mkdirSync(path.dirname(DEBUG_FILE), { recursive: true });
-        const line = JSON.stringify(record, (_k, v) => {
-            if (v && v.type === 'Buffer' && Array.isArray(v.data)) return Buffer.from(v.data).toString('base64');
-            return v;
-        });
-        fs.appendFileSync(DEBUG_FILE, line + '\n');
-    } catch (_) { /* debug only */ }
-}
 
 const USE_CASE = 'Message Edit';
 
@@ -76,4 +59,4 @@ function encryptEdit({ plaintext, targetId, secret, origSender, modSender, iv })
     return Buffer.concat([body, c.getAuthTag()]);
 }
 
-module.exports = { decryptEdit, encryptEdit, nonAD, toBuf, writeEditDebug, DEBUG_FILE };
+module.exports = { decryptEdit, encryptEdit, nonAD, toBuf };

@@ -25,6 +25,3 @@ npm-debug.log*
 # no lockfiles in the repo — Render uses yarn, Koyeb will use Docker
 package-lock.json
 yarn.lock
-
-# local debug output (may contain message secrets)
-debug/
