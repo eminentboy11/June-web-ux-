@@ -583,11 +583,29 @@ function attachChatUI(app, deps) {
 
     // lid-mapping.update — Baileys reports { pn, lid } for one person.
     // Saved contact names from the address book. LID entries are stored under their phone number.
-    function handleContacts(list) {
+    // Counts only (no names or numbers) so the log shows what WhatsApp sent after a link.
+    function logContactStats(source, list) {
+        try {
+            const arr = Array.isArray(list) ? list : [];
+            let withName = 0, withNotify = 0, withLid = 0;
+            for (const c of arr) {
+                if (c?.name) withName++;
+                if (c?.notify) withNotify++;
+                if (c?.lid) withLid++;
+            }
+            log(`[webchat] contacts (${source}): ${arr.length} entries, ${withName} with saved name, ${withNotify} with notify, ${withLid} with lid`);
+        } catch (_) {}
+    }
+
+    // Push names (c.notify) are what a person sets for themselves. They are used only when no
+    // saved name is known, and are kept apart from the phonebook.
+    const notifyNames = new Map();  // canonical jid -> push name
+
+    function handleContacts(list, source) {
+        if (source) logContactStats(source, list);
         try {
             for (const c of (Array.isArray(list) ? list : [])) {
                 const name = c?.name;
-                if (!name) continue;
                 // A contact can arrive under its LID, its phone number, or both. Save the name
                 // under every address we know, so the chat shows it whichever address it uses.
                 const addresses = new Set();
@@ -597,7 +615,11 @@ function attachChatUI(app, deps) {
                     addresses.add(j);
                     addresses.add(getJidMap().canonical(j));
                 }
-                for (const j of addresses) chatStore.setContactName(j, name);
+                if (name) {
+                    for (const j of addresses) chatStore.setContactName(j, name);
+                } else if (typeof c?.notify === 'string' && c.notify.trim()) {
+                    for (const j of addresses) notifyNames.set(j, c.notify.trim());
+                }
             }
         } catch (_) {}
     }
@@ -606,7 +628,9 @@ function attachChatUI(app, deps) {
     function handleHistorySync(payload) {
         try {
             const { chats = [], contacts = [], messages = [] } = payload || {};
-            handleContacts(contacts);
+            const chatsWithName = (Array.isArray(chats) ? chats : []).filter((c) => c?.name && c?.id && !String(c.id).endsWith('@g.us') && !String(c.id).endsWith('@newsletter')).length;
+            log(`[webchat] history sync: ${chats.length} chats (${chatsWithName} individual chats with saved name), ${contacts.length} contacts, ${messages.length} messages`);
+            handleContacts(contacts, 'history');
             for (const c of (Array.isArray(chats) ? chats : [])) {
                 if (!c?.id || !c.name) continue;
                 if (String(c.id).endsWith('@g.us')) groupNames.set(getJidMap().canonical(String(c.id)), c.name);
@@ -697,11 +721,27 @@ function attachChatUI(app, deps) {
 
     /* ── shared name resolution ─────────────────────────────────────────── */
 
+    // The owner's own chat is labelled with the owner's profile name plus "(You)",
+    // like WhatsApp does. Baileys fills creds.me.name from the owner's own messages.
+    function ownChatLabel(canon) {
+        try {
+            const me = getSock()?.authState?.creds?.me;
+            const users = [me?.id, me?.lid].map((j) => String(j || '').split(':')[0].split('@')[0]).filter(Boolean);
+            const user = String(canon || '').split(':')[0].split('@')[0];
+            if (!user || !users.includes(user)) return null;
+            if (!/@(s\.whatsapp\.net|lid)$/.test(String(canon))) return null;
+            const name = typeof me?.name === 'string' ? me.name.trim() : '';
+            return name && name !== '~' ? `${name} (You)` : 'You';
+        } catch (_) { return null; }
+    }
+
     function chatDisplayName(jid, lastMsg) {
         const canon = getJidMap().canonical(jid);
         if (canon.endsWith('@g.us')) return groupNames.get(canon) || null;
+        const own = ownChatLabel(canon);
+        if (own) return own;
         // lastMsg must be the other side's message: our own pushName is our name, not theirs.
-        return chatStore.phonebookName(canon) || lastMsg?.pushName || null;
+        return chatStore.phonebookName(canon) || notifyNames.get(canon) || lastMsg?.pushName || null;
     }
 
     /* ── public: login ────────────────────────────────────────────────────── */

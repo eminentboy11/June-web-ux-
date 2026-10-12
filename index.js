@@ -1283,7 +1283,7 @@ async function startJunexBot() {
     // phonebook (number → WhatsApp name) fresh.
     // Web chat UI: LID ↔ PN identity mapping (one person, two addresses).
     // Web chat UI: saved contact names (what the phone shows), not profile names.
-    const onContacts = (list) => { try { webChatHandle?.handleContacts?.(list) } catch (_) {} }
+    const onContacts = (list) => { try { webChatHandle?.handleContacts?.(list, 'event') } catch (_) {} }
     sock.ev.on('contacts.upsert', onContacts)
     sock.ev.on('messaging-history.set', (payload) => {
         try { webChatHandle?.handleHistorySync?.(payload) } catch (_) {}
