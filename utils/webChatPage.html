@@ -56,6 +56,7 @@
   .nc-sub{font-size:.74rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .nc-label{padding:10px 18px 6px;font-size:.66rem;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
   .nc-note{padding:12px 18px;font-size:.8rem;color:var(--muted)}
+  .nc-radio{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);flex:none;margin-left:auto}
   input,textarea{background:rgba(0,0,0,.35);border:1px solid rgba(0,255,224,.25);color:var(--text);
     padding:.5rem .7rem;font-size:.82rem;outline:none;border-radius:2px;font-family:inherit}
   input:focus,textarea:focus{border-color:var(--cyan)}
@@ -326,20 +327,16 @@
   </div>
 </div>
 <div id="cam-dialog" class="nc-overlay" hidden>
-  <div class="nc-sheet" role="dialog" aria-modal="true" aria-label="Camera">
+  <div class="nc-sheet" role="dialog" aria-modal="true" aria-label="Status">
     <div class="nc-top">
-      <h2>Camera</h2>
+      <h2>Status</h2>
       <button id="cam-close" class="nc-close" type="button" aria-label="Close">✕</button>
     </div>
-    <div id="cam-body">
-      <div class="nc-card">
-        <div class="nc-row" id="cam-status-row">
-          <span class="nc-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/></svg></span>
-          <div class="nc-text"><div class="nc-name">Status</div><div class="nc-sub">Post a photo or video</div></div>
-        </div>
-      </div>
-      <div class="nc-note" id="cam-note"></div>
+    <div class="nc-search">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="cam-search" placeholder="Search" autocomplete="off">
     </div>
+    <div id="cam-body"></div>
   </div>
 </div>
 <div id="app">
@@ -2064,13 +2061,69 @@ function openNewChat() {
   openChat(raw + '@s.whatsapp.net', raw, false);
 }
 $('new-chat-open').addEventListener('click', openNewChatDialog);
-// Camera: Status only for now. Capture and posting come in a later step.
-function openCamDialog() { $('cam-dialog').hidden = false; $('cam-note').textContent = ''; }
+// Status picker: My status, Frequently contacted and Recent chats. Selecting and posting come later.
+function camRow(jid, name, sub, onTap) {
+  const row = el('div', 'nc-row');
+  if (jid) {
+    const av = el('span', 'nc-av');
+    setAvatar(av, jid, name);
+    row.appendChild(av);
+  }
+  const text = el('div', 'nc-text');
+  text.appendChild(el('div', 'nc-name', name));
+  if (sub) text.appendChild(el('div', 'nc-sub', sub));
+  row.appendChild(text);
+  row.appendChild(el('span', 'nc-radio'));
+  row.addEventListener('click', onTap);
+  return row;
+}
+function renderCam() {
+  const q = $('cam-search').value.trim().toLowerCase();
+  const body = $('cam-body');
+  body.textContent = '';
+  const note = el('div', 'nc-note', '');
+  const soon = () => { note.textContent = 'Status posting is coming soon'; };
+  const people = state.chats.filter((c) => c.jid && !c.archived && /@(s\.whatsapp\.net|lid|g\.us)$/.test(c.jid));
+  const isSelf = (c) => /\(You\)$/.test(c.name || '');
+  const nameOf = (c) => c.name || c.number || c.jid.split('@')[0];
+  const matches = (c) => !q || nameOf(c).toLowerCase().includes(q);
+
+  if (!q) {
+    const mine = el('div', 'nc-card');
+    mine.appendChild(camRow(null, 'My status', 'Post a photo or video', soon));
+    body.appendChild(mine);
+
+    const frequent = people.filter((c) => !c.isGroup && !isSelf(c) && c.lastTs)
+      .sort((x, y) => (y.lastTs || 0) - (x.lastTs || 0)).slice(0, 5);
+    if (frequent.length) {
+      body.appendChild(el('div', 'nc-label', 'Frequently contacted'));
+      const card = el('div', 'nc-card');
+      for (const c of frequent) card.appendChild(camRow(c.jid, nameOf(c), null, soon));
+      body.appendChild(card);
+    }
+  }
+
+  const recent = people.filter((c) => c.lastTs && matches(c))
+    .sort((x, y) => (y.lastTs || 0) - (x.lastTs || 0)).slice(0, q ? 50 : 20);
+  if (recent.length) {
+    body.appendChild(el('div', 'nc-label', 'Recent chats'));
+    const card = el('div', 'nc-card');
+    for (const c of recent) card.appendChild(camRow(c.jid, nameOf(c), isSelf(c) ? 'Message yourself' : null, soon));
+    body.appendChild(card);
+  }
+  body.appendChild(note);
+  if (!body.querySelector('.nc-row')) body.appendChild(el('div', 'nc-note', 'No matches'));
+}
+function openCamDialog() {
+  $('cam-dialog').hidden = false;
+  $('cam-search').value = '';
+  renderCam();
+}
 function closeCamDialog() { $('cam-dialog').hidden = true; }
 $('status-camera').addEventListener('click', openCamDialog);
 $('cam-close').addEventListener('click', closeCamDialog);
+$('cam-search').addEventListener('input', renderCam);
 $('cam-dialog').addEventListener('click', (e) => { if (e.target.id === 'cam-dialog') closeCamDialog(); });
-$('cam-status-row').addEventListener('click', () => { $('cam-note').textContent = 'Status posting is coming soon'; });
 $('new-chat-close').addEventListener('click', closeNewChatDialog);
 $('new-chat-input').addEventListener('input', renderNewChat);
 $('new-chat-dialog').addEventListener('click', (e) => { if (e.target.id === 'new-chat-dialog') closeNewChatDialog(); });
