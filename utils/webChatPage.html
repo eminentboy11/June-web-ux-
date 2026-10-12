@@ -81,6 +81,22 @@
   .cap-caption-row{display:flex;gap:10px;align-items:center;padding:12px 14px 22px;background:rgba(0,0,0,.5)}
   #cap-caption{flex:1;min-width:0;border-radius:20px;border:1px solid rgba(255,255,255,.25);background:rgba(20,30,38,.7);color:#fff;padding:11px 14px;font-size:.95rem;outline:0}
   #cap-caption::placeholder{color:rgba(255,255,255,.55)}
+  .edit-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;touch-action:none;overflow:hidden}
+  .edit-stage canvas{touch-action:none;display:block;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+  .edit-panel{min-height:54px;padding:10px 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:center;background:rgba(0,0,0,.7)}
+  .edit-panel input{flex:1;min-width:120px;border-radius:16px;border:1px solid rgba(255,255,255,.25);background:rgba(20,30,38,.7);color:#fff;padding:8px 12px;font-size:16px;outline:0}
+  .edit-panel .chip{background:rgba(20,30,38,.8);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:16px;padding:7px 12px;font-size:.8rem;cursor:pointer}
+  .edit-panel .emo{background:none;border:0;font-size:1.6rem;cursor:pointer;padding:2px}
+  .edit-panel .hint{color:rgba(255,255,255,.7);font-size:.8rem}
+  .edit-panel .sw{width:26px;height:26px;border-radius:50%;border:2px solid rgba(255,255,255,.6);cursor:pointer;padding:0}
+  .edit-panel .sw.on{box-shadow:0 0 0 2px #000,0 0 0 4px var(--cyan)}
+  .edit-tabs{display:flex;justify-content:space-around;padding:6px 0 22px;background:#000}
+  .edit-tabs button{background:none;border:0;color:rgba(255,255,255,.6);font:inherit;font-size:.8rem;letter-spacing:1px;cursor:pointer;padding:6px 10px}
+  .edit-tabs button.on{color:var(--cyan)}
+  #cap-done{background:var(--cyan);color:#001}
+  .cap-btn.flash-on{background:#ffcc00;color:#000}
+  .cap-btn.off{opacity:.45}
+  #cap-video{transform-origin:center center}
   .cap-check{width:52px;height:52px;flex:none;border-radius:50%;border:0;background:var(--cyan);color:#001;font-size:1.3rem;font-weight:700;cursor:pointer}
   .share-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;background:var(--panel);border-top:1px solid var(--border);z-index:3}
   .share-bar[hidden]{display:none}
@@ -410,15 +426,31 @@
   <div class="cap-top">
     <button id="cap-retake" class="cap-btn" type="button" aria-label="Retake">✕</button>
     <div class="cap-tools">
-      <button type="button" data-soon="Crop">Crop</button>
-      <button type="button" data-soon="Draw">Draw</button>
-      <button type="button" data-soon="Text">Text</button>
+      <button type="button" data-edit-tool="crop">Crop</button>
+      <button type="button" data-edit-tool="draw">Draw</button>
+      <button type="button" data-edit-tool="text">Text</button>
+      <button type="button" data-edit-tool="emoji">Emoji</button>
     </div>
   </div>
   <div class="cap-media" id="cap-media"></div>
   <div class="cap-caption-row">
     <input id="cap-caption" placeholder="Add a caption…" maxlength="300" autocomplete="off">
     <button id="cap-send" class="cap-check" type="button" aria-label="Send">✓</button>
+  </div>
+</div>
+<div id="cap-edit" class="cap-overlay" hidden>
+  <div class="cap-top">
+    <button id="edit-cancel" class="cap-btn" type="button" aria-label="Cancel edit">✕</button>
+    <div class="cap-tools"><button id="edit-undo" type="button">Undo</button></div>
+    <button id="cap-done" class="cap-btn" type="button" aria-label="Done">✓</button>
+  </div>
+  <div class="edit-stage" id="edit-stage"><canvas id="edit-canvas"></canvas></div>
+  <div class="edit-panel" id="edit-panel"></div>
+  <div class="edit-tabs">
+    <button type="button" data-tool="crop">CROP</button>
+    <button type="button" data-tool="draw">DRAW</button>
+    <button type="button" data-tool="text">TEXT</button>
+    <button type="button" data-tool="emoji">EMOJI</button>
   </div>
 </div>
 <input type="file" id="cap-file-camera" accept="image/*,video/*" capture="environment" hidden>
@@ -2385,14 +2417,41 @@ $('share-send').addEventListener('click', sendShare);
 let capStream = null, capFacing = 'environment', capMode = 'photo', capRecorder = null, capChunks = [];
 let capMedia = null, capMediaUrl = null, capKind = null;
 const canLiveCamera = !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+// Zoom and flash state for the live camera.
+let capTrack = null, capZoom = 1, capHwZoom = null, capTorchOk = false, capFlashOn = false, capDigital = 1;
+const CAP_ZOOM_LEVELS = [1, 2, 3];
+// Use the lens's own zoom when the browser reports it. Otherwise crop digitally (preview, photo and video).
+function capApplyZoom() {
+  let digital = capZoom;
+  if (capTrack && capHwZoom) {
+    const z = Math.min(capHwZoom.max, Math.max(capHwZoom.min, capZoom));
+    digital = capZoom / z;
+    capTrack.applyConstraints({ advanced: [{ zoom: z }] }).catch(() => {});
+  }
+  capDigital = digital;
+  $('cap-video').style.transform = digital > 1 ? `scale(${digital})` : '';
+  $('cap-zoom').textContent = capZoom + '×';
+}
+function capApplyFlash() {
+  const b = $('cap-flash');
+  b.classList.toggle('flash-on', capFlashOn);
+  b.classList.toggle('off', !capTorchOk);
+  if (capTrack && capTorchOk) capTrack.applyConstraints({ advanced: [{ torch: capFlashOn }] }).catch(() => {});
+}
 async function startCapStream() {
   stopCapStream();
   try {
     capStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: capFacing }, audio: capMode === 'video'
     });
+    capTrack = capStream.getVideoTracks()[0] || null;
+    const caps = capTrack && capTrack.getCapabilities ? capTrack.getCapabilities() : {};
+    capHwZoom = caps.zoom ? { min: caps.zoom.min || 1, max: caps.zoom.max || 1 } : null;
+    capTorchOk = !!caps.torch;
     $('cap-video').srcObject = capStream;
     await $('cap-video').play().catch(() => {});
+    capApplyZoom();
+    capApplyFlash();
   } catch (_) {
     capStream = null;
     toast('Camera access was not allowed. Opening your phone camera.');
@@ -2402,7 +2461,7 @@ async function startCapStream() {
 }
 function stopCapStream() {
   if (capStream) capStream.getTracks().forEach((t) => t.stop());
-  capStream = null;
+  capStream = null; capTrack = null;
   $('cap-video').srcObject = null;
 }
 function openCapture() {
@@ -2449,17 +2508,34 @@ function takePhoto() {
   if (!v.videoWidth) { toast('Camera is still starting'); return; }
   const c = document.createElement('canvas');
   c.width = v.videoWidth; c.height = v.videoHeight;
-  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  const sw = c.width / capDigital, sh = c.height / capDigital;
+  c.getContext('2d').drawImage(v, (c.width - sw) / 2, (c.height - sh) / 2, sw, sh, 0, 0, c.width, c.height);
   c.toBlob((blob) => { if (blob) showPreview(blob, 'image'); }, 'image/jpeg', 0.92);
 }
 function toggleRecord() {
   if (capRecorder && capRecorder.state === 'recording') { capRecorder.stop(); return; }
   if (!capStream || typeof MediaRecorder === 'undefined') { toast('Video recording is not supported in this browser'); return; }
   capChunks = [];
-  try { capRecorder = new MediaRecorder(capStream); }
-  catch (_) { toast('Video recording is not supported in this browser'); return; }
+  // With digital zoom the recording must come from a cropped canvas, so the saved video matches the preview.
+  let recStream = capStream, raf = 0;
+  if (capDigital > 1 && typeof HTMLCanvasElement.prototype.captureStream === 'function') {
+    const v = $('cap-video');
+    const cv = document.createElement('canvas');
+    cv.width = v.videoWidth || 720; cv.height = v.videoHeight || 1280;
+    const ctx = cv.getContext('2d');
+    const draw = () => {
+      const sw = cv.width / capDigital, sh = cv.height / capDigital;
+      ctx.drawImage(v, (cv.width - sw) / 2, (cv.height - sh) / 2, sw, sh, 0, 0, cv.width, cv.height);
+      raf = requestAnimationFrame(draw);
+    };
+    draw();
+    recStream = new MediaStream([...cv.captureStream(30).getVideoTracks(), ...capStream.getAudioTracks()]);
+  }
+  try { capRecorder = new MediaRecorder(recStream); }
+  catch (_) { cancelAnimationFrame(raf); toast('Video recording is not supported in this browser'); return; }
   capRecorder.ondataavailable = (e) => { if (e.data && e.data.size) capChunks.push(e.data); };
   capRecorder.onstop = () => {
+    cancelAnimationFrame(raf);
     $('cap-shutter').classList.remove('rec');
     const type = capRecorder.mimeType || 'video/webm';
     const blob = new Blob(capChunks, { type });
@@ -2474,9 +2550,21 @@ $('cap-close').addEventListener('click', closeCapture);
 $('cap-shutter').addEventListener('click', () => { if (capMode === 'photo') takePhoto(); else toggleRecord(); });
 $('mode-photo').addEventListener('click', () => { if (!capRecorder || capRecorder.state !== 'recording') { setCapMode('photo'); } });
 $('mode-video').addEventListener('click', () => { if (!capRecorder || capRecorder.state !== 'recording') { setCapMode('video'); startCapStream(); } });
-$('cap-flip').addEventListener('click', () => { capFacing = capFacing === 'environment' ? 'user' : 'environment'; startCapStream(); });
-$('cap-flash').addEventListener('click', () => toast('Flash is not available in the web camera'));
-$('cap-zoom').addEventListener('click', () => toast('Zoom is coming soon'));
+$('cap-flip').addEventListener('click', () => {
+  capFacing = capFacing === 'environment' ? 'user' : 'environment';
+  capZoom = 1; capFlashOn = false;
+  startCapStream();
+});
+$('cap-flash').addEventListener('click', () => {
+  if (!capTorchOk) { toast('Flash is not available on this camera'); return; }
+  capFlashOn = !capFlashOn;
+  capApplyFlash();
+});
+$('cap-zoom').addEventListener('click', () => {
+  const i = CAP_ZOOM_LEVELS.indexOf(capZoom);
+  capZoom = CAP_ZOOM_LEVELS[(i + 1) % CAP_ZOOM_LEVELS.length];
+  capApplyZoom();
+});
 $('cap-gallery').addEventListener('click', () => { $('cap-file-gallery').click(); });
 $('cap-file-camera').addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
@@ -2489,9 +2577,229 @@ $('cap-file-gallery').addEventListener('change', (e) => {
   if (f) { closeCapture(); showPreview(f, f.type.startsWith('video') ? 'video' : 'image'); }
 });
 $('cap-retake').addEventListener('click', () => { closePreview(); if (canLiveCamera) openCapture(); });
-document.querySelectorAll('#cap-preview [data-soon]').forEach((b) => {
-  b.addEventListener('click', () => toast(b.dataset.soon + ' is coming soon'));
+document.querySelectorAll('#cap-preview [data-edit-tool]').forEach((b) => {
+  b.addEventListener('click', () => openEditor(b.dataset.editTool));
 });
+
+// ── Photo editor: Crop, Draw, Text, Emoji ──
+// Everything is stored in relative coordinates (0–1), so the same drawing works on the
+// screen and at full resolution when saved. Crop bakes the edits into a new base image.
+const ed = { base: null, strokes: [], stickers: [], undo: [], tool: 'move', color: '#00ffe0', drawing: null, drag: null };
+const ED_COLORS = ['#ffffff', '#000000', '#00ffe0', '#ff3b30', '#ffcc00', '#34c759', '#0a84ff'];
+const ED_EMOJI = ['😀', '😂', '😍', '🥳', '😎', '🔥', '❤️', '👍', '🙏', '🎉', '💯', '😢', '😮', '🙌', '✨', '🌙'];
+const ED_MAX = 2048;
+const edCanvas = $('edit-canvas');
+
+function edSnapshot() {
+  ed.undo.push({ base: ed.base, strokes: ed.strokes.slice(), stickers: ed.stickers.map((x) => ({ ...x })) });
+  if (ed.undo.length > 30) ed.undo.shift();
+}
+function edUndo() {
+  const snap = ed.undo.pop();
+  if (!snap) { toast('Nothing to undo'); return; }
+  ed.base = snap.base; ed.strokes = snap.strokes; ed.stickers = snap.stickers;
+  edRedraw();
+}
+// Draws the base image plus strokes and stickers into ctx at size W×H.
+function edRender(ctx, W, H) {
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(ed.base, 0, 0, W, H);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const st of ed.strokes) {
+    if (!st.pts.length) continue;
+    ctx.strokeStyle = st.color; ctx.lineWidth = st.w * W;
+    ctx.beginPath();
+    st.pts.forEach((p, i) => { const x = p[0] * W, y = p[1] * H; if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.stroke();
+  }
+  for (const st of ed.stickers) {
+    const size = st.size * W;
+    const x = st.x * W, y = st.y * H;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (st.type === 'emoji') {
+      ctx.font = `${size}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.fillStyle = '#000';
+      ctx.fillText(st.text, x, y);
+    } else {
+      ctx.font = `bold ${size}px system-ui,-apple-system,"Segoe UI",sans-serif`;
+      ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.14; ctx.strokeStyle = '#000';
+      ctx.strokeText(st.text, x, y);
+      ctx.fillStyle = st.color; ctx.fillText(st.text, x, y);
+    }
+  }
+}
+function edFit() {
+  if (!ed.base) return;
+  const stage = $('edit-stage');
+  const maxW = stage.clientWidth - 16, maxH = stage.clientHeight - 16;
+  const ratio = ed.base.width / ed.base.height;
+  let w = maxW, h = w / ratio;
+  if (h > maxH) { h = maxH; w = h * ratio; }
+  const pxW = Math.min(ed.base.width, 1200);
+  edCanvas.width = pxW; edCanvas.height = Math.round(pxW / ratio);
+  edCanvas.style.width = Math.floor(w) + 'px'; edCanvas.style.height = Math.floor(h) + 'px';
+}
+function edRedraw() {
+  if (!ed.base) return;
+  edRender(edCanvas.getContext('2d'), edCanvas.width, edCanvas.height);
+}
+function edPoint(e) {
+  const r = edCanvas.getBoundingClientRect();
+  return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
+}
+function edHit(p) {
+  for (let i = ed.stickers.length - 1; i >= 0; i--) {
+    const st = ed.stickers[i];
+    const half = st.size * 0.6;
+    if (Math.abs(p[0] - st.x) < half && Math.abs(p[1] - st.y) < half) return st;
+  }
+  return null;
+}
+edCanvas.addEventListener('pointerdown', (e) => {
+  if (!ed.base) return;
+  const p = edPoint(e);
+  edCanvas.setPointerCapture(e.pointerId);
+  if (ed.tool === 'draw') {
+    edSnapshot();
+    ed.drawing = { color: ed.color, w: 0.009, pts: [p] };
+    ed.strokes.push(ed.drawing);
+  } else {
+    const hit = edHit(p);
+    if (hit) { edSnapshot(); ed.drag = { st: hit, dx: p[0] - hit.x, dy: p[1] - hit.y }; }
+  }
+  edRedraw();
+});
+edCanvas.addEventListener('pointermove', (e) => {
+  if (ed.drawing) { ed.drawing.pts.push(edPoint(e)); edRedraw(); }
+  else if (ed.drag) {
+    const p = edPoint(e);
+    ed.drag.st.x = p[0] - ed.drag.dx; ed.drag.st.y = p[1] - ed.drag.dy;
+    edRedraw();
+  }
+});
+const edEnd = () => { ed.drawing = null; ed.drag = null; };
+edCanvas.addEventListener('pointerup', edEnd);
+edCanvas.addEventListener('pointercancel', edEnd);
+
+function edAddSticker(st) {
+  edSnapshot();
+  ed.stickers.push(Object.assign({ x: 0.5, y: 0.45 }, st));
+  edRedraw();
+}
+// Crop to a centred ratio, baking the current edits into the base image.
+function edCrop(ratio) {
+  if (!ed.base) return;
+  const bw = ed.base.width, bh = ed.base.height;
+  let cw = bw, ch = bh;
+  if (bw / bh > ratio) cw = Math.round(bh * ratio); else ch = Math.round(bw / ratio);
+  const full = document.createElement('canvas');
+  full.width = bw; full.height = bh;
+  edRender(full.getContext('2d'), bw, bh);
+  const out = document.createElement('canvas');
+  out.width = cw; out.height = ch;
+  out.getContext('2d').drawImage(full, Math.round((bw - cw) / 2), Math.round((bh - ch) / 2), cw, ch, 0, 0, cw, ch);
+  edSnapshot();
+  ed.base = out; ed.strokes = []; ed.stickers = [];
+  edFit(); edRedraw();
+}
+
+function setEditTool(tool) {
+  ed.tool = tool;
+  document.querySelectorAll('#cap-edit [data-tool]').forEach((b) => b.classList.toggle('on', b.dataset.tool === tool));
+  const panel = $('edit-panel');
+  panel.textContent = '';
+  const swatches = () => {
+    const row = el('div', '');
+    row.style.display = 'flex'; row.style.gap = '8px';
+    for (const c of ED_COLORS) {
+      const b = el('button', 'sw');
+      b.type = 'button';
+      b.style.background = c;
+      if (c === ed.color) b.classList.add('on');
+      b.addEventListener('click', () => { ed.color = c; setEditTool(ed.tool); });
+      row.appendChild(b);
+    }
+    return row;
+  };
+  if (tool === 'crop') {
+    panel.appendChild(el('span', 'hint', 'Crop to:'));
+    for (const [label, r] of [['1:1', 1], ['4:5', 0.8], ['16:9', 16 / 9]]) {
+      const b = el('button', 'chip', label);
+      b.type = 'button';
+      b.addEventListener('click', () => edCrop(r));
+      panel.appendChild(b);
+    }
+  } else if (tool === 'draw') {
+    panel.appendChild(swatches());
+    panel.appendChild(el('span', 'hint', 'Drag on the photo'));
+  } else if (tool === 'text') {
+    const input = el('input');
+    input.id = 'ed-text'; input.placeholder = 'Type text'; input.maxLength = 60; input.autocomplete = 'off';
+    const add = el('button', 'chip', 'Add');
+    add.type = 'button';
+    add.addEventListener('click', () => {
+      const t = input.value.trim();
+      if (!t) { toast('Type some text first'); return; }
+      edAddSticker({ type: 'text', text: t, size: 0.075, color: ed.color });
+      input.value = '';
+    });
+    panel.appendChild(input);
+    panel.appendChild(add);
+    panel.appendChild(swatches());
+  } else if (tool === 'emoji') {
+    for (const em of ED_EMOJI) {
+      const b = el('button', 'emo', em);
+      b.type = 'button';
+      b.addEventListener('click', () => edAddSticker({ type: 'emoji', text: em, size: 0.16 }));
+      panel.appendChild(b);
+    }
+  } else {
+    panel.appendChild(el('span', 'hint', 'Drag a sticker to move it'));
+  }
+}
+
+function openEditor(tool) {
+  if (capKind !== 'image' || !capMediaUrl) { toast('Editing works on photos'); return; }
+  const img = new Image();
+  img.onload = () => {
+    // Cap very large photos so editing stays smooth and the saved file stays a sensible size.
+    const k = Math.min(1, ED_MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    ed.base = c; ed.strokes = []; ed.stickers = []; ed.undo = []; ed.drawing = null; ed.drag = null;
+    $('cap-preview').hidden = true;
+    $('cap-edit').hidden = false;
+    requestAnimationFrame(() => { edFit(); edRedraw(); });
+    setEditTool(tool === 'crop' || tool === 'draw' || tool === 'text' || tool === 'emoji' ? tool : 'move');
+  };
+  img.onerror = () => toast('Could not open this photo');
+  img.src = capMediaUrl;
+}
+function closeEditor() {
+  $('cap-edit').hidden = true;
+  ed.base = null; ed.strokes = []; ed.stickers = []; ed.undo = [];
+  $('cap-preview').hidden = false;
+}
+document.querySelectorAll('#cap-edit [data-tool]').forEach((b) => b.addEventListener('click', () => setEditTool(b.dataset.tool)));
+$('edit-cancel').addEventListener('click', closeEditor);
+$('edit-undo').addEventListener('click', edUndo);
+$('cap-done').addEventListener('click', () => {
+  if (!ed.base) return;
+  const out = document.createElement('canvas');
+  out.width = ed.base.width; out.height = ed.base.height;
+  edRender(out.getContext('2d'), out.width, out.height);
+  out.toBlob((blob) => {
+    if (!blob) { toast('Could not save the edit'); return; }
+    if (capMediaUrl) URL.revokeObjectURL(capMediaUrl);
+    capMedia = blob; capKind = 'image';
+    capMediaUrl = URL.createObjectURL(blob);
+    const node = $('cap-media').querySelector('img');
+    if (node) node.src = capMediaUrl;
+    closeEditor();
+  }, 'image/jpeg', 0.92);
+});
+window.addEventListener('resize', () => { if (!$('cap-edit').hidden) { edFit(); edRedraw(); } });
 $('cap-send').addEventListener('click', () => {
   // Keep the caption, then choose who to send to in the Status sheet.
   capCaption = $('cap-caption').value.trim();

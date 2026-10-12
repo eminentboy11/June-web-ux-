@@ -499,6 +499,10 @@ if (!fs.existsSync(envPath)) {
         '',
         '# Optional: override bot port (default 5000)',
         '# PORT=5000',
+        '',
+        '# Optional: HTTPS for the web chat camera (needs a real certificate, e.g. Let\'s Encrypt)',
+        '# WEB_TLS_CERT=/path/to/fullchain.pem',
+        '# WEB_TLS_KEY=/path/to/privkey.pem',
     ].join('\n')
     atomicWriteFile(envPath, defaultEnv, 'utf8')
     log('[ .env ] No .env file found — created with default template.', 'green')
@@ -2668,7 +2672,21 @@ function startKeepAliveServer() {
         log('[ WEB ] Chat UI unavailable:', e.message, 'red');
     }
 
-    const server = http.createServer(app);
+    // Optional HTTPS for the web chat. Phone browsers only allow the camera on HTTPS pages.
+    // Set WEB_TLS_CERT and WEB_TLS_KEY to the PEM files of a real certificate. Without them the server stays on HTTP.
+    let webTls = null;
+    if (process.env.WEB_TLS_CERT && process.env.WEB_TLS_KEY) {
+        try {
+            webTls = {
+                cert: fs.readFileSync(process.env.WEB_TLS_CERT),
+                key: fs.readFileSync(process.env.WEB_TLS_KEY),
+            };
+        } catch (e) {
+            log('[ WEB ] HTTPS disabled, could not read the certificate files:', e.message, 'red');
+        }
+    }
+    const server = webTls ? require('https').createServer(webTls, app) : http.createServer(app);
+    const webScheme = webTls ? 'https' : 'http';
 
     // Pterodactyl exposes the primary allocation as SERVER_PORT; other hosts
     // (Render/Koyeb/Heroku) use PORT. Bind whichever the platform provides.
@@ -2686,10 +2704,11 @@ function startKeepAliveServer() {
         server.listen(PORT, '0.0.0.0');
 
         server.once('listening', () => {
-            log(`[ WEB ] listening on 0.0.0.0:${PORT} — open /chat`, 'cyan');
-            const selfPingUrl = process.env.APP_URL || `http://localhost:${PORT}/health`;
+            log(`[ WEB ] listening on 0.0.0.0:${PORT} (${webScheme}) — open /chat`, 'cyan');
+            const selfPingUrl = process.env.APP_URL || `${webScheme}://localhost:${PORT}/health`;
+            const pingLib = selfPingUrl.startsWith('https') ? require('https') : http;
             setInterval(() => {
-                http.get(selfPingUrl, (r) => {}).on('error', () => {});
+                pingLib.get(selfPingUrl, { rejectUnauthorized: false }, (r) => {}).on('error', () => {});
             }, 4 * 60 * 1000);
         });
 
