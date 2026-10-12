@@ -28,14 +28,31 @@
     background:#25d366;color:#fff;font-size:1.5rem;line-height:1;display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 10px rgba(0,0,0,.35)}
   #new-chat-open:active{transform:scale(.95)}
-  .nc-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50}
+  .nc-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:stretch;z-index:50}
   .nc-overlay[hidden]{display:none}
-  .nc-box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(320px,90vw);display:flex;flex-direction:column;gap:12px}
-  .nc-box h3{margin:0;font-size:.95rem;color:var(--text);font-weight:600}
-  .nc-box input{width:100%;box-sizing:border-box}
-  .nc-actions{display:flex;justify-content:flex-end;gap:8px}
-  .nc-actions button{padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer}
-  .nc-actions button.primary{background:#25d366;border-color:#25d366;color:#fff}
+  .nc-sheet{background:#f0f2f5;color:#111b21;width:100%;max-width:440px;height:100%;display:flex;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;box-shadow:0 0 30px rgba(0,0,0,.4)}
+  .nc-top{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 6px;background:#f0f2f5}
+  .nc-top h2{margin:0;font-size:1.25rem;font-weight:700;color:#111b21}
+  .nc-close{width:40px;height:40px;border-radius:50%;border:0;background:#fff;color:#111b21;font-size:1.1rem;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+  .nc-search{margin:8px 14px 10px;background:#fff;border-radius:22px;display:flex;align-items:center;gap:8px;padding:0 14px;height:44px;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .nc-search svg{flex:none;stroke:#54656f}
+  .nc-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-size:.98rem;color:#111b21;padding:0}
+  .nc-search input::placeholder{color:#8696a0}
+  #nc-body{flex:1;overflow-y:auto;padding:0 0 24px}
+  .nc-card{background:#fff;border-radius:14px;margin:0 12px 14px;overflow:hidden}
+  .nc-row{display:flex;align-items:center;gap:14px;padding:10px 16px;cursor:pointer;min-height:56px;background:#fff}
+  .nc-row + .nc-row{border-top:1px solid #e9edef;margin-left:0}
+  .nc-row:active{background:#f5f6f6}
+  .nc-row .nc-ico{width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;color:#00a884}
+  .nc-row .nc-ico svg{stroke:#00a884;fill:none;stroke-width:1.8}
+  .nc-row .nc-av{width:44px;height:44px;flex:none;position:relative}
+  .nc-row .nc-av .avatar{width:44px;height:44px;border:0}
+  .nc-row .nc-av .avatar-fallback{background:#dfe5e7;color:#54656f}
+  .nc-text{min-width:0;flex:1}
+  .nc-name{font-size:1rem;color:#111b21;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nc-sub{font-size:.8rem;color:#667781;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nc-label{padding:10px 18px 6px;font-size:.82rem;color:#00a884;font-weight:600}
+  .nc-note{padding:12px 18px;font-size:.85rem;color:#667781}
   input,textarea{background:rgba(0,0,0,.35);border:1px solid rgba(0,255,224,.25);color:var(--text);
     padding:.5rem .7rem;font-size:.82rem;outline:none;border-radius:2px;font-family:inherit}
   input:focus,textarea:focus{border-color:var(--cyan)}
@@ -293,13 +310,16 @@
   <div class="sv-tap sv-next"></div>
 </div>
 <div id="new-chat-dialog" class="nc-overlay" hidden>
-  <div class="nc-box" role="dialog" aria-modal="true" aria-labelledby="nc-title">
-    <h3 id="nc-title">New chat</h3>
-    <input id="new-chat-input" placeholder="Phone number, e.g. 234…" maxlength="20" inputmode="numeric">
-    <div class="nc-actions">
-      <button id="new-chat-cancel" type="button">Cancel</button>
-      <button id="new-chat-btn" class="primary" type="button">Open chat</button>
+  <div class="nc-sheet" role="dialog" aria-modal="true" aria-label="New chat">
+    <div class="nc-top">
+      <h2>New chat</h2>
+      <button id="new-chat-close" class="nc-close" type="button" aria-label="Close">✕</button>
     </div>
+    <div class="nc-search">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke-width="2"/><path d="M21 21l-4.3-4.3" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="new-chat-input" placeholder="Name, number, @username" maxlength="40" autocomplete="off">
+    </div>
+    <div id="nc-body"></div>
   </div>
 </div>
 <div id="app">
@@ -1897,9 +1917,115 @@ $('reply-cancel').addEventListener('click', () => { setReply(null); setEditing(n
 
 /* ── new chat, navigation, logout ──────────────────────────────────────── */
 
+const NC_ICONS = {
+  group: '<svg width="22" height="22" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3 2.7-5 6-5s6 2 6 5"/><circle cx="17" cy="9" r="2.6"/><path d="M16 14c2.6 0 5 1.6 5 4.4"/></svg>',
+  contact: '<svg width="22" height="22" viewBox="0 0 24 24"><circle cx="10" cy="8" r="3.4"/><path d="M4 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5"/><path d="M19 8v6M16 11h6"/></svg>',
+  community: '<svg width="22" height="22" viewBox="0 0 24 24"><circle cx="7" cy="9" r="2.4"/><circle cx="17" cy="9" r="2.4"/><circle cx="12" cy="7" r="2.6"/><path d="M2.5 18c0-2.4 2-4 4.5-4M21.5 18c0-2.4-2-4-4.5-4M7.5 19c0-2.6 2-4.4 4.5-4.4s4.5 1.8 4.5 4.4"/></svg>',
+  broadcast: '<svg width="22" height="22" viewBox="0 0 24 24"><path d="M3 10v4l11 4V6L3 10z"/><path d="M14 9a4 4 0 0 1 0 6"/><path d="M7 14l1.5 5h2"/></svg>'
+};
+const NC_ACTIONS = [['New group', 'group'], ['New contact', 'contact'], ['New community', 'community'], ['New broadcast', 'broadcast']];
+
+function ncPersonRow(c) {
+  const row = el('div', 'nc-row');
+  const av = el('span', 'nc-av');
+  setAvatar(av, c.jid, c.name || c.number);
+  const text = el('div', 'nc-text');
+  text.appendChild(el('div', 'nc-name', c.name || c.number || c.jid.split('@')[0]));
+  row.appendChild(av);
+  row.appendChild(text);
+  row.addEventListener('click', () => { closeNewChatDialog(); openChat(c.jid, c.name || c.number, false); });
+  return row;
+}
+
+function ncActionRow(label, key) {
+  const row = el('div', 'nc-row');
+  const ico = el('span', 'nc-ico');
+  ico.innerHTML = NC_ICONS[key];
+  row.appendChild(ico);
+  const text = el('div', 'nc-text');
+  text.appendChild(el('div', 'nc-name', label));
+  row.appendChild(text);
+  // Features for these rows come in later steps; for now they only say so.
+  row.addEventListener('click', () => { ncNote(label + ' is coming soon'); });
+  return row;
+}
+
+function ncNote(text) {
+  const body = $('nc-body');
+  let note = body.querySelector('.nc-note');
+  if (!note) { note = el('div', 'nc-note'); body.insertBefore(note, body.firstChild); }
+  note.textContent = text;
+}
+
+function renderNewChat() {
+  const raw = $('new-chat-input').value.trim();
+  const q = raw.toLowerCase();
+  const digits = raw.replace(/\D/g, '');
+  const body = $('nc-body');
+  body.textContent = '';
+
+  // Individual chats only: no groups, channels, broadcasts, or archived chats.
+  const people = state.chats.filter((c) => c.jid && !c.isGroup && !c.archived &&
+    /@(s\.whatsapp\.net|lid)$/.test(c.jid));
+  const isSelf = (c) => /\(You\)$/.test(c.name || '');
+  const matches = (c) => {
+    if (!q) return true;
+    if ((c.name || '').toLowerCase().includes(q)) return true;
+    return digits.length >= 3 && String(c.number || c.jid).replace(/\D/g, '').includes(digits);
+  };
+
+  if (!q) {
+    const card = el('div', 'nc-card');
+    for (const [label, key] of NC_ACTIONS) card.appendChild(ncActionRow(label, key));
+    body.appendChild(card);
+
+    const frequent = people.filter((c) => !isSelf(c) && c.lastTs)
+      .sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0)).slice(0, 5);
+    if (frequent.length) {
+      body.appendChild(el('div', 'nc-label', 'Frequently contacted'));
+      const card2 = el('div', 'nc-card');
+      for (const c of frequent) card2.appendChild(ncPersonRow(c));
+      body.appendChild(card2);
+    }
+  }
+
+  const everyone = people.filter(matches)
+    .sort((a, b) => (isSelf(b) - isSelf(a)) || (a.name || a.number || '').localeCompare(b.name || b.number || ''));
+  if (everyone.length) {
+    body.appendChild(el('div', 'nc-label', 'Contacts on WhatsApp'));
+    const card3 = el('div', 'nc-card');
+    for (const c of everyone) {
+      const r = ncPersonRow(c);
+      if (isSelf(c)) r.querySelector('.nc-text').appendChild(el('div', 'nc-sub', 'Message yourself'));
+      card3.appendChild(r);
+    }
+    body.appendChild(card3);
+  }
+
+  // A number typed in the search that is not a saved chat can still be opened.
+  if (digits.length >= 5 && !everyone.some((c) => String(c.number || c.jid).replace(/\D/g, '') === digits)) {
+    body.insertBefore(numberRow(digits), body.firstChild);
+  }
+  if (!body.children.length) body.appendChild(el('div', 'nc-note', 'No matches'));
+}
+
+function numberRow(digits) {
+  const row = el('div', 'nc-row');
+  const ico = el('span', 'nc-ico');
+  ico.innerHTML = NC_ICONS.contact;
+  row.appendChild(ico);
+  const text = el('div', 'nc-text');
+  text.appendChild(el('div', 'nc-name', '+' + digits));
+  text.appendChild(el('div', 'nc-sub', 'Message this number'));
+  row.appendChild(text);
+  row.addEventListener('click', openNewChat);
+  return row;
+}
+
 function openNewChatDialog() {
   $('new-chat-dialog').hidden = false;
   $('new-chat-input').value = '';
+  renderNewChat();
   setTimeout(() => $('new-chat-input').focus(), 0);
 }
 function closeNewChatDialog() {
@@ -1913,11 +2039,15 @@ function openNewChat() {
   openChat(raw + '@s.whatsapp.net', raw, false);
 }
 $('new-chat-open').addEventListener('click', openNewChatDialog);
-$('new-chat-btn').addEventListener('click', openNewChat);
-$('new-chat-cancel').addEventListener('click', closeNewChatDialog);
+$('new-chat-close').addEventListener('click', closeNewChatDialog);
+$('new-chat-input').addEventListener('input', renderNewChat);
 $('new-chat-dialog').addEventListener('click', (e) => { if (e.target.id === 'new-chat-dialog') closeNewChatDialog(); });
 $('new-chat-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); openNewChat(); }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const digits = $('new-chat-input').value.replace(/\D/g, '');
+    if (digits.length >= 5) openNewChat();
+  }
   if (e.key === 'Escape') closeNewChatDialog();
 });
 $('back-btn').addEventListener('click', closeChat);
