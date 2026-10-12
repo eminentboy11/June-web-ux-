@@ -82,7 +82,13 @@ function messageText(msg) {
         const c = inner.callLogMessage;
         return `📞 Missed ${c.isVideo ? 'video' : 'voice'} call`;
     }
-    if (inner.protocolMessage) return '⚙️ System message';
+    if (inner.protocolMessage) {
+        // Delete-for-everyone and edit notices read as June notes, not system messages.
+        const t = Number(inner.protocolMessage.type);
+        if (t === 0) return 'The message above was deleted but June x got you covered 😂';
+        if (t === 14) return 'The message above was edited but June x got you covered ✏️';
+        return '⚙️ System message';
+    }
     if (msg.messageStubType != null) return '⚙️ Notification';
     return '· Unsupported message ·';
 }
