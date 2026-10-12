@@ -628,7 +628,8 @@ function attachChatUI(app, deps) {
     function handleHistorySync(payload) {
         try {
             const { chats = [], contacts = [], messages = [] } = payload || {};
-            log(`[webchat] history sync: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} messages`);
+            const chatsWithName = (Array.isArray(chats) ? chats : []).filter((c) => c?.name && c?.id && !String(c.id).endsWith('@g.us') && !String(c.id).endsWith('@newsletter')).length;
+            log(`[webchat] history sync: ${chats.length} chats (${chatsWithName} individual chats with saved name), ${contacts.length} contacts, ${messages.length} messages`);
             handleContacts(contacts, 'history');
             for (const c of (Array.isArray(chats) ? chats : [])) {
                 if (!c?.id || !c.name) continue;
