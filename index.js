@@ -146,7 +146,8 @@ const {
     fetchLatestBaileysVersion,
     jidNormalizedUser,
     makeCacheableSignalKeyStore,
-    delay
+    delay,
+    Browsers
 } = require('@whiskeysockets/baileys')
 
 const NodeCache = require('node-cache')
@@ -1247,7 +1248,8 @@ async function startJunexBot() {
         version,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        // Desktop identity: WhatsApp sends more history to desktop clients (Baileys docs).
+        browser: Browsers.macOS('Desktop'),
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' }))
