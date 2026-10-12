@@ -583,11 +583,29 @@ function attachChatUI(app, deps) {
 
     // lid-mapping.update — Baileys reports { pn, lid } for one person.
     // Saved contact names from the address book. LID entries are stored under their phone number.
-    function handleContacts(list) {
+    // Counts only (no names or numbers) so the log shows what WhatsApp sent after a link.
+    function logContactStats(source, list) {
+        try {
+            const arr = Array.isArray(list) ? list : [];
+            let withName = 0, withNotify = 0, withLid = 0;
+            for (const c of arr) {
+                if (c?.name) withName++;
+                if (c?.notify) withNotify++;
+                if (c?.lid) withLid++;
+            }
+            log(`[webchat] contacts (${source}): ${arr.length} entries, ${withName} with saved name, ${withNotify} with notify, ${withLid} with lid`);
+        } catch (_) {}
+    }
+
+    // Push names (c.notify) are what a person sets for themselves. They are used only when no
+    // saved name is known, and are kept apart from the phonebook.
+    const notifyNames = new Map();  // canonical jid -> push name
+
+    function handleContacts(list, source) {
+        if (source) logContactStats(source, list);
         try {
             for (const c of (Array.isArray(list) ? list : [])) {
                 const name = c?.name;
-                if (!name) continue;
                 // A contact can arrive under its LID, its phone number, or both. Save the name
                 // under every address we know, so the chat shows it whichever address it uses.
                 const addresses = new Set();
@@ -597,7 +615,11 @@ function attachChatUI(app, deps) {
                     addresses.add(j);
                     addresses.add(getJidMap().canonical(j));
                 }
-                for (const j of addresses) chatStore.setContactName(j, name);
+                if (name) {
+                    for (const j of addresses) chatStore.setContactName(j, name);
+                } else if (typeof c?.notify === 'string' && c.notify.trim()) {
+                    for (const j of addresses) notifyNames.set(j, c.notify.trim());
+                }
             }
         } catch (_) {}
     }
@@ -606,7 +628,8 @@ function attachChatUI(app, deps) {
     function handleHistorySync(payload) {
         try {
             const { chats = [], contacts = [], messages = [] } = payload || {};
-            handleContacts(contacts);
+            log(`[webchat] history sync: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} messages`);
+            handleContacts(contacts, 'history');
             for (const c of (Array.isArray(chats) ? chats : [])) {
                 if (!c?.id || !c.name) continue;
                 if (String(c.id).endsWith('@g.us')) groupNames.set(getJidMap().canonical(String(c.id)), c.name);
@@ -717,7 +740,7 @@ function attachChatUI(app, deps) {
         const own = ownChatLabel(canon);
         if (own) return own;
         // lastMsg must be the other side's message: our own pushName is our name, not theirs.
-        return chatStore.phonebookName(canon) || lastMsg?.pushName || null;
+        return chatStore.phonebookName(canon) || notifyNames.get(canon) || lastMsg?.pushName || null;
     }
 
     /* ── public: login ────────────────────────────────────────────────────── */
