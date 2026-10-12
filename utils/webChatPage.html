@@ -645,12 +645,24 @@ function dayLabel(ts) {
   return d.toLocaleDateString([], opts).toUpperCase();
 }
 
+// First letter or digit of the name. Emoji and symbols are skipped, so an emoji-named contact
+// never shows a broken character.
+function avatarInitial(name) {
+  for (const ch of Array.from(String(name || '').trim())) {
+    if (/[\p{L}\p{N}]/u.test(ch)) return ch.toUpperCase();
+  }
+  return '';
+}
+const PERSON_ICON = '<svg viewBox="0 0 24 24" width="55%" height="55%" fill="currentColor" aria-hidden="true"><circle cx="12" cy="8.5" r="4.2"/><path d="M4 21.5c0-4.6 3.6-7.4 8-7.4s8 2.8 8 7.4z"/></svg>';
 function setAvatar(container, jid, name) {
   container.textContent = '';
   const img = el('img', 'avatar');
   img.alt = '';
   img.src = '/api/avatar?jid=' + encodeURIComponent(jid);
-  const fallback = el('span', 'avatar avatar-fallback', (name || '?').trim().charAt(0).toUpperCase() || '?');
+  const letter = avatarInitial(name);
+  const fallback = el('span', 'avatar avatar-fallback');
+  if (letter) fallback.textContent = letter;
+  else fallback.innerHTML = PERSON_ICON;
   img.onload = () => fallback.remove();
   img.onerror = () => img.remove();
   container.appendChild(img);
