@@ -993,6 +993,22 @@ function attachChatUI(app, deps) {
         }
     }
 
+    // A message row rebuilt from SQLite (after a restart, or older history). When the saved
+    // message body exists, rebuild the full DTO so media, quotes and polls still show.
+    function dbRowToDto(r, meta, mine) {
+        const raw = r.chatJid ? chatStore.getRaw(r.chatJid, r.id) : null;
+        if (raw) return slimMessage(raw, meta, mine);
+        return {
+            ...r, chatJid: undefined, media: null, status: meta.status ?? null,
+            // Stored reactions are { emoji, senders }; the page expects { emoji, count, byMe }.
+            reactions: (meta.reactions || []).map((x) => ({
+                emoji: x.emoji, count: (x.senders || []).length, byMe: (x.senders || []).includes('me'),
+            })),
+            quoted: meta.quoted || null, edited: !!meta.edited, deleted: false,
+            mentions: [], forwarded: false, poll: null,
+        };
+    }
+
     app.get('/api/messages', requireAuth, async (req, res) => {
         const jid = String(req.query.jid || '');
         if (!JID_RE.test(jid)) {
@@ -1017,12 +1033,10 @@ function attachChatUI(app, deps) {
             const rows = chatStore.pageBefore(jids, before, limit + 1, beforeId);
             const hasMore = rows.length > limit;
             const page = hasMore ? rows.slice(rows.length - limit) : rows;
+            const mineOld = myDigits();
             return res.json({
                 ok: true, jid, history: true, hasMore,
-                messages: page.map((r) => ({
-                    ...r, media: null, status: null, reactions: [], quoted: null,
-                    edited: false, deleted: false, mentions: [], forwarded: false, poll: null,
-                })),
+                messages: page.map((r) => dbRowToDto(r, {}, mineOld)),
             });
         }
 
@@ -1054,14 +1068,7 @@ function attachChatUI(app, deps) {
         markChatRead(jid, all);
         const mine = myDigits();
         const memDtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id), mine));
-        const indexDtos = dbFill.map((r) => {
-            const meta = metas.get(r.id) || {};
-            return {
-                ...r, media: null, status: meta.status ?? null, reactions: meta.reactions || [],
-                quoted: meta.quoted || null, edited: !!meta.edited, deleted: false,
-                mentions: [], forwarded: false, poll: null,
-            };
-        });
+        const indexDtos = dbFill.map((r) => dbRowToDto(r, metas.get(r.id) || {}, mine));
         const dtos = indexDtos.concat(memDtos)
             .sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.id).localeCompare(String(b.id)))
             .slice(-limit);

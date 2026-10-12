@@ -252,6 +252,7 @@ function createWebChatStore({ dbPath, phonebookPath }) {
               ORDER BY ts DESC, msg_id DESC LIMIT ?`
         ).all(...params).reverse().map((r) => ({
             id: r.msg_id,
+            chatJid: r.chat_jid,
             fromMe: !!r.from_me,
             sender: r.sender,
             pushName: r.push_name,
