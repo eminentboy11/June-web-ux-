@@ -44,7 +44,7 @@ const express = require('express');
 
 const { spawn } = require('child_process');
 const pollCrypto = require('./webChatPoll');
-const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits, protoTypeOf, secretEditOf, messageText, isNoticeRow } = require('./webChatText');
+const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits, protoTypeOf, secretEditOf, messageText, isSilentRow } = require('./webChatText');
 const { decryptEdit } = require('./msgSecret');
 const { proto: waProto } = require('@whiskeysockets/baileys');
 const { createWebChatStore } = require('./webChatStore');
@@ -898,7 +898,7 @@ function attachChatUI(app, deps) {
                 let lastIn = null;
                 for (const m of msgs.values()) {
                     if (!m?.key || m.message?.reactionMessage) continue; // reactions aren't previews
-                    if (isNoticeRow(m)) continue; // delete/edit rows are not shown
+                    if (isSilentRow(m)) continue; // protocol rows are not shown
                     count++;
                     last = m; // insertion order → last non-reaction is newest
                     if (!m.key.fromMe) lastIn = m;
@@ -1081,7 +1081,7 @@ function attachChatUI(app, deps) {
         const memDtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id), mine));
         const indexDtos = dbFill.map((r) => dbRowToDto(r, metas.get(r.id) || {}, mine));
         const dtos = indexDtos.concat(memDtos)
-            .filter((d) => !d.notice) // delete/edit rows are not shown; the target carries the state
+            .filter((d) => !d.hidden) // protocol rows are not shown; the target carries the state
             .sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.id).localeCompare(String(b.id)))
             .slice(-limit);
         // Enrich quoted blocks with the sender's profile name when we have it.

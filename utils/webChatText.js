@@ -287,10 +287,11 @@ function noticeOf(inner, outerKey) {
     };
 }
 
-// True for delete/edit protocol rows. They are not shown in the chat; the target
-// message carries the deleted / edited state instead.
-function isNoticeRow(m) {
-    return !!noticeOf(unwrapMessage(m?.message || {}), m?.key);
+// Protocol rows (deletes, edits, and other device-to-device messages) are never shown
+// in the chat. The target message carries the deleted / edited state instead.
+function isSilentRow(m) {
+    const inner = unwrapMessage(m?.message || {});
+    return !!(inner.protocolMessage || secretEditOf(inner));
 }
 
 // Slim DTO sent to the browser. Media messages carry a descriptor so the page
@@ -328,6 +329,7 @@ function slimMessage(m, meta, meJids) {
         forwarded: isForwardedMsg(inner),
         poll: pollDto(inner, meta, meJids),
         notice: noticeOf(inner, m?.key),
+        hidden: isSilentRow(m),
         history: false,
     };
 }
@@ -351,7 +353,7 @@ module.exports = {
     editedTextFromProtocol,
     revokedTargetKey,
     noticeOf,
-    isNoticeRow,
+    isSilentRow,
     protoTypeOf,
     secretEditOf,
     slimMessage,
