@@ -56,6 +56,28 @@
   .nc-sub{font-size:.74rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .nc-label{padding:10px 18px 6px;font-size:.66rem;letter-spacing:2px;color:var(--muted);text-transform:uppercase}
   .nc-note{padding:12px 18px;font-size:.8rem;color:var(--muted)}
+  .cap-overlay{position:fixed;inset:0;background:#000;color:#fff;z-index:60;display:flex;flex-direction:column;overflow:hidden}
+  .cap-overlay[hidden]{display:none}
+  .cap-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+  .cap-top{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:16px 14px;z-index:2}
+  .cap-btn{width:42px;height:42px;border-radius:50%;border:0;background:rgba(20,30,38,.6);color:#fff;font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+  .cap-bottom{position:absolute;bottom:0;left:0;right:0;padding:18px 14px 26px;display:flex;flex-direction:column;align-items:center;gap:16px;z-index:2;background:linear-gradient(transparent,rgba(0,0,0,.55))}
+  .cap-row{width:100%;display:flex;justify-content:space-between;align-items:center}
+  .cap-shutter{width:76px;height:76px;border-radius:50%;border:4px solid #fff;background:transparent;padding:0;cursor:pointer;position:relative}
+  .cap-shutter::after{content:'';position:absolute;inset:6px;border-radius:50%;background:#fff;transition:all .15s}
+  .cap-shutter.rec::after{inset:20px;border-radius:8px;background:#ff3b30}
+  .cap-modes{display:flex;gap:22px;font-size:.78rem;letter-spacing:1.5px;font-family:'JetBrains Mono',monospace}
+  .cap-modes button{background:none;border:0;color:rgba(255,255,255,.6);cursor:pointer;padding:4px 2px;font:inherit;letter-spacing:inherit}
+  .cap-modes button.on{color:var(--cyan)}
+  #cap-preview{background:#000}
+  .cap-media{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;overflow:hidden}
+  .cap-media img,.cap-media video{max-width:100%;max-height:100%;object-fit:contain}
+  .cap-tools{display:flex;gap:8px}
+  .cap-tools button{background:rgba(20,30,38,.6);color:#fff;border:0;border-radius:16px;padding:7px 12px;font-size:.78rem;cursor:pointer}
+  .cap-caption-row{display:flex;gap:10px;align-items:center;padding:12px 14px 22px;background:rgba(0,0,0,.5)}
+  #cap-caption{flex:1;min-width:0;border-radius:20px;border:1px solid rgba(255,255,255,.25);background:rgba(20,30,38,.7);color:#fff;padding:11px 14px;font-size:.95rem;outline:0}
+  #cap-caption::placeholder{color:rgba(255,255,255,.55)}
+  .cap-check{width:52px;height:52px;flex:none;border-radius:50%;border:0;background:var(--cyan);color:#001;font-size:1.3rem;font-weight:700;cursor:pointer}
   .nc-radio{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);flex:none;margin-left:auto}
   input,textarea{background:rgba(0,0,0,.35);border:1px solid rgba(0,255,224,.25);color:var(--text);
     padding:.5rem .7rem;font-size:.82rem;outline:none;border-radius:2px;font-family:inherit}
@@ -339,6 +361,44 @@
     <div id="cam-body"></div>
   </div>
 </div>
+<div id="cap-capture" class="cap-overlay" hidden>
+  <video id="cap-video" class="cap-video" autoplay playsinline muted></video>
+  <div class="cap-top">
+    <button id="cap-close" class="cap-btn" type="button" aria-label="Close camera">✕</button>
+    <button id="cap-flash" class="cap-btn" type="button" aria-label="Flash">⚡</button>
+  </div>
+  <div class="cap-bottom">
+    <div class="cap-row">
+      <button id="cap-gallery" class="cap-btn" type="button" aria-label="Gallery">▣</button>
+      <button id="cap-shutter" class="cap-shutter" type="button" aria-label="Capture"></button>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button id="cap-zoom" class="cap-btn" type="button" aria-label="Zoom">1×</button>
+        <button id="cap-flip" class="cap-btn" type="button" aria-label="Switch camera">⟲</button>
+      </div>
+    </div>
+    <div class="cap-modes">
+      <button id="mode-video" type="button">VIDEO</button>
+      <button id="mode-photo" class="on" type="button">PHOTO</button>
+    </div>
+  </div>
+</div>
+<div id="cap-preview" class="cap-overlay" hidden>
+  <div class="cap-top">
+    <button id="cap-retake" class="cap-btn" type="button" aria-label="Retake">✕</button>
+    <div class="cap-tools">
+      <button type="button" data-soon="Crop">Crop</button>
+      <button type="button" data-soon="Draw">Draw</button>
+      <button type="button" data-soon="Text">Text</button>
+    </div>
+  </div>
+  <div class="cap-media" id="cap-media"></div>
+  <div class="cap-caption-row">
+    <input id="cap-caption" placeholder="Add a caption…" maxlength="300" autocomplete="off">
+    <button id="cap-send" class="cap-check" type="button" aria-label="Send">✓</button>
+  </div>
+</div>
+<input type="file" id="cap-file-camera" accept="image/*,video/*" capture="environment" hidden>
+<input type="file" id="cap-file-gallery" accept="image/*,video/*" hidden>
 <div id="app">
   <aside id="sidebar">
     <div class="side-head">
@@ -2120,7 +2180,123 @@ function openCamDialog() {
   renderCam();
 }
 function closeCamDialog() { $('cam-dialog').hidden = true; }
-$('status-camera').addEventListener('click', openCamDialog);
+// ── Camera flow: capture → preview (caption, send) → Status share sheet ──
+let capStream = null, capFacing = 'environment', capMode = 'photo', capRecorder = null, capChunks = [];
+let capMedia = null, capMediaUrl = null, capKind = null;
+const canLiveCamera = !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+async function startCapStream() {
+  stopCapStream();
+  try {
+    capStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: capFacing }, audio: capMode === 'video'
+    });
+    $('cap-video').srcObject = capStream;
+    await $('cap-video').play().catch(() => {});
+  } catch (_) {
+    capStream = null;
+    toast('Camera access was not allowed. Opening your phone camera.');
+    closeCapture();
+    $('cap-file-camera').click();
+  }
+}
+function stopCapStream() {
+  if (capStream) capStream.getTracks().forEach((t) => t.stop());
+  capStream = null;
+  $('cap-video').srcObject = null;
+}
+function openCapture() {
+  if (!canLiveCamera) { $('cap-file-camera').click(); return; }
+  $('cap-capture').hidden = false;
+  setCapMode(capMode);
+  startCapStream();
+}
+function closeCapture() {
+  if (capRecorder && capRecorder.state !== 'inactive') capRecorder.stop();
+  stopCapStream();
+  $('cap-capture').hidden = true;
+}
+function setCapMode(mode) {
+  capMode = mode;
+  $('mode-photo').classList.toggle('on', mode === 'photo');
+  $('mode-video').classList.toggle('on', mode === 'video');
+  $('cap-shutter').classList.remove('rec');
+}
+function showPreview(blob, kind) {
+  stopCapStream();
+  $('cap-capture').hidden = true;
+  if (capMediaUrl) URL.revokeObjectURL(capMediaUrl);
+  capMedia = blob;
+  capKind = kind;
+  capMediaUrl = URL.createObjectURL(blob);
+  const holder = $('cap-media');
+  holder.textContent = '';
+  const node = el(kind === 'video' ? 'video' : 'img');
+  node.src = capMediaUrl;
+  if (kind === 'video') { node.controls = true; node.playsInline = true; }
+  holder.appendChild(node);
+  $('cap-caption').value = '';
+  $('cap-preview').hidden = false;
+}
+function closePreview() {
+  $('cap-preview').hidden = true;
+  if (capMediaUrl) URL.revokeObjectURL(capMediaUrl);
+  capMediaUrl = null;
+  capMedia = null;
+}
+function takePhoto() {
+  const v = $('cap-video');
+  if (!v.videoWidth) { toast('Camera is still starting'); return; }
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  c.toBlob((blob) => { if (blob) showPreview(blob, 'image'); }, 'image/jpeg', 0.92);
+}
+function toggleRecord() {
+  if (capRecorder && capRecorder.state === 'recording') { capRecorder.stop(); return; }
+  if (!capStream || typeof MediaRecorder === 'undefined') { toast('Video recording is not supported in this browser'); return; }
+  capChunks = [];
+  try { capRecorder = new MediaRecorder(capStream); }
+  catch (_) { toast('Video recording is not supported in this browser'); return; }
+  capRecorder.ondataavailable = (e) => { if (e.data && e.data.size) capChunks.push(e.data); };
+  capRecorder.onstop = () => {
+    $('cap-shutter').classList.remove('rec');
+    const type = capRecorder.mimeType || 'video/webm';
+    const blob = new Blob(capChunks, { type });
+    if (blob.size) showPreview(blob, 'video');
+  };
+  capRecorder.start();
+  $('cap-shutter').classList.add('rec');
+}
+
+$('status-camera').addEventListener('click', openCapture);
+$('cap-close').addEventListener('click', closeCapture);
+$('cap-shutter').addEventListener('click', () => { if (capMode === 'photo') takePhoto(); else toggleRecord(); });
+$('mode-photo').addEventListener('click', () => { if (!capRecorder || capRecorder.state !== 'recording') { setCapMode('photo'); } });
+$('mode-video').addEventListener('click', () => { if (!capRecorder || capRecorder.state !== 'recording') { setCapMode('video'); startCapStream(); } });
+$('cap-flip').addEventListener('click', () => { capFacing = capFacing === 'environment' ? 'user' : 'environment'; startCapStream(); });
+$('cap-flash').addEventListener('click', () => toast('Flash is not available in the web camera'));
+$('cap-zoom').addEventListener('click', () => toast('Zoom is coming soon'));
+$('cap-gallery').addEventListener('click', () => { $('cap-file-gallery').click(); });
+$('cap-file-camera').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (f) showPreview(f, f.type.startsWith('video') ? 'video' : 'image');
+});
+$('cap-file-gallery').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (f) { closeCapture(); showPreview(f, f.type.startsWith('video') ? 'video' : 'image'); }
+});
+$('cap-retake').addEventListener('click', () => { closePreview(); if (canLiveCamera) openCapture(); });
+document.querySelectorAll('#cap-preview [data-soon]').forEach((b) => {
+  b.addEventListener('click', () => toast(b.dataset.soon + ' is coming soon'));
+});
+$('cap-send').addEventListener('click', () => {
+  // Hand the captured media to the Status share sheet. Sending to a person or Status comes later.
+  $('cap-preview').hidden = true;
+  openCamDialog();
+  toast('Choose who to share with (sending comes later)');
+});
 $('cam-close').addEventListener('click', closeCamDialog);
 $('cam-search').addEventListener('input', renderCam);
 $('cam-dialog').addEventListener('click', (e) => { if (e.target.id === 'cam-dialog') closeCamDialog(); });
