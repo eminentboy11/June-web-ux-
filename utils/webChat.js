@@ -1765,7 +1765,10 @@ function attachChatUI(app, deps) {
             const outgoing = !!fromDigits && (fromDigits === digits(sock?.user?.id) || fromDigits === digits(sock?.user?.lid));
             const dir = outgoing ? 'outgoing' : 'incoming';
             const video = !!call.isVideo;
-            const ts = (Number(call.date) || Math.floor(Date.now() / 1000)) * 1000;
+            // call.date is a Date (milliseconds) in Baileys. Only convert when it looks like seconds,
+            // otherwise the timestamp lands ~1000x in the future and the 3-minute expiry never runs.
+            const rawDate = call.date instanceof Date ? call.date.getTime() : Number(call.date);
+            const ts = rawDate > 1e12 ? rawDate : (rawDate > 0 ? rawDate * 1000 : Date.now());
             const callChat = canonicalChat(chatId);
             // Incoming rejects are calls the caller ended before you answered: WhatsApp shows them as missed.
             const finalOutcome = {

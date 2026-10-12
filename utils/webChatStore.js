@@ -508,7 +508,11 @@ function createWebChatStore({ dbPath, phonebookPath }) {
     function listCalls(limit = 100) {
         try {
             return db.prepare('SELECT call_id, chat_jid, direction, outcome, is_video, ts FROM webchat_calls ORDER BY ts DESC LIMIT ?')
-                .all(limit).map((r) => ({ id: r.call_id, jid: r.chat_jid, direction: r.direction, outcome: r.outcome, isVideo: r.is_video === 1, ts: r.ts }));
+                .all(limit).map((r) => ({
+                    id: r.call_id, jid: r.chat_jid, direction: r.direction, outcome: r.outcome, isVideo: r.is_video === 1,
+                    // Rows stored before the fix can hold microseconds (1000x too large). Bring them back to ms.
+                    ts: Number(r.ts) > 1e14 ? Math.floor(Number(r.ts) / 1000) : r.ts,
+                }));
         } catch (_) { return []; }
     }
 
