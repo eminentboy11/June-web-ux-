@@ -1085,6 +1085,17 @@ function attachChatUI(app, deps) {
                     }
                 }
             }
+            // Delete/edit notices quote the message they are about.
+            if (d.notice && !d.quoted) {
+                const found = findStored(d.notice.targetChat, d.notice.targetId);
+                if (found) {
+                    const q = quotedDescriptor(found.msg);
+                    for (const [, meta] of chatStore.getMsgMetas(found.chat, [d.notice.targetId])) {
+                        if (meta && meta.editText != null) q.text = meta.editText;
+                    }
+                    d.quoted = { id: q.id, sender: q.sender, pushName: q.pushName, text: q.text, mediaKind: q.mediaKind, fromMe: q.fromMe };
+                }
+            }
             if (d.deleted) { d.text = 'This message was deleted'; d.media = null; d.poll = null; }
         }
         // Cursor = oldest message on screen. With nothing in memory, ask the

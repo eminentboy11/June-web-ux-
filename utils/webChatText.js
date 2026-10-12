@@ -60,12 +60,28 @@ function unwrapMessage(m) {
             inner.viewOnceMessage?.message ||
             inner.viewOnceMessageV2?.message ||
             inner.viewOnceMessageV2Extension?.message ||
-            inner.documentWithCaptionMessage?.message;
+            inner.documentWithCaptionMessage?.message ||
+            inner.editedMessage?.message;
         if (!next) break;
         inner = next;
     }
     return inner;
 }
+
+// Mathematical Bold Italic letters (𝑻𝒉𝒆 𝒎𝒆𝒔𝒔𝒂𝒈𝒆), used for June's own notices.
+function boldItalic(text) {
+    return String(text).replace(/[A-Za-z]/g, (c) => {
+        const code = c.charCodeAt(0);
+        return c <= 'Z'
+            ? String.fromCodePoint(0x1D468 + code - 65)
+            : String.fromCodePoint(0x1D482 + code - 97);
+    });
+}
+
+const NOTICE_TEXT = {
+    deleted: boldItalic('The message above was deleted but June x got you covered') + ' 😂',
+    edited: boldItalic('The message above was edited but June x got you covered') + ' ✏️',
+};
 
 function messageText(msg) {
     if (!msg || !msg.message) return '';
@@ -85,8 +101,8 @@ function messageText(msg) {
     if (inner.protocolMessage) {
         // Delete-for-everyone and edit notices read as June notes, not system messages.
         const t = Number(inner.protocolMessage.type);
-        if (t === 0) return 'The message above was deleted but June x got you covered 😂';
-        if (t === 14) return 'The message above was edited but June x got you covered ✏️';
+        if (t === 0) return NOTICE_TEXT.deleted;
+        if (t === 14) return NOTICE_TEXT.edited;
         return '⚙️ System message';
     }
     if (msg.messageStubType != null) return '⚙️ Notification';
@@ -231,6 +247,19 @@ function revokedTargetKey(inner) {
     return proto.key;
 }
 
+// Delete / edit notice: which message it is about (the quote target).
+function noticeOf(inner) {
+    const proto = inner?.protocolMessage;
+    if (!proto || !proto.key?.id) return null;
+    const t = Number(proto.type);
+    if (t !== 0 && t !== 14) return null;
+    return {
+        kind: t === 0 ? 'deleted' : 'edited',
+        targetId: String(proto.key.id),
+        targetChat: String(proto.key.remoteJid || ''),
+    };
+}
+
 // Slim DTO sent to the browser. Media messages carry a descriptor so the page
 // can render them via /api/media (the text is the caption, not a label).
 // `meta` (optional) attaches status ticks, reactions, quoted blocks, polls
@@ -265,6 +294,7 @@ function slimMessage(m, meta, meJids) {
         mentions: extractMentions(inner),
         forwarded: isForwardedMsg(inner),
         poll: pollDto(inner, meta, meJids),
+        notice: noticeOf(inner),
         history: false,
     };
 }
@@ -287,5 +317,6 @@ module.exports = {
     pollDto,
     editedTextFromProtocol,
     revokedTargetKey,
+    noticeOf,
     slimMessage,
 };

@@ -185,6 +185,7 @@
   .msg-row.them .bubble{background:var(--them);border:1px solid rgba(255,255,255,.08);border-bottom-left-radius:3px}
   .msg-row.me.cont .bubble{border-top-right-radius:3px}
   .msg-row.them.cont .bubble{border-top-left-radius:3px}
+  .bubble.notice{font-size:.74rem}
   .bubble .sender{font-size:.66rem;color:var(--orange);margin-bottom:2px;font-weight:600}
   .bubble .ts{font-size:.6rem;color:var(--muted);margin-top:4px;display:flex;justify-content:flex-end;align-items:center;gap:5px;font-family:'JetBrains Mono',monospace}
   .ticks{font-size:.62rem;letter-spacing:-1px;line-height:1}
@@ -1074,7 +1075,7 @@ function attachSwipeReply(row, bubble, m) {
 function renderRow(m, cont) {
   const row = el('div', 'msg-row ' + (m.fromMe ? 'me' : 'them') + (cont ? ' cont' : ''));
   if (m.id) row.setAttribute('data-msg-id', m.id);
-  const bubble = el('div', 'bubble' + (m.deleted ? ' deleted' : ''));
+  const bubble = el('div', 'bubble' + (m.deleted ? ' deleted' : '') + (m.notice ? ' notice' : ''));
   attachSwipeReply(row, bubble, m);
   if (!m.fromMe && state.currentIsGroup && m.sender && !cont) {
     bubble.appendChild(el('div', 'sender', m.pushName || m.sender.split('@')[0]));
