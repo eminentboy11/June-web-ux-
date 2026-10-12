@@ -196,7 +196,7 @@
   .mention{color:var(--cyan);font-weight:600}
   .media{margin-bottom:4px}
   .media-img{max-width:260px;max-height:300px;border-radius:8px;display:block;cursor:pointer;border:1px solid var(--border)}
-  .media-video{max-width:300px;border-radius:8px;display:block;border:1px solid var(--border)}
+  .media-video{display:block;width:100%;max-width:300px;min-height:180px;background:#000;border-radius:8px;border:1px solid var(--border)}
   .media-audio{max-width:280px;display:block}
   .wave{display:flex;align-items:flex-end;gap:2px;height:28px;margin-bottom:4px;min-width:200px;cursor:pointer;touch-action:manipulation}
   .wave span{flex:1;background:var(--muted);border-radius:2px;min-height:3px;opacity:.7}
@@ -1041,6 +1041,8 @@ function attachSwipeReply(row, bubble, m) {
   const hint = el('span', 'swipe-hint', '↩');
   row.appendChild(hint);
   row.addEventListener('touchstart', (ev) => {
+    // Touches on media controls (video, audio, buttons, links) belong to that control, not to the swipe.
+    if (isInteractive(ev.target)) { x0 = null; return; }
     const t = ev.touches[0];
     x0 = t.clientX; y0 = t.clientY; dx = 0; locked = false;
   }, { passive: true });
