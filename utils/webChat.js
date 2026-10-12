@@ -695,7 +695,18 @@ function attachChatUI(app, deps) {
             return { buf: cached.buf, mime: cached.mime, fileName: cached.fileName, kind: cached.kind };
         }
         const buf = await downloadMedia(media.content, media.kind);
-        const entry = { buf, mime: media.mime, fileName: media.fileName, kind: media.kind, size: buf.length, ts: Date.now() };
+        // WhatsApp voice notes are Ogg/Opus, which iPhone Safari cannot play (the player spins forever).
+        // Convert them to MP3 for the browser. If conversion fails, serve the original file.
+        let playBuf = buf, playMime = media.mime;
+        if (media.kind === 'audio' && /ogg|opus/i.test(media.mime || '')) {
+            try {
+                playBuf = await runFfmpeg(['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-vn', '-codec:a', 'libmp3lame', '-b:a', '64k', '-f', 'mp3', 'pipe:1'], buf);
+                playMime = 'audio/mpeg';
+            } catch (_) {
+                playBuf = buf; playMime = media.mime;
+            }
+        }
+        const entry = { buf: playBuf, mime: playMime, fileName: media.fileName, kind: media.kind, size: playBuf.length, ts: Date.now() };
         cacheMedia(key, entry);
         return { buf: entry.buf, mime: entry.mime, fileName: entry.fileName, kind: entry.kind };
     }
