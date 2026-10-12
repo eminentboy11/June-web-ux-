@@ -1307,9 +1307,9 @@ async function startJunexBot() {
         try { webChatHandle?.handleReceiptUpdate?.(receipts) } catch (_) {}
     })
     for (const ev of ['chats.upsert', 'chats.update']) {
-        sock.ev.on(ev, (list) => { try { webChatHandle?.handleChats?.(list) } catch (_) {} })
+        sock.ev.on(ev, (list) => { try { webChatHandle?.handleChats?.(list, ev) } catch (_) {} })
     }
-    sock.ev.on('chats.set', ({ chats } = {}) => { try { webChatHandle?.handleChats?.(chats) } catch (_) {} })
+    sock.ev.on('chats.set', ({ chats } = {}) => { try { webChatHandle?.handleChats?.(chats, 'chats.set') } catch (_) {} })
     sock.ev.on('call', (calls) => {
         for (const c of calls || []) {
             try { webChatHandle?.logCall?.(c) } catch (_) {}
@@ -1348,6 +1348,8 @@ async function startJunexBot() {
             ).toLowerCase()
             // A 401 with "conflict" is recoverable and must not erase the verified session.
             const isConflict401 = statusCode === 401 && disconnectMessage.includes('conflict')
+            // Full reason for every disconnect, so a logout can be traced to its cause.
+            console.log(`[disconnect] code=${statusCode} reason="${lastDisconnect?.error?.message || 'none'}" lastWebChatAction=${global.lastWebChatAction || 'none'} at=${new Date().toISOString()}`)
 
             // 403 means WhatsApp refused the account outright — almost always a ban.
             const isForbidden = statusCode === 403
