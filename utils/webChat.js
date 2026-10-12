@@ -556,8 +556,9 @@ function attachChatUI(app, deps) {
                 if (!reactedTo?.id || !reactedTo?.remoteJid) continue;
                 linkKey(reactedTo);
                 linkKey(reaction?.key);
+                // Same canonical chat address as the message rows (a contact may be addressed by LID).
                 applyReactionUpdate(
-                    reactedTo.remoteJid,
+                    canonicalChat(reactedTo.remoteJid),
                     String(reactedTo.id),
                     typeof reaction.text === 'string' ? reaction.text : '',
                     reactionSender(reaction.key)
@@ -1879,6 +1880,17 @@ function attachChatUI(app, deps) {
             const inner = unwrapMessage(msg?.message || {});
             if (inner.protocolMessage) { handleProtocol(inner); return; }
             if (inner.pollUpdateMessage) { handlePollVote(msg, inner.pollUpdateMessage); return; }
+            // Some reactions arrive as ordinary messages. Apply them like messages.reaction
+            // (applying the same reaction twice is harmless: one reaction per person).
+            if (inner.reactionMessage) {
+                const rm = inner.reactionMessage;
+                const target = rm.key || {};
+                handleReactions([{
+                    key: { id: target.id, remoteJid: target.remoteJid || msg.key.remoteJid, fromMe: target.fromMe },
+                    reaction: { text: rm.text, key: msg.key },
+                }]);
+                return;
+            }
             if (msg?.key?.remoteJid === 'status@broadcast' && msg.key.id && extractMedia(inner)) {
                 chatStore.saveRaw('status@broadcast', msg.key.id, msgTs(msg), msg);
             }
