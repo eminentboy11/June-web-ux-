@@ -187,6 +187,12 @@ function createWebChatStore({ dbPath, phonebookPath }) {
                 text,
                 msgTs(msg) || Date.now()
             );
+            // Keep the full body of media messages so /api/media still works after the
+            // in-memory recent store has dropped them (restart, eviction, or a missed echo).
+            const inner = unwrapMessage(msg.message || {});
+            if (['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage', 'stickerMessage'].some((k) => inner[k])) {
+                saveRaw(jid, String(msg.key.id), msgTs(msg) || Date.now(), msg);
+            }
             // Phonebook: remember the WhatsApp profile name of everyone who DMs us.
             if (!msg.key.fromMe && msg.pushName && !msg.key.participant) {
                 const num = digits(jid);

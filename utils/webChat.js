@@ -684,7 +684,8 @@ function attachChatUI(app, deps) {
 
     async function resolveMedia(jid, msgId) {
         let msg = store?.messages?.get(jid)?.get(msgId);
-        if (!msg && jid === 'status@broadcast') msg = chatStore.getRaw(jid, msgId);
+        // Fall back to the saved body when the recent store no longer has the message.
+        if (!msg) msg = chatStore.getRaw(jid, msgId);
         if (!msg) return { error: 404, message: 'message not in recent store (media expired)' };
         const media = extractMedia(unwrapMessage(msg.message || {}));
         if (!media) return { error: 400, message: 'not a media message' };
