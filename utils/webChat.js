@@ -44,7 +44,7 @@ const express = require('express');
 
 const { spawn } = require('child_process');
 const pollCrypto = require('./webChatPoll');
-const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits, protoTypeOf, secretEditOf, messageText } = require('./webChatText');
+const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits, protoTypeOf, secretEditOf, messageText, isNoticeRow } = require('./webChatText');
 const { decryptEdit } = require('./msgSecret');
 const { proto: waProto } = require('@whiskeysockets/baileys');
 const { createWebChatStore } = require('./webChatStore');
@@ -898,6 +898,7 @@ function attachChatUI(app, deps) {
                 let lastIn = null;
                 for (const m of msgs.values()) {
                     if (!m?.key || m.message?.reactionMessage) continue; // reactions aren't previews
+                    if (isNoticeRow(m)) continue; // delete/edit rows are not shown
                     count++;
                     last = m; // insertion order → last non-reaction is newest
                     if (!m.key.fromMe) lastIn = m;
@@ -1080,6 +1081,7 @@ function attachChatUI(app, deps) {
         const memDtos = list.map((m) => slimMessage(m, metas.get(m?.key?.id), mine));
         const indexDtos = dbFill.map((r) => dbRowToDto(r, metas.get(r.id) || {}, mine));
         const dtos = indexDtos.concat(memDtos)
+            .filter((d) => !d.notice) // delete/edit rows are not shown; the target carries the state
             .sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.id).localeCompare(String(b.id)))
             .slice(-limit);
         // Enrich quoted blocks with the sender's profile name when we have it.
@@ -1092,20 +1094,6 @@ function attachChatUI(app, deps) {
                         d.quoted.fromMe = !!qm.key?.fromMe;
                         break;
                     }
-                }
-            }
-            // Delete/edit notices quote the message they are about.
-            if (d.notice && !d.quoted) {
-                const found = findStored(d.notice.targetChat, d.notice.targetId)
-                    || (d.notice.senderChat ? findStored(d.notice.senderChat, d.notice.targetId) : null);
-                if (found) {
-                    const q = quotedDescriptor(found.msg);
-                    const addrs = new Set([found.chat, found.msg?.key?.remoteJid, d.notice.targetChat, d.notice.senderChat].filter(Boolean));
-                    for (const a of addrs) {
-                        const meta = chatStore.getMsgMetas(a, [d.notice.targetId]).get(String(d.notice.targetId));
-                        if (meta && meta.editText != null) q.text = meta.editText;
-                    }
-                    d.quoted = { id: q.id, sender: q.sender, pushName: q.pushName, text: q.text, mediaKind: q.mediaKind, fromMe: q.fromMe };
                 }
             }
             if (d.deleted) { d.text = 'This message was deleted'; d.media = null; d.poll = null; }

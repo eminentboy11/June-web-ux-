@@ -287,6 +287,12 @@ function noticeOf(inner, outerKey) {
     };
 }
 
+// True for delete/edit protocol rows. They are not shown in the chat; the target
+// message carries the deleted / edited state instead.
+function isNoticeRow(m) {
+    return !!noticeOf(unwrapMessage(m?.message || {}), m?.key);
+}
+
 // Slim DTO sent to the browser. Media messages carry a descriptor so the page
 // can render them via /api/media (the text is the caption, not a label).
 // `meta` (optional) attaches status ticks, reactions, quoted blocks, polls
@@ -345,6 +351,7 @@ module.exports = {
     editedTextFromProtocol,
     revokedTargetKey,
     noticeOf,
+    isNoticeRow,
     protoTypeOf,
     secretEditOf,
     slimMessage,
