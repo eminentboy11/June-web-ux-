@@ -45,7 +45,7 @@ const express = require('express');
 const { spawn } = require('child_process');
 const pollCrypto = require('./webChatPoll');
 const { unwrapMessage, extractMedia, slimMessage, msgTs, STATUS, applyReaction, quotedDescriptor, editedTextFromProtocol, digits, protoTypeOf, secretEditOf, messageText, isSilentRow } = require('./webChatText');
-const { decryptEdit } = require('./msgSecret');
+const { decryptEdit, writeEditDebug } = require('./msgSecret');
 const { proto: waProto } = require('@whiskeysockets/baileys');
 const { createWebChatStore } = require('./webChatStore');
 
@@ -2060,22 +2060,36 @@ function attachChatUI(app, deps) {
             const ms = found?.msg?.message?.messageContextInfo?.messageSecret;
             if (ms) secret = typeof ms === 'string' ? ms : Buffer.from(ms).toString('base64');
         }
+        const editor = [msg?.key?.remoteJid, msg?.key?.remoteJidAlt, msg?.key?.participant]
+            .filter((j) => j && !String(j).endsWith('@g.us'));
+        const dbg = {
+            at: new Date().toISOString(),
+            targetId: id,
+            targetRemoteJid: target.remoteJid || null,
+            targetFromMe: target.fromMe ?? null,
+            editorJids: editor,
+            secretEncType: sem.secretEncType ?? null,
+            encIv: sem.encIv ?? null,
+            encPayload: sem.encPayload ?? null,
+            messageSecret: secret || null,
+        };
         if (!secret) {
+            writeEditDebug({ ...dbg, result: 'secret-not-found' });
             console.log(`[WEBCHAT] edit ${id}: original message secret not found, cannot decrypt`);
             return;
         }
-        const editor = [msg?.key?.remoteJid, msg?.key?.remoteJidAlt, msg?.key?.participant]
-            .filter((j) => j && !String(j).endsWith('@g.us'));
         const plain = decryptEdit({
             encPayload: sem.encPayload, encIv: sem.encIv, targetId: id, secret,
             origSenders: [...new Set([...editor, target.remoteJid].filter(Boolean))],
             modSenders: [...new Set(editor)],
         });
         if (!plain) {
+            writeEditDebug({ ...dbg, result: 'decrypt-failed' });
             console.log(`[WEBCHAT] edit ${id}: could not decrypt`);
             return;
         }
         const text = messageText({ message: waProto.Message.decode(plain) });
+        writeEditDebug({ ...dbg, result: 'ok', text });
         for (const c of chats) {
             chatStore.setMsgMeta(c, id, { editText: text, edited: true });
             chatStore.updateIndexText(c, id, text);
