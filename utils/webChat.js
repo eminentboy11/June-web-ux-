@@ -697,9 +697,25 @@ function attachChatUI(app, deps) {
 
     /* ── shared name resolution ─────────────────────────────────────────── */
 
+    // The owner's own chat is labelled with the owner's profile name plus "(You)",
+    // like WhatsApp does. Baileys fills creds.me.name from the owner's own messages.
+    function ownChatLabel(canon) {
+        try {
+            const me = getSock()?.authState?.creds?.me;
+            const users = [me?.id, me?.lid].map((j) => String(j || '').split(':')[0].split('@')[0]).filter(Boolean);
+            const user = String(canon || '').split(':')[0].split('@')[0];
+            if (!user || !users.includes(user)) return null;
+            if (!/@(s\.whatsapp\.net|lid)$/.test(String(canon))) return null;
+            const name = typeof me?.name === 'string' ? me.name.trim() : '';
+            return name && name !== '~' ? `${name} (You)` : 'You';
+        } catch (_) { return null; }
+    }
+
     function chatDisplayName(jid, lastMsg) {
         const canon = getJidMap().canonical(jid);
         if (canon.endsWith('@g.us')) return groupNames.get(canon) || null;
+        const own = ownChatLabel(canon);
+        if (own) return own;
         // lastMsg must be the other side's message: our own pushName is our name, not theirs.
         return chatStore.phonebookName(canon) || lastMsg?.pushName || null;
     }
