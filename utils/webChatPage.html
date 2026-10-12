@@ -50,6 +50,23 @@
   .archive-row:hover{background:rgba(0,255,224,.05)}
   .archive-label{flex:1}
   .archive-count{color:var(--muted);font-size:.72rem}
+  .swipe-wrap{position:relative;overflow:hidden}
+  .swipe-wrap .chat-item{position:relative;background:var(--bg);touch-action:pan-y;transition:transform .18s ease}
+  .swipe-actions{position:absolute;top:0;bottom:0;display:flex;width:150px}
+  .swipe-actions.left{right:0;justify-content:flex-end}
+  .swipe-actions.right{left:0}
+  .swipe-btn{flex:1;border:0;color:#fff;font:inherit;font-size:.72rem;cursor:pointer}
+  .swipe-btn.more{background:#4a4a4a}
+  .swipe-btn.archive{background:#1f9d55}
+  .swipe-btn.unread{background:#1f9d55}
+  .swipe-btn.pin{background:#4a4a4a}
+  .call-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer}
+  .call-row:hover{background:rgba(0,255,224,.04)}
+  .call-meta{flex:1;min-width:0}
+  .call-name{font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .call-sub{font-size:.72rem;color:var(--muted);margin-top:2px}
+  .call-sub.missed{color:var(--red)}
+  .call-time{font-size:.68rem;color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap}
   .empty{padding:18px 14px;font-size:.75rem;color:var(--muted);text-align:center}
   .avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;flex:none;border:1px solid var(--border);display:block;background:rgba(0,255,224,.08)}
   .avatar-fallback{display:flex;align-items:center;justify-content:center;color:var(--cyan);font-weight:600;font-size:.85rem;font-family:'JetBrains Mono',monospace}
@@ -277,9 +294,11 @@
     </div>
     <div class="tabs">
       <button id="tab-chats" class="tab active" type="button">Chats</button>
+      <button id="tab-calls" class="tab" type="button">Calls</button>
       <button id="tab-updates" class="tab" type="button">Updates<span id="updates-badge" class="unread" hidden></span></button>
     </div>
     <div id="updates-list" hidden></div>
+    <div id="calls-list" hidden></div>
     <div id="search-wrap"><input id="search" placeholder="search messages…" style="width:100%"></div>
     <div id="chat-list"><div class="empty">loading…</div></div>
   </aside>
@@ -371,7 +390,7 @@
 <script>
 'use strict';
 const state = {
-  pending: [], loadingJid: null, tab: 'chats', showArchived: false, readOnly: false, updates: null,
+  pending: [], loadingJid: null, tab: 'chats', showArchived: false, swiping: false, chatsDirty: true, readOnly: false, updates: null,
   chats: [], currentJid: null, currentName: '', currentIsGroup: false, filter: '', connected: false,
   memory: [],          // latest page from the live store
   history: [],         // older pages loaded automatically (or by scrolling up / search)
@@ -490,8 +509,15 @@ function setComposerEnabled() {
 async function loadChats() {
   try {
     const r = await api('/api/chats?limit=100');
-    state.chats = r.chats || [];
-    if (!state.filter.trim()) renderChats();
+    const next = r.chats || [];
+    const changed = JSON.stringify(next) !== JSON.stringify(state.chats);
+    state.chats = next;
+    if (changed) state.chatsDirty = true;
+    if (!state.chatsDirty || state.filter.trim()) return;
+    // The 5-second refresh must not rebuild rows under a finger or hide a revealed row.
+    if (state.swiping || document.querySelector('.swipe-wrap.open-left, .swipe-wrap.open-right')) return;
+    state.chatsDirty = false;
+    renderChats();
   } catch (_) {}
 }
 
@@ -512,7 +538,9 @@ function renderChats() {
     const row = el('div', 'archive-row');
     row.appendChild(el('span', 'archive-ico', '🗄'));
     row.appendChild(el('span', 'archive-label', 'Archived'));
-    row.appendChild(el('span', 'archive-count', String(archived.length)));
+    // Total unread messages across archived chats (what WhatsApp shows in the Archived row).
+    const unread = archived.reduce((n, c) => n + (c.unread || 0), 0);
+    if (unread > 0) row.appendChild(el('span', 'archive-count', String(unread)));
     row.addEventListener('click', () => { state.showArchived = true; renderChats(); });
     list.appendChild(row);
   }
@@ -534,9 +562,101 @@ function drawChatItems(list, chats, emptyText) {
     col.appendChild(el('div', 'preview', c.preview));
     item.appendChild(av);
     item.appendChild(col);
-    item.addEventListener('click', () => openChat(c.jid, c.name, c.isGroup));
-    list.appendChild(item);
+    const wrap = el('div', 'swipe-wrap');
+    item.addEventListener('click', () => {
+      if (wrap.classList.contains('open-left') || wrap.classList.contains('open-right')) { closeSwipe(wrap); return; }
+      openChat(c.jid, c.name, c.isGroup);
+    });
+    wrap.appendChild(chatSwipeActions(c, 'left'));
+    wrap.appendChild(chatSwipeActions(c, 'right'));
+    wrap.appendChild(item);
+    attachChatSwipe(wrap, item);
+    list.appendChild(wrap);
   }
+}
+
+// Swipe-left reveals More / Archive; swipe-right reveals Unread / Pin.
+function chatSwipeActions(c, side) {
+  const box = el('div', 'swipe-actions ' + side);
+  const buttons = side === 'left'
+    ? [
+        { label: 'More', cls: 'more', run: () => openChat(c.jid, c.name, c.isGroup) },
+        { label: c.archived ? 'Unarchive' : 'Archive', cls: 'archive', run: () => chatAction(c, c.archived ? 'unarchive' : 'archive') },
+      ]
+    : [
+        { label: c.unread > 0 ? 'Read' : 'Unread', cls: 'unread', run: () => chatAction(c, c.unread > 0 ? 'markRead' : 'markUnread') },
+        { label: c.pinned ? 'Unpin' : 'Pin', cls: 'pin', run: () => chatAction(c, c.pinned ? 'unpin' : 'pin') },
+      ];
+  for (const b of buttons) {
+    const btn = el('button', 'swipe-btn ' + b.cls, b.label);
+    btn.type = 'button';
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeSwipe(box.parentElement);
+      b.run();
+    });
+    box.appendChild(btn);
+  }
+  return box;
+}
+
+function closeSwipe(wrap) {
+  if (!wrap) return;
+  wrap.classList.remove('open-left', 'open-right');
+  const item = wrap.querySelector('.chat-item');
+  if (item) item.style.transform = '';
+}
+
+async function chatAction(c, action) {
+  try {
+    await postJson('/api/chat/action', { jid: c.jid, action });
+    await loadChats();
+  } catch (err) {
+    alert(err.message || 'That action failed');
+  }
+}
+
+function attachChatSwipe(wrap, item) {
+  const OPEN = 150, SNAP = 80;
+  let x0 = null, y0 = null, dx = 0, locked = false, startOpen = null;
+  item.addEventListener('touchstart', (ev) => {
+    const t = ev.touches[0];
+    x0 = t.clientX; y0 = t.clientY; dx = 0; locked = false;
+    startOpen = wrap.classList.contains('open-left') ? -OPEN : wrap.classList.contains('open-right') ? OPEN : 0;
+    item.style.transition = 'none';
+    state.swiping = true;
+  }, { passive: true });
+  item.addEventListener('touchmove', (ev) => {
+    if (x0 == null) return;
+    const t = ev.touches[0];
+    const mx = t.clientX - x0, my = t.clientY - y0;
+    if (!locked) {
+      if (Math.abs(my) > 12 && Math.abs(my) > Math.abs(mx)) { x0 = null; return; } // vertical scroll
+      if (Math.abs(mx) > 12) locked = true; else return;
+    }
+    dx = mx;
+    const pos = Math.max(-OPEN, Math.min(OPEN, startOpen + dx));
+    item.style.transform = `translateX(${pos}px)`;
+  }, { passive: true });
+  const end = () => {
+    state.swiping = false;
+    if (x0 == null && !locked) { if (state.chatsDirty) renderChats(); return; }
+    const pos = startOpen + dx;
+    x0 = null; locked = false;
+    item.style.transition = '';
+    wrap.classList.remove('open-left', 'open-right');
+    if (Math.abs(dx) < 12) { closeSwipe(wrap); return; }
+    if (pos <= -SNAP) { wrap.classList.add('open-left'); item.style.transform = `translateX(-${OPEN}px)`; }
+    else if (pos >= SNAP) { wrap.classList.add('open-right'); item.style.transform = `translateX(${OPEN}px)`; }
+    else item.style.transform = '';
+    dx = 0;
+    if (state.chatsDirty && !document.querySelector('.swipe-wrap.open-left, .swipe-wrap.open-right')) {
+      state.chatsDirty = false;
+      renderChats();
+    }
+  };
+  item.addEventListener('touchend', end);
+  item.addEventListener('touchcancel', end);
 }
 
 function openChat(jid, name, isGroup) {
@@ -1488,14 +1608,50 @@ document.addEventListener('keydown', (e) => {
 function setTab(tab) {
   state.tab = tab;
   $('tab-chats').classList.toggle('active', tab === 'chats');
+  $('tab-calls').classList.toggle('active', tab === 'calls');
   $('tab-updates').classList.toggle('active', tab === 'updates');
   $('chat-list').hidden = tab !== 'chats';
   $('search-wrap').hidden = tab !== 'chats';
+  $('calls-list').hidden = tab !== 'calls';
   $('updates-list').hidden = tab !== 'updates';
   if (tab === 'updates') loadUpdates();
+  if (tab === 'calls') loadCalls();
 }
 $('tab-chats').addEventListener('click', () => setTab('chats'));
+$('tab-calls').addEventListener('click', () => setTab('calls'));
 $('tab-updates').addEventListener('click', () => setTab('updates'));
+
+const CALL_LABELS = {
+  answered: 'Answered', missed: 'Missed', declined: 'Declined',
+  rejected: 'Rejected', 'no answer': 'No answer', ringing: 'Ringing', ended: 'Ended',
+};
+async function loadCalls() {
+  try {
+    const r = await api('/api/calls');
+    renderCalls(r.calls || []);
+  } catch (_) {}
+}
+function renderCalls(calls) {
+  const list = $('calls-list');
+  list.textContent = '';
+  if (!calls.length) { list.appendChild(el('div', 'empty', 'no calls yet — they appear here as the bot sees them')); return; }
+  for (const c of calls) {
+    const row = el('div', 'call-row');
+    const av = el('span', 'avatar');
+    setAvatar(av, c.jid, c.name);
+    const meta = el('div', 'call-meta');
+    meta.appendChild(el('div', 'call-name', c.name));
+    const missed = c.outcome === 'missed' || c.outcome === 'declined';
+    const arrow = c.direction === 'outgoing' ? '↗' : '↙';
+    meta.appendChild(el('div', 'call-sub' + (missed ? ' missed' : ''),
+      `${arrow} ${CALL_LABELS[c.outcome] || c.outcome}${c.isVideo ? ' · video' : ''}`));
+    row.appendChild(av);
+    row.appendChild(meta);
+    row.appendChild(el('span', 'call-time', fmtTime(c.ts)));
+    row.addEventListener('click', () => { setTab('chats'); openChat(c.jid, c.name, false); });
+    list.appendChild(row);
+  }
+}
 
 async function loadUpdates() {
   try {
@@ -2082,7 +2238,7 @@ $('poll-create').addEventListener('click', async () => {
 
 /* ── timers + boot ─────────────────────────────────────────────────────── */
 
-setInterval(() => { if (!document.hidden) { loadStatus(); loadChats(); if (state.tab === 'updates') loadUpdates(); } }, 5000);
+setInterval(() => { if (!document.hidden) { loadStatus(); loadChats(); if (state.tab === 'updates') loadUpdates(); if (state.tab === 'calls') loadCalls(); } }, 5000);
 setInterval(() => { if (!document.hidden) loadMessages(); }, 1200);
 $('messages').addEventListener('scroll', () => {
   if ($('messages').scrollTop < 40 && state.hasMore) loadOlder();

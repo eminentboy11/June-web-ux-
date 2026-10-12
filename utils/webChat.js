@@ -936,8 +936,17 @@ function attachChatUI(app, deps) {
                 unread: row.fromMe ? 0 : chatStore.countSince(jids, lastRead),
             });
         }
-        const chats = Array.from(merged.values()).map((c) => ({ ...c, archived: chatStore.isArchived(c.jid) }));
-        chats.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
+        const chats = Array.from(merged.values()).map((c) => {
+            const manual = chatStore.getFlag(c.jid, 'manual_unread');
+            return {
+                ...c,
+                archived: chatStore.isArchived(c.jid),
+                pinned: chatStore.getFlag(c.jid, 'pinned'),
+                manualUnread: manual,
+                unread: c.unread > 0 ? c.unread : (manual ? 1 : 0),
+            };
+        });
+        chats.sort((a, b) => (Number(b.pinned) - Number(a.pinned)) || ((b.lastTs || 0) - (a.lastTs || 0)));
         refreshGroupNames(chats.slice(0, MAX_GROUP_NAME_FETCHES));
         res.json({ ok: true, chats: chats.slice(0, limit) });
     });
@@ -1309,6 +1318,98 @@ function attachChatUI(app, deps) {
         }
     });
 
+    // Builds the lastMessages entry chatModify needs, or null when a field is missing.
+    function lastMessageForSync(chatJid, id, fromMe, participant, tsMs) {
+        if (!chatJid || !id || typeof fromMe !== 'boolean' || !tsMs || !Number.isFinite(Number(tsMs))) return null;
+        const isGroup = String(chatJid).endsWith('@g.us');
+        if (isGroup && !fromMe && !participant) return null;
+        const key = { remoteJid: String(chatJid), id: String(id), fromMe };
+        if (participant) key.participant = String(participant);
+        return [{ key, messageTimestamp: Math.floor(Number(tsMs) / 1000) }];
+    }
+
+    // Calls tab: newest first, with a readable name for each chat.
+    app.get('/api/calls', requireAuth, (req, res) => {
+        const rows = chatStore.listCalls(100).map((c) => {
+            let name = '';
+            try { name = chatDisplayName(c.jid, null) || ''; } catch (_) {}
+            // A call still "ringing" after 3 minutes never got a final event from WhatsApp.
+            const outcome = c.outcome === 'ringing' && Date.now() - c.ts > 3 * 60 * 1000 ? 'ended' : c.outcome;
+            return { ...c, outcome, name: name || c.jid.split('@')[0], number: c.jid.split('@')[0] };
+        });
+        res.json({ ok: true, calls: rows });
+    });
+
+    // Swipe actions on a chat row. Each one is synced to the phone with chatModify.
+    app.post('/api/chat/action', requireAuth, jsonParser, async (req, res) => {
+        try {
+            const { jid, action } = req.body || {};
+            if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
+            const ACTIONS = ['archive', 'unarchive', 'pin', 'unpin', 'markRead', 'markUnread'];
+            if (!ACTIONS.includes(action)) return res.status(400).json({ ok: false, error: 'unknown action' });
+            // Archive and unarchive from the web are paused: they coincided with session conflicts that force a relink.
+            if (action === 'archive' || action === 'unarchive') {
+                return res.status(501).json({ ok: false, error: 'Archive and unarchive from the web are paused while a session conflict is investigated. Nothing was changed.' });
+            }
+            const sock = getSock();
+            if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            if (typeof sock.chatModify !== 'function') return res.status(501).json({ ok: false, error: 'chat actions are not supported by this bot version' });
+
+            const canon = getJidMap().canonical(jid);
+            // WhatsApp needs the newest message to sync archive and read state.
+            let lastMessages = null;
+            if (['archive', 'unarchive', 'markRead', 'markUnread'].includes(action)) {
+                // WhatsApp can log every linked device out if chatModify gets incomplete data
+                // (Baileys docs). So the last message must be complete, or the action is skipped.
+                for (const k of getJidMap().related(canon)) {
+                    const msgs = store?.messages?.get(k);
+                    if (!msgs || !msgs.size) continue;
+                    const last = Array.from(msgs.values()).filter((m) => m?.key).pop();
+                    lastMessages = lastMessageForSync(k, last?.key?.id, last?.key?.fromMe, last?.key?.participant, msgTs(last));
+                    if (lastMessages) break;
+                }
+                // Archived chats are often not in memory any more; use the newest stored message.
+                if (!lastMessages) {
+                    for (const k of getJidMap().related(canon)) {
+                        const lk = chatStore.latestKey(k);
+                        if (!lk) continue;
+                        const participant = lk.sender && lk.sender !== k ? lk.sender : null;
+                        lastMessages = lastMessageForSync(k, lk.id, lk.fromMe, participant, lk.ts);
+                        if (lastMessages) break;
+                    }
+                }
+                if (!lastMessages) return res.status(409).json({ ok: false, error: 'not enough stored message data to sync this chat safely, so nothing was changed' });
+            }
+
+            const modify = {
+                archive: { archive: true, lastMessages },
+                unarchive: { archive: false, lastMessages },
+                pin: { pin: true },
+                unpin: { pin: false },
+                markRead: { markRead: true, lastMessages },
+                markUnread: { markRead: false, lastMessages },
+            }[action];
+            global.lastWebChatAction = `${action} @ ${new Date().toISOString()}`;
+            console.log(`[webchat] chat action ${action}: sending (${lastMessages ? 'with last message' : 'no last message'})`);
+            try {
+                await sock.chatModify(modify, canon);
+            } catch (err) {
+                console.log(`[webchat] chat action ${action} failed: ${err?.message || err}`);
+                throw err;
+            }
+            console.log(`[webchat] chat action ${action}: accepted by WhatsApp`);
+
+            // Local state follows only after WhatsApp accepted the change.
+            if (action === 'archive' || action === 'unarchive') chatStore.setArchived(canon, action === 'archive');
+            if (action === 'pin' || action === 'unpin') chatStore.setFlag(canon, 'pinned', action === 'pin');
+            if (action === 'markRead') { chatStore.setRead(canon, Date.now()); chatStore.setFlag(canon, 'manual_unread', false); }
+            if (action === 'markUnread') chatStore.setFlag(canon, 'manual_unread', true);
+            res.json({ ok: true });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
     // Star / unstar. Synced to the phone's starred messages (Baileys chatModify).
     app.post('/api/star', requireAuth, jsonParser, async (req, res) => {
         try {
@@ -1636,20 +1737,52 @@ function attachChatUI(app, deps) {
     // Calls from the `call` event. Only unanswered incoming calls are kept, as a
     // "Missed voice call" row in the chat they came from.
     // chats.upsert / chats.update / chats.set — keep the archived flag per chat.
-    function handleChats(list) {
+    function handleChats(list, source) {
         try {
-            for (const c of (Array.isArray(list) ? list : [])) {
-                if (!c?.id || typeof c.archived !== 'boolean') continue;
+            const items = Array.isArray(list) ? list : [];
+            let flagged = 0, archived = 0;
+            for (const c of items) {
+                if (!c?.id) continue;
+                if ('pinned' in c) chatStore.setFlag(canonicalChat(c.id), 'pinned', !!c.pinned);
+                if (typeof c.archived !== 'boolean') continue;
+                flagged++;
+                if (c.archived) archived++;
                 chatStore.setArchived(canonicalChat(c.id), c.archived);
             }
+            // Counts only (no chat IDs) so the log shows whether WhatsApp sends archive flags.
+            console.log(`[webchat] ${source || 'chats'} event: ${items.length} chats, ${flagged} with archive flag, ${archived} archived`);
         } catch (_) {}
     }
 
     function logCall(call) {
         try {
-            if (!call || (call.status !== 'timeout' && call.status !== 'reject')) return;
+            if (!call?.id || call.isGroup) return;
             const chatId = call.chatId || call.from;
-            if (!chatId || call.isGroup) return;
+            if (!chatId) return;
+            // Call history for the Calls tab.
+            const sock = getSock();
+            const fromDigits = digits(call.from);
+            const outgoing = !!fromDigits && (fromDigits === digits(sock?.user?.id) || fromDigits === digits(sock?.user?.lid));
+            const dir = outgoing ? 'outgoing' : 'incoming';
+            const video = !!call.isVideo;
+            // call.date is a Date (milliseconds) in Baileys. Only convert when it looks like seconds,
+            // otherwise the timestamp lands ~1000x in the future and the 3-minute expiry never runs.
+            const rawDate = call.date instanceof Date ? call.date.getTime() : Number(call.date);
+            const ts = rawDate > 1e12 ? rawDate : (rawDate > 0 ? rawDate * 1000 : Date.now());
+            const callChat = canonicalChat(chatId);
+            // Incoming rejects are calls the caller ended before you answered: WhatsApp shows them as missed.
+            const finalOutcome = {
+                accept: 'answered',
+                timeout: outgoing ? 'no answer' : 'missed',
+                reject: outgoing ? 'rejected' : 'missed',
+            }[call.status];
+            // Counts only (no numbers) so the logs show whether call events reach the bot.
+            console.log(`[webchat] call event: status=${call.status} ${dir} video=${video}`);
+            if (finalOutcome) chatStore.recordCall(call.id, callChat, dir, finalOutcome, video, ts, true);
+            else if (call.status === 'offer' || call.status === 'ringing') chatStore.recordCall(call.id, callChat, dir, 'ringing', video, ts, false);
+            else if (call.status === 'terminate') chatStore.recordCall(call.id, callChat, dir, 'ended', video, ts, false);
+
+            if (call.status !== 'timeout' && call.status !== 'reject') return;
             logMessage({
                 key: { id: 'CALL-' + String(call.id), remoteJid: chatId, fromMe: false },
                 message: { callLogMessage: { isVideo: !!call.isVideo } },
