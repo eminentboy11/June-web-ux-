@@ -79,6 +79,7 @@
   #cap-caption::placeholder{color:rgba(255,255,255,.55)}
   .cap-check{width:52px;height:52px;flex:none;border-radius:50%;border:0;background:var(--cyan);color:#001;font-size:1.3rem;font-weight:700;cursor:pointer}
   .nc-radio{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);flex:none;margin-left:auto}
+  .nc-radio.on{background:var(--cyan);border-color:var(--cyan);box-shadow:inset 0 0 0 4px var(--panel)}
   input,textarea{background:rgba(0,0,0,.35);border:1px solid rgba(0,255,224,.25);color:var(--text);
     padding:.5rem .7rem;font-size:.82rem;outline:none;border-radius:2px;font-family:inherit}
   input:focus,textarea:focus{border-color:var(--cyan)}
@@ -2134,7 +2135,11 @@ function camRow(jid, name, sub, onTap) {
   if (sub) text.appendChild(el('div', 'nc-sub', sub));
   row.appendChild(text);
   row.appendChild(el('span', 'nc-radio'));
-  row.addEventListener('click', onTap);
+  row.addEventListener('click', () => {
+    // Select (fills the circle), then tell the user sending is not built yet.
+    row.querySelector('.nc-radio').classList.toggle('on');
+    onTap();
+  });
   return row;
 }
 function renderCam() {
@@ -2142,7 +2147,7 @@ function renderCam() {
   const body = $('cam-body');
   body.textContent = '';
   const note = el('div', 'nc-note', '');
-  const soon = () => { note.textContent = 'Status posting is coming soon'; };
+  const soon = () => toast('Sending is coming soon');
   const people = state.chats.filter((c) => c.jid && !c.archived && /@(s\.whatsapp\.net|lid|g\.us)$/.test(c.jid));
   const isSelf = (c) => /\(You\)$/.test(c.name || '');
   const nameOf = (c) => c.name || c.number || c.jid.split('@')[0];
