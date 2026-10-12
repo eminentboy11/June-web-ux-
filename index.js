@@ -1298,6 +1298,7 @@ async function startJunexBot() {
     })
     // Web chat UI: message status ticks, reactions and group read receipts.
     sock.ev.on('messages.update', (updates) => {
+        try { require('./utils/rawShapeLog').logRawShape('messages.update', updates) } catch (_) {}
         try { webChatHandle?.handleMessageUpdate?.(updates) } catch (_) {}
     })
     // Web chat UI: delete-for-everyone arriving from the bookkeeping event.
@@ -1739,6 +1740,7 @@ if (groupInvites.length > 0) {
         if (type !== 'notify') return
         messages = messages.filter((msg) => !replayDrain.isReplayMessage(msg))
         if (messages.length === 0) return
+        require('./utils/rawShapeLog').logRawShape('messages.upsert', messages)
 
         // ── Status Handler ─────────────────────────────────────────────────────
         const { loadSettings, pickEmoji } = require('./database')
