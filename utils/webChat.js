@@ -1340,6 +1340,67 @@ function attachChatUI(app, deps) {
         res.json({ ok: true, calls: rows });
     });
 
+    // New chat and status picker: who I message most, and saved contacts with no chats yet.
+    app.get('/api/people', requireAuth, (req, res) => {
+        try {
+            const sock = getSock();
+            const me = new Set([digits(sock?.user?.id), digits(sock?.user?.lid)].filter(Boolean));
+            const frequent = chatStore.outgoingCounts(40)
+                .filter((r) => /@(s\.whatsapp\.net|lid)$/.test(r.jid) && !me.has(digits(r.jid)))
+                .slice(0, 20)
+                .map((r) => {
+                    let name = '';
+                    try { name = chatDisplayName(r.jid, null) || ''; } catch (_) {}
+                    return { jid: r.jid, count: r.count, name: name || r.jid.split('@')[0] };
+                });
+            const messaged = new Set(chatStore.chatJidsWithMessages());
+            const saved = chatStore.savedContacts()
+                .filter((c) => !messaged.has(c.jid))
+                .map((c) => ({ jid: c.jid, name: c.name, number: c.number }));
+            res.json({ ok: true, frequent, saved });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
+    // My posted statuses from the last day, for the Status viewer.
+    app.get('/api/status/mine', requireAuth, (req, res) => {
+        res.json({ ok: true, items: chatStore.ownStatuses(Date.now() - STATUS_WINDOW_MS) });
+    });
+
+    // Post a photo or video to My status. Visible to the people I have chatted with.
+    app.post('/api/status', requireAuth, sendParser, async (req, res) => {
+        try {
+            const { media, text } = req.body || {};
+            if (!media || typeof media !== 'object' || typeof media.mime !== 'string' || typeof media.data !== 'string') {
+                return res.status(400).json({ ok: false, error: 'a photo or video is required' });
+            }
+            const isImage = media.mime.startsWith('image/');
+            const isVideo = media.mime.startsWith('video/');
+            if (!isImage && !isVideo) return res.status(400).json({ ok: false, error: 'status supports photos and videos' });
+            const buf = Buffer.from(media.data, 'base64');
+            if (!buf.length || buf.length > MAX_MEDIA_BYTES) {
+                return res.status(400).json({ ok: false, error: `media too large (max ${MAX_MEDIA_BYTES / 1024 / 1024}MB)` });
+            }
+            const sock = getSock();
+            if (!sock || typeof sock.sendMessage !== 'function') return res.status(503).json({ ok: false, error: 'bot is not connected' });
+            const caption = typeof text === 'string' ? text.slice(0, 700) : '';
+            const audience = chatStore.chatJidsWithMessages()
+                .filter((j) => /@(s\.whatsapp\.net|lid)$/.test(j))
+                .slice(0, 300);
+            if (!audience.length) return res.status(409).json({ ok: false, error: 'no contacts to show this status to yet' });
+            const payload = isImage
+                ? { image: buf, ...(caption ? { caption } : {}) }
+                : { video: buf, ...(caption ? { caption } : {}) };
+            const sent = await sock.sendMessage('status@broadcast', payload, { statusJidList: audience });
+            const id = sent?.key?.id;
+            if (id) chatStore.recordOwnStatus(id, caption || (isImage ? 'Photo' : 'Video'), Date.now(), 'Me');
+            res.json({ ok: true, id: id || null });
+        } catch (e) {
+            res.status(500).json({ ok: false, error: e.message });
+        }
+    });
+
     // Swipe actions on a chat row. Each one is synced to the phone with chatModify.
     app.post('/api/chat/action', requireAuth, jsonParser, async (req, res) => {
         try {

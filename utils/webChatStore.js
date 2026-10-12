@@ -284,6 +284,48 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         return row ? row.n : 0;
     }
 
+    // How often I message each chat (my outgoing messages), most messaged first.
+    function outgoingCounts(limit = 30) {
+        return db.prepare(
+            `SELECT chat_jid, COUNT(*) AS n FROM webchat_messages
+              WHERE from_me = 1 AND deleted = 0 AND chat_jid != 'status@broadcast'
+                AND (chat_jid LIKE '%@s.whatsapp.net' OR chat_jid LIKE '%@lid')
+              GROUP BY chat_jid ORDER BY n DESC LIMIT ?`
+        ).all(Number(limit) || 30).map((r) => ({ jid: r.chat_jid, count: r.n }));
+    }
+
+    // Saved address-book contacts (name and number), from the phonebook.
+    function savedContacts() {
+        return Object.entries(phonebook)
+            .filter(([, v]) => v && v.saved && v.name)
+            .map(([num, v]) => ({ jid: num + '@s.whatsapp.net', number: num, name: v.name }));
+    }
+
+    // Every chat that has at least one stored message.
+    function chatJidsWithMessages() {
+        try {
+            return db.prepare(`SELECT DISTINCT chat_jid FROM webchat_messages WHERE chat_jid != 'status@broadcast'`)
+                .all().map((r) => r.chat_jid);
+        } catch (_) { return []; }
+    }
+
+    // Statuses I posted, kept so the Status viewer can show them.
+    function recordOwnStatus(msgId, text, ts, pushName) {
+        try {
+            db.prepare(
+                `INSERT OR IGNORE INTO webchat_messages (chat_jid, msg_id, from_me, sender, push_name, text, ts)
+                 VALUES ('status@broadcast', ?, 1, 'me', ?, ?, ?)`
+            ).run(String(msgId), pushName || '', text || '', Number(ts) || Date.now());
+        } catch (_) {}
+    }
+    function ownStatuses(sinceTs) {
+        return db.prepare(
+            `SELECT msg_id, text, ts, push_name FROM webchat_messages
+              WHERE chat_jid = 'status@broadcast' AND from_me = 1 AND deleted = 0 AND ts > ?
+              ORDER BY ts ASC LIMIT 100`
+        ).all(Number(sinceTs) || 0).map((r) => ({ id: r.msg_id, text: r.text || '', ts: r.ts, pushName: r.push_name || '' }));
+    }
+
     // Channels (newsletters): one entry per channel, newest first.
     function channelList(limit = 100) {
         return db.prepare(
@@ -592,6 +634,11 @@ function createWebChatStore({ dbPath, phonebookPath }) {
         getFlag,
         latestKey,
         recordCall,
+        outgoingCounts,
+        savedContacts,
+        chatJidsWithMessages,
+        recordOwnStatus,
+        ownStatuses,
         listCalls,
         flush,
         close,

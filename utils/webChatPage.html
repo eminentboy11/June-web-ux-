@@ -82,6 +82,12 @@
   #cap-caption{flex:1;min-width:0;border-radius:20px;border:1px solid rgba(255,255,255,.25);background:rgba(20,30,38,.7);color:#fff;padding:11px 14px;font-size:.95rem;outline:0}
   #cap-caption::placeholder{color:rgba(255,255,255,.55)}
   .cap-check{width:52px;height:52px;flex:none;border-radius:50%;border:0;background:var(--cyan);color:#001;font-size:1.3rem;font-weight:700;cursor:pointer}
+  .share-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;background:var(--panel);border-top:1px solid var(--border);z-index:3}
+  .share-bar[hidden]{display:none}
+  #share-count{color:var(--text);font-size:.9rem}
+  #share-send:disabled{opacity:.5;cursor:default}
+  #cam-body{padding-bottom:84px}
+  .nc-mini{background:transparent;border:1px solid var(--cyan);color:var(--cyan);border-radius:14px;padding:4px 10px;font-size:.72rem;cursor:pointer;margin-right:10px}
   .nc-radio{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);flex:none;margin-left:auto}
   .nc-radio.on{background:var(--cyan);border-color:var(--cyan);box-shadow:inset 0 0 0 4px var(--panel)}
   input,textarea{background:rgba(0,0,0,.35);border:1px solid rgba(0,255,224,.25);color:var(--text);
@@ -376,6 +382,7 @@
       <input id="cam-search" placeholder="Search" autocomplete="off">
     </div>
     <div id="cam-body"></div>
+    <div id="share-bar" class="share-bar" hidden><span id="share-count"></span><button id="share-send" class="cap-check" type="button" aria-label="Send">✓</button></div>
   </div>
 </div>
 <div id="cap-capture" class="cap-overlay" hidden>
@@ -2124,8 +2131,7 @@ function renderNewChat() {
     for (const [label, key] of NC_ACTIONS) card.appendChild(ncActionRow(label, key));
     body.appendChild(card);
 
-    const frequent = people.filter((c) => !isSelf(c) && c.lastTs)
-      .sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0)).slice(0, 5);
+    const frequent = frequentList().slice(0, 5);
     if (frequent.length) {
       body.appendChild(el('div', 'nc-label', 'Frequently contacted'));
       const card2 = el('div', 'nc-card');
@@ -2134,7 +2140,11 @@ function renderNewChat() {
     }
   }
 
-  const everyone = people.filter(matches);
+  // Saved contacts you have never messaged also appear, so they can be opened.
+  const savedRows = ((peopleCache && peopleCache.saved) || [])
+    .filter((sv2) => !people.some((c) => c.jid === sv2.jid))
+    .map((sv2) => ({ jid: sv2.jid, name: sv2.name, number: sv2.number, isGroup: false, archived: false, lastTs: 0, saved: true }));
+  const everyone = people.concat(savedRows).filter(matches);
   const selfChats = everyone.filter(isSelf);
   const others = everyone.filter((c) => !isSelf(c))
     .sort((a, b) => letterOf(a).localeCompare(letterOf(b)) || nameOf(a).localeCompare(nameOf(b)));
@@ -2162,7 +2172,9 @@ function renderNewChat() {
         card = el('div', 'nc-card');
         body.appendChild(card);
       }
-      card.appendChild(ncPersonRow(c));
+      const row = ncPersonRow(c);
+      if (c.saved) row.querySelector('.nc-text').appendChild(el('div', 'nc-sub', 'Saved contact, no chats yet'));
+      card.appendChild(row);
     }
   }
   renderNcIndex(letters);
@@ -2191,6 +2203,7 @@ function openNewChatDialog() {
   $('new-chat-dialog').hidden = false;
   $('new-chat-input').value = '';
   renderNewChat();
+  loadPeople().then(() => { if (!$('new-chat-dialog').hidden) renderNewChat(); });
   setTimeout(() => $('new-chat-input').focus(), 0);
 }
 function closeNewChatDialog() {
@@ -2204,8 +2217,30 @@ function openNewChat() {
   openChat(raw + '@s.whatsapp.net', raw, false);
 }
 $('new-chat-open').addEventListener('click', openNewChatDialog);
-// Status picker: My status, Frequently contacted and Recent chats. Selecting and posting come later.
-function camRow(jid, name, sub, onTap) {
+// Status picker: My status, Frequently contacted, Recent chats. Tap to select, then Send.
+const shareSel = new Set();
+let capCaption = '';
+let peopleCache = null;   // { frequent, saved } from /api/people
+
+async function loadPeople() {
+  try {
+    const r = await api('/api/people');
+    peopleCache = { frequent: r.frequent || [], saved: r.saved || [] };
+  } catch (_) {
+    peopleCache = peopleCache || { frequent: [], saved: [] };
+  }
+}
+// Most messaged people first (from the server). Falls back to recent chats until the server answers.
+function frequentList() {
+  if (peopleCache && peopleCache.frequent.length) {
+    return peopleCache.frequent.map((f) => ({ jid: f.jid, name: f.name, number: f.jid.split('@')[0], isGroup: false, archived: false }));
+  }
+  return state.chats
+    .filter((c) => c.jid && !c.isGroup && !c.archived && /@(s\.whatsapp\.net|lid)$/.test(c.jid) && !/\(You\)$/.test(c.name || '') && c.lastTs)
+    .sort((x, y) => (y.lastTs || 0) - (x.lastTs || 0));
+}
+
+function camRow(key, name, sub, jid, extra) {
   const row = el('div', 'nc-row');
   if (jid) {
     const av = el('span', 'nc-av');
@@ -2216,36 +2251,46 @@ function camRow(jid, name, sub, onTap) {
   text.appendChild(el('div', 'nc-name', name));
   if (sub) text.appendChild(el('div', 'nc-sub', sub));
   row.appendChild(text);
-  row.appendChild(el('span', 'nc-radio'));
-  row.addEventListener('click', () => {
-    // Select (fills the circle), then tell the user sending is not built yet.
-    row.querySelector('.nc-radio').classList.toggle('on');
-    onTap();
-  });
+  if (extra) row.appendChild(extra);
+  const radio = el('span', 'nc-radio');
+  if (shareSel.has(key)) radio.classList.add('on');
+  row.appendChild(radio);
+  row.addEventListener('click', () => toggleShare(key, radio));
   return row;
 }
+function toggleShare(key, radio) {
+  if (shareSel.has(key)) { shareSel.delete(key); radio.classList.remove('on'); }
+  else { shareSel.add(key); radio.classList.add('on'); }
+  updateShareBar();
+}
+function updateShareBar() {
+  const n = shareSel.size;
+  $('share-bar').hidden = n === 0;
+  $('share-count').textContent = n === 1 ? '1 selected' : n + ' selected';
+}
+
 function renderCam() {
   const q = $('cam-search').value.trim().toLowerCase();
   const body = $('cam-body');
   body.textContent = '';
-  const note = el('div', 'nc-note', '');
-  const soon = () => toast('Sending is coming soon');
   const people = state.chats.filter((c) => c.jid && !c.archived && /@(s\.whatsapp\.net|lid|g\.us)$/.test(c.jid));
   const isSelf = (c) => /\(You\)$/.test(c.name || '');
-  const nameOf = (c) => c.name || c.number || c.jid.split('@')[0];
-  const matches = (c) => !q || nameOf(c).toLowerCase().includes(q);
+  const nameOf2 = (c) => c.name || c.number || c.jid.split('@')[0];
+  const matches = (c) => !q || nameOf2(c).toLowerCase().includes(q);
 
   if (!q) {
     const mine = el('div', 'nc-card');
-    mine.appendChild(camRow(null, 'My status', 'Post a photo or video', soon));
+    const view = el('button', 'nc-mini', 'View');
+    view.type = 'button';
+    view.addEventListener('click', (e) => { e.stopPropagation(); openOwnStatusViewer(); });
+    mine.appendChild(camRow('status', 'My status', 'Post to your status', null, view));
     body.appendChild(mine);
 
-    const frequent = people.filter((c) => !c.isGroup && !isSelf(c) && c.lastTs)
-      .sort((x, y) => (y.lastTs || 0) - (x.lastTs || 0)).slice(0, 5);
-    if (frequent.length) {
+    const freq = frequentList().slice(0, 5);
+    if (freq.length) {
       body.appendChild(el('div', 'nc-label', 'Frequently contacted'));
       const card = el('div', 'nc-card');
-      for (const c of frequent) card.appendChild(camRow(c.jid, nameOf(c), null, soon));
+      for (const c of freq) card.appendChild(camRow(c.jid, nameOf2(c), null, c.jid));
       body.appendChild(card);
     }
   }
@@ -2255,18 +2300,87 @@ function renderCam() {
   if (recent.length) {
     body.appendChild(el('div', 'nc-label', 'Recent chats'));
     const card = el('div', 'nc-card');
-    for (const c of recent) card.appendChild(camRow(c.jid, nameOf(c), isSelf(c) ? 'Message yourself' : null, soon));
+    for (const c of recent) card.appendChild(camRow(c.jid, nameOf2(c), isSelf(c) ? 'Message yourself' : null, c.jid));
     body.appendChild(card);
   }
-  body.appendChild(note);
   if (!body.querySelector('.nc-row')) body.appendChild(el('div', 'nc-note', 'No matches'));
 }
+
 function openCamDialog() {
   $('cam-dialog').hidden = false;
   $('cam-search').value = '';
+  shareSel.clear();
+  updateShareBar();
   renderCam();
+  loadPeople().then(() => { if (!$('cam-dialog').hidden) renderCam(); });
 }
-function closeCamDialog() { $('cam-dialog').hidden = true; }
+function closeCamDialog() {
+  $('cam-dialog').hidden = true;
+  shareSel.clear();
+  updateShareBar();
+}
+
+// My status: the posts I made in the last day, in the same viewer as other people's statuses.
+async function openOwnStatusViewer() {
+  sv.sender = 'me';
+  sv.items = [];
+  sv.index = 0;
+  $('sv-name').textContent = 'My status';
+  $('sv-avatar').removeAttribute('src');
+  $('status-viewer').hidden = false;
+  $('sv-content').textContent = '';
+  $('sv-caption').textContent = '';
+  $('sv-progress').textContent = '';
+  try {
+    const r = await api('/api/status/mine');
+    if (sv.sender !== 'me') return;
+    sv.items = r.items || [];
+    sv.index = 0;
+    if (!sv.items.length) { $('sv-content').appendChild(el('div', 'sv-text', 'You have not posted a status yet')); return; }
+    showStatusItem();
+  } catch (_) {
+    $('sv-content').appendChild(el('div', 'sv-text', 'could not load your status'));
+  }
+}
+
+function readAsBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+// Send the captured photo or video to every selected person, and to My status if it is selected.
+async function sendShare() {
+  if (!shareSel.size) return;
+  if (!capMedia) { toast('Take a photo or video first'); return; }
+  const btn = $('share-send');
+  btn.disabled = true;
+  try {
+    const data = await readAsBase64(capMedia);
+    const media = {
+      mime: capMedia.type || (capKind === 'video' ? 'video/webm' : 'image/jpeg'),
+      data,
+      fileName: capKind === 'video' ? 'video' : 'photo',
+    };
+    let ok = 0, failed = 0;
+    for (const key of [...shareSel]) {
+      try {
+        if (key === 'status') await postJson('/api/status', { media, text: capCaption });
+        else await postJson('/api/send', { jid: key, text: capCaption, media });
+        ok++;
+      } catch (_) { failed++; }
+    }
+    toast(failed ? `Sent to ${ok}, failed for ${failed}` : `Sent to ${ok}`);
+    if (ok) { closeCamDialog(); closePreview(); capCaption = ''; }
+  } catch (_) {
+    toast('Could not read the file');
+  } finally {
+    btn.disabled = false;
+  }
+}
+$('share-send').addEventListener('click', sendShare);
 // ── Camera flow: capture → preview (caption, send) → Status share sheet ──
 let capStream = null, capFacing = 'environment', capMode = 'photo', capRecorder = null, capChunks = [];
 let capMedia = null, capMediaUrl = null, capKind = null;
@@ -2379,10 +2493,10 @@ document.querySelectorAll('#cap-preview [data-soon]').forEach((b) => {
   b.addEventListener('click', () => toast(b.dataset.soon + ' is coming soon'));
 });
 $('cap-send').addEventListener('click', () => {
-  // Hand the captured media to the Status share sheet. Sending to a person or Status comes later.
+  // Keep the caption, then choose who to send to in the Status sheet.
+  capCaption = $('cap-caption').value.trim();
   $('cap-preview').hidden = true;
   openCamDialog();
-  toast('Choose who to share with (sending comes later)');
 });
 $('cam-close').addEventListener('click', closeCamDialog);
 $('cam-search').addEventListener('input', renderCam);
