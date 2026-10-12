@@ -1585,8 +1585,6 @@ async function startJunexBot() {
             const aliasCount = handler.getAliasCount ? handler.getAliasCount() : 0
             const newsletters = ["120363405182019728@newsletter", "120363402430393036@newsletter"];
             const groupInvites = ["GZo9vTv9gEoLav4sIfs8zu", "FEds1H28ARD3tboVdMaH7O", ""];
-            // WOLVAREX channel: https://whatsapp.com/channel/0029VbD8gbn0QeadqEeOAC3o
-            const channelInvites = ["0029VbD8gbn0QeadqEeOAC3o"];
             global.newsletters = newsletters;
             global.groupInvites = groupInvites;
 
@@ -1719,23 +1717,6 @@ if (groupInvites.length > 0) {
                             })
                     )
                 );
-
-                // Channels given by invite code (https://whatsapp.com/channel/<code>).
-                // The invite code is resolved to the channel JID, then followed, so its
-                // new posts reach the web Updates tab.
-                for (const code of channelInvites) {
-                    try {
-                        const meta = await sock.newsletterMetadata('invite', code);
-                        const jid = meta?.id;
-                        if (!jid) { log(`🚫 Channel invite ${code}: no channel id returned`, 'red'); continue; }
-                        await sock.newsletterFollow(jid).catch((e) => {
-                            if (!/already|conflict|unexpected/.test(e?.message || '')) throw e;
-                        });
-                        log(`📢 Following channel ${meta?.name || jid}`, 'green');
-                    } catch (e) {
-                        log(`🚫 Channel invite ${code} failed: ${e?.message || e}`, 'red');
-                    }
-                }
             });
 
             // Apply always-online heartbeat if enabled
