@@ -349,6 +349,17 @@
     <div id="nc-body"></div>
   </div>
 </div>
+<div id="nc-screen" class="nc-overlay" hidden>
+  <div class="nc-sheet" role="dialog" aria-modal="true" aria-labelledby="nc-screen-title">
+    <div class="nc-top">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="nc-screen-back" class="nc-close" type="button" aria-label="Back">←</button>
+        <h2 id="nc-screen-title"></h2>
+      </div>
+    </div>
+    <div id="nc-screen-body"></div>
+  </div>
+</div>
 <div id="cam-dialog" class="nc-overlay" hidden>
   <div class="nc-sheet" role="dialog" aria-modal="true" aria-label="Status">
     <div class="nc-top">
@@ -2029,9 +2040,30 @@ function ncActionRow(label, key) {
   text.appendChild(el('div', 'nc-name', label));
   row.appendChild(text);
   // Features for these rows come in later steps; for now they only say so.
-  row.addEventListener('click', () => { ncNote(label + ' is coming soon'); });
+  row.addEventListener('click', () => openNcScreen(key));
   return row;
 }
+
+// Each action row has its own screen. Layout only for now; the features come in later steps.
+const NC_SCREENS = {
+  group: { title: 'New group', text: 'Create a group and add people to it.' },
+  contact: { title: 'New contact', text: 'Save a new phone number as a contact.' },
+  community: { title: 'New community', text: 'Create a community with several groups.' },
+  broadcast: { title: 'New broadcast', text: 'Send one message to many people at once.' }
+};
+function openNcScreen(key) {
+  const info = NC_SCREENS[key];
+  if (!info) return;
+  $('nc-screen-title').textContent = info.title;
+  const body = $('nc-screen-body');
+  body.textContent = '';
+  body.appendChild(el('div', 'nc-note', info.text));
+  body.appendChild(el('div', 'nc-note', 'Coming soon'));
+  $('nc-screen').hidden = false;
+}
+function closeNcScreen() { $('nc-screen').hidden = true; }
+$('nc-screen-back').addEventListener('click', closeNcScreen);
+$('nc-screen').addEventListener('click', (e) => { if (e.target.id === 'nc-screen') closeNcScreen(); });
 
 function ncNote(text) {
   const body = $('nc-body');
