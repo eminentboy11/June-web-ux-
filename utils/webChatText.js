@@ -87,9 +87,23 @@ function protoTypeOf(proto) {
     return NaN;
 }
 
+// The encrypted-edit block (secretEncryptedMessage) can sit under any wrapper
+// (ephemeral, edited, etc.), so search the body a few levels deep.
+function findSecretEnc(body, depth = 0) {
+    if (!body || typeof body !== 'object' || depth > 4) return null;
+    if (body.secretEncryptedMessage) return body.secretEncryptedMessage;
+    for (const k of Object.keys(body)) {
+        const v = body[k];
+        if (!v || typeof v !== 'object' || Buffer.isBuffer(v) || v instanceof Uint8Array) continue;
+        const found = findSecretEnc(v, depth + 1);
+        if (found) return found;
+    }
+    return null;
+}
+
 // Edit whose new text is encrypted (secretEncryptedMessage, secretEncType MESSAGE_EDIT).
 function secretEditOf(inner) {
-    const sem = inner?.secretEncryptedMessage;
+    const sem = findSecretEnc(inner);
     return sem && sem.secretEncType === 'MESSAGE_EDIT' ? sem : null;
 }
 
@@ -291,7 +305,7 @@ function noticeOf(inner, outerKey) {
 // in the chat. The target message carries the deleted / edited state instead.
 function isSilentRow(m) {
     const inner = unwrapMessage(m?.message || {});
-    return !!(inner.protocolMessage || secretEditOf(inner));
+    return !!(inner.protocolMessage || findSecretEnc(inner));
 }
 
 // Slim DTO sent to the browser. Media messages carry a descriptor so the page
