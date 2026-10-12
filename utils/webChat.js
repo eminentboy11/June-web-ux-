@@ -1200,8 +1200,9 @@ function attachChatUI(app, deps) {
             if (text && (Array.from(text).length > 8 || !/\S/.test(text))) {
                 return res.status(400).json({ ok: false, error: 'invalid emoji' });
             }
-            const msg = store?.messages?.get(jid)?.get(msgId);
-            if (!msg) {
+            // Recent store first, then the SQLite index (empty recent store after a restart).
+            const found = findStored(jid, msgId);
+            if (!found) {
                 return res.status(404).json({ ok: false, error: 'message not in recent store' });
             }
             const sock = getSock();
@@ -1209,7 +1210,7 @@ function attachChatUI(app, deps) {
                 return res.status(503).json({ ok: false, error: 'bot is not connected' });
             }
             // An empty emoji removes our reaction (WhatsApp semantics).
-            await sock.sendMessage(jid, { react: { text, key: msg.key } });
+            await sock.sendMessage(found.msg.key.remoteJid, { react: { text, key: found.msg.key } });
             const reactions = applyReactionUpdate(jid, msgId, text, 'me');
             res.json({
                 ok: true,
