@@ -35,16 +35,15 @@ function createArchiveCapture() {
         write(chunk) {
             if (!open) return;
             try {
+                // No filters: every outgoing and incoming node in the window, in full.
                 const rec = JSON.parse(chunk);
                 if (rec.msg !== 'xml send' && rec.msg !== 'recv xml') return;
-                const s = summarize(rec.msg === 'xml send' ? 'out' : 'in', rec.xml);
-                if (!s) return;
-                const line = `[archive-capture] ${JSON.stringify(s)}`;
-                console.log(line);
+                const dir = rec.msg === 'xml send' ? 'OUT' : 'IN';
+                console.log(`[archive-capture ${dir}] ${rec.xml}`);
             } catch (_) {}
         },
     });
-    function start(ms = 60000, log = console.log) {
+    function start(ms = 120000, log = console.log) {
         open = true;
         logger.level = 'trace';
         log(`[archive-capture] window open for ${Math.round(ms / 1000)}s`);

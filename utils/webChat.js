@@ -1534,7 +1534,7 @@ function attachChatUI(app, deps) {
             }[action];
             global.lastWebChatAction = `${action} @ ${new Date().toISOString()}`;
             try {
-                if (isArchiveAction) global.archiveCapture?.start(60000);
+                if (isArchiveAction) global.archiveCapture?.start(120000);
                 if (isArchiveAction) watchArchiveReply(sock, action, target, lastMessages?.[0]);
                 await sock.chatModify(modify, target);
                 if (isArchiveAction) console.log(`[archive-debug] ${action}: chatModify resolved (WhatsApp returned a result for the patch)`);
