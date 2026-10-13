@@ -1451,12 +1451,24 @@ function attachChatUI(app, deps) {
             if (typeof sock.chatModify !== 'function') return res.status(501).json({ ok: false, error: 'chat actions are not supported by this bot version' });
 
             const canon = getJidMap().canonical(jid);
+            // Archive state is keyed by the address the phone uses for the chat. For 1:1 chats
+            // that is the LID, not the phone number, so a patch sent under the number is accepted
+            // but never shows on the phone. Send archive/unarchive under the LID.
+            const isArchiveAction = action === 'archive' || action === 'unarchive';
+            const addresses = getJidMap().related(canon);
+            let target = canon;
+            if (isArchiveAction && !canon.endsWith('@g.us')) {
+                const lid = addresses.find((a) => a.endsWith('@lid'));
+                if (!lid) return res.status(409).json({ ok: false, error: 'WhatsApp address (LID) for this chat is not known yet, so nothing was changed' });
+                target = lid;
+            }
+            const orderedAddresses = [target, ...addresses.filter((a) => a !== target)];
             // WhatsApp needs the newest message to sync archive and read state.
             let lastMessages = null;
             if (['archive', 'unarchive', 'markRead', 'markUnread'].includes(action)) {
                 // WhatsApp can log every linked device out if chatModify gets incomplete data
                 // (Baileys docs). So the last message must be complete, or the action is skipped.
-                for (const k of getJidMap().related(canon)) {
+                for (const k of orderedAddresses) {
                     const msgs = store?.messages?.get(k);
                     if (!msgs || !msgs.size) continue;
                     const last = Array.from(msgs.values()).filter((m) => m?.key).pop();
@@ -1465,7 +1477,7 @@ function attachChatUI(app, deps) {
                 }
                 // Archived chats are often not in memory any more; use the newest stored message.
                 if (!lastMessages) {
-                    for (const k of getJidMap().related(canon)) {
+                    for (const k of orderedAddresses) {
                         const lk = chatStore.latestKey(k);
                         if (!lk) continue;
                         const participant = lk.sender && lk.sender !== k ? lk.sender : null;
@@ -1486,7 +1498,7 @@ function attachChatUI(app, deps) {
             }[action];
             global.lastWebChatAction = `${action} @ ${new Date().toISOString()}`;
             try {
-                await sock.chatModify(modify, canon);
+                await sock.chatModify(modify, target);
             } catch (err) {
                 throw err;
             }
