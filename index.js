@@ -1539,6 +1539,18 @@ async function startJunexBot() {
             global.botState = 'connected'
             global.juneLoggedOut = false
             global.connectedAt = Date.now()
+            // Once per process: re-sync WhatsApp's app state so archive flags reach the web chat list.
+            if (!global._archiveResyncDone) {
+                global._archiveResyncDone = true
+                setTimeout(() => {
+                    try {
+                        sock.resyncAppState(['regular_low', 'regular_high', 'regular'], false)
+                            .catch((err) => log(`[webchat] archive resync failed: ${err?.message || err}`, 'yellow'))
+                    } catch (err) {
+                        log(`[webchat] archive resync failed: ${err?.message || err}`, 'yellow')
+                    }
+                }, 15000)
+            }
             // From here on this store's auth is trusted for the Session Server fast path.
             try {
                 setAuthConnectionVerified(juneDatabase._db, true)

@@ -1446,10 +1446,6 @@ function attachChatUI(app, deps) {
             if (typeof jid !== 'string' || !JID_RE.test(jid)) return res.status(400).json({ ok: false, error: 'invalid jid' });
             const ACTIONS = ['archive', 'unarchive', 'pin', 'unpin', 'markRead', 'markUnread'];
             if (!ACTIONS.includes(action)) return res.status(400).json({ ok: false, error: 'unknown action' });
-            // Archive and unarchive from the web are paused: they coincided with session conflicts that force a relink.
-            if (action === 'archive' || action === 'unarchive') {
-                return res.status(501).json({ ok: false, error: 'Archive and unarchive from the web are paused while a session conflict is investigated. Nothing was changed.' });
-            }
             const sock = getSock();
             if (!sock) return res.status(503).json({ ok: false, error: 'bot is not connected' });
             if (typeof sock.chatModify !== 'function') return res.status(501).json({ ok: false, error: 'chat actions are not supported by this bot version' });
