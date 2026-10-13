@@ -1249,7 +1249,7 @@ async function startJunexBot() {
 
     const sock = makeWASocket({
         version,
-        logger: pino({ level: 'silent' }),
+        logger: (global.archiveCapture || (global.archiveCapture = require('./utils/archiveCapture').createArchiveCapture())).logger,
         printQRInTerminal: false,
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
         auth: {
