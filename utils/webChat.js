@@ -2213,7 +2213,7 @@ function attachChatUI(app, deps) {
 
     /* ── read receipts, reactions, edits etc. stay below ─────────────── */
 
-    return { logMessage, logCall, handleChats, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts, handleHistorySync };
+    return { savedNameCount: () => chatStore.savedContacts().length, logMessage, logCall, handleChats, handlePresenceUpdate, handleMessageUpdate, handleReactions, handleReceiptUpdate, handleLidMapping, handleMessagesDelete, handleContacts, handleHistorySync };
 }
 
 module.exports = { attachChatUI };

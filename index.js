@@ -1551,6 +1551,18 @@ async function startJunexBot() {
                     }
                 }, 15000)
             }
+            // Once per process: if the saved-name phonebook is missing, ask WhatsApp for the full contact list.
+            if (!global._contactSnapshotChecked) {
+                global._contactSnapshotChecked = true
+                setTimeout(() => {
+                    require('./utils/contactSnapshot').refreshContactSnapshot({
+                        sock,
+                        authState,
+                        savedNameCount: () => webChatHandle?.savedNameCount?.() ?? 0,
+                        log: (m) => log(m, 'cyan'),
+                    }).catch((err) => log(`[contacts-sync] snapshot failed: ${err?.message || err}`, 'yellow'))
+                }, 30000)
+            }
             // From here on this store's auth is trusted for the Session Server fast path.
             try {
                 setAuthConnectionVerified(juneDatabase._db, true)
