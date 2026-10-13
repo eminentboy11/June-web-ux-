@@ -14,3 +14,13 @@ test('summarizes an error reply and ignores unrelated traffic', () => {
     assert.equal(s.error, '404 item-not-found');
     assert.equal(summarize('out', '<iq id="x" xmlns="usync" type="get"/>'), null);
 });
+
+test('reads Baileys single-quoted XML, which is what the socket actually writes', () => {
+    const out = "<iq id='33778.11586-95' to='s.whatsapp.net' type='set' xmlns='w:sync:app:state'>\n\t<sync>\n\t\t<collection name='regular_low' version='5' return_snapshot='false'/>\n\t</sync>\n</iq>";
+    const s = summarize('out', out);
+    assert.equal(s.id, '33778.11586-95');
+    assert.equal(s.collection, 'regular_low');
+    assert.equal(s.version, '5');
+    const inn = "<iq id='33778.11586-89' type='error' from='s.whatsapp.net'>\n\t<error code='404' text='item-not-found'/>\n</iq>";
+    assert.equal(summarize('in', inn).error, '404 item-not-found');
+});

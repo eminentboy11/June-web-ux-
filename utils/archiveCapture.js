@@ -12,7 +12,7 @@ function attrs(xml, tag) {
     const m = String(xml || '').match(new RegExp(`<${tag}\\b([^>]*)>`));
     const out = {};
     if (!m) return out;
-    for (const a of m[1].matchAll(/(\w[\w-]*)="([^"]*)"/g)) out[a[1]] = a[2];
+    for (const a of m[1].matchAll(/(\w[\w-]*)=(["'])(.*?)\2/g)) out[a[1]] = a[3];
     return out;
 }
 
@@ -20,10 +20,10 @@ function attrs(xml, tag) {
 function summarize(direction, xml) {
     const iq = attrs(xml, 'iq');
     const coll = attrs(xml, 'collection');
-    const err = String(xml || '').match(/<error\b([^>]*)\/?>/);
-    const errText = err ? (err[1].match(/code="(\d+)"/) || [])[1] + ' ' + ((err[1].match(/text="([^"]*)"/) || [])[1] || '') : null;
+    const errAttrs = attrs(xml, 'error');
+    const errText = errAttrs.code ? `${errAttrs.code} ${errAttrs.text || ''}`.trim() : null;
     if (direction === 'out' && !/w:sync:app:state/.test(xml || '')) return null;
-    if (direction === 'in' && !/w:sync:app:state/.test(xml || '') && !err) return null;
+    if (direction === 'in' && !/w:sync:app:state/.test(xml || '') && !errText) return null;
     return { dir: direction, id: iq.id, type: iq.type, xmlns: iq.xmlns || null, collection: coll.name || null, version: coll.version || null, error: errText };
 }
 
