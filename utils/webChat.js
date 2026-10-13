@@ -60,6 +60,10 @@ const MEDIA_CACHE_TTL_MS = 30 * 60 * 1000;
 const MEDIA_CACHE_MAX_ENTRIES = 100;
 const MEDIA_CACHE_MAX_BYTES = 200 * 1024 * 1024;
 const AVATAR_CACHE_TTL_MS = 60 * 60 * 1000;
+// WhatsApp answers 401/404 for many contacts (no picture, or not allowed to see it).
+// Remember those misses so the web list refresh does not ask again every time.
+const AVATAR_MISS_TTL_MS = 6 * 60 * 60 * 1000;
+const AVATAR_ERROR_MISS_TTL_MS = 5 * 60 * 1000;
 const AVATAR_CACHE_MAX = 200;
 const PRESENCE_TTL_MS = 20 * 1000;
 const JID_RE = /^[0-9]{5,20}@(s\.whatsapp\.net|g\.us|lid|newsletter)$/;
@@ -714,21 +718,45 @@ function attachChatUI(app, deps) {
 
     /* ── avatars ────────────────────────────────────────────────────────── */
 
+    const avatarMisses = new Map(); // jid -> { until }
+    const avatarInflight = new Map(); // jid -> Promise
+
     async function resolveAvatar(jid) {
         const cached = avatarCache.get(jid);
         if (cached && Date.now() - cached.ts < AVATAR_CACHE_TTL_MS) return cached;
+        const miss = avatarMisses.get(jid);
+        if (miss && Date.now() < miss.until) return null;
+        if (avatarInflight.has(jid)) return avatarInflight.get(jid);
+        const p = fetchAvatar(jid).finally(() => avatarInflight.delete(jid));
+        avatarInflight.set(jid, p);
+        return p;
+    }
+
+    async function fetchAvatar(jid) {
+        const markMiss = (ttl) => {
+            avatarMisses.set(jid, { until: Date.now() + ttl });
+            if (avatarMisses.size > AVATAR_CACHE_MAX) avatarMisses.delete(avatarMisses.keys().next().value);
+            return null;
+        };
         const sock = getSock();
         if (!sock || typeof sock.profilePictureUrl !== 'function') return null;
-        const chanMeta = jid.endsWith('@newsletter') ? await loadChannelMeta(jid) : null;
-        const url = chanMeta?.pictureUrl || await sock.profilePictureUrl(jid, 'image');
-        if (!url) return null;
-        const resp = await withTimeout(fetch(url), 8000);
-        if (!resp.ok) return null;
+        let url;
+        try {
+            const chanMeta = jid.endsWith('@newsletter') ? await loadChannelMeta(jid) : null;
+            url = chanMeta?.pictureUrl || await sock.profilePictureUrl(jid, 'image');
+        } catch (e) {
+            const code = e?.output?.statusCode;
+            return markMiss(code === 401 || code === 404 ? AVATAR_MISS_TTL_MS : AVATAR_ERROR_MISS_TTL_MS);
+        }
+        if (!url) return markMiss(AVATAR_MISS_TTL_MS);
+        const resp = await withTimeout(fetch(url), 8000).catch(() => null);
+        if (!resp || !resp.ok) return markMiss(AVATAR_ERROR_MISS_TTL_MS);
         const buf = Buffer.from(await resp.arrayBuffer());
-        if (!buf.length) return null;
+        if (!buf.length) return markMiss(AVATAR_ERROR_MISS_TTL_MS);
         const entry = { buf, mime: resp.headers.get('content-type') || 'image/jpeg', ts: Date.now() };
         if (avatarCache.size >= AVATAR_CACHE_MAX) avatarCache.delete(avatarCache.keys().next().value);
         avatarCache.set(jid, entry);
+        avatarMisses.delete(jid);
         return entry;
     }
 
