@@ -1366,6 +1366,42 @@ function attachChatUI(app, deps) {
         return [{ key, messageTimestamp: Math.floor(Number(tsMs) / 1000) }];
     }
 
+    // TEMP debug (archive): log what we sent and what WhatsApp answers on the regular_low
+    // app-state collection, so we can tell a dropped packet from an incomplete one.
+    function watchArchiveReply(sock, action, target, lastMsg) {
+        const ws = sock?.ws;
+        const k = lastMsg?.key || {};
+        console.log(`[archive-debug] ${action} sent: target=${target} collection=regular_low last=${k.id}/fromMe=${k.fromMe}/participant=${k.participant || '-'}/ts=${lastMsg?.messageTimestamp}`);
+        if (!ws || typeof ws.on !== 'function') { console.log('[archive-debug] no socket handle, cannot watch replies'); return () => {}; }
+        const started = Date.now();
+        let seen = 0;
+        const describe = (node) => {
+            const kids = Array.isArray(node?.content) ? node.content : [];
+            const sync = kids.find((c) => c?.tag === 'sync');
+            const coll = (sync && Array.isArray(sync.content)) ? sync.content.find((c) => c?.tag === 'collection') : null;
+            const err = kids.find((c) => c?.tag === 'error') || (coll && Array.isArray(coll.content) ? coll.content.find((c) => c?.tag === 'error') : null);
+            const name = coll?.attrs?.name;
+            return { type: node.attrs?.type, id: node.attrs?.id, collection: name, version: coll?.attrs?.version, collectionType: coll?.attrs?.type,
+                children: coll && Array.isArray(coll.content) ? coll.content.map((c) => c.tag).join(',') : '', error: err ? `${err.attrs?.code || ''} ${err.attrs?.text || ''}`.trim() : null };
+        };
+        const onFrame = (frame) => {
+            try {
+                if (!frame || frame instanceof Uint8Array || frame.tag !== 'iq') return;
+                const d = describe(frame);
+                if (d.collection !== 'regular_low' && !d.error) return;
+                seen++;
+                console.log(`[archive-debug] ${action} reply #${seen} after ${Date.now() - started}ms: ${JSON.stringify(d)}`);
+            } catch (_) {}
+        };
+        ws.on('frame', onFrame);
+        const timer = setTimeout(() => {
+            ws.off('frame', onFrame);
+            if (!seen) console.log(`[archive-debug] ${action}: no regular_low reply from WhatsApp within 15s (packet may not be acknowledged)`);
+        }, 15000);
+        if (timer.unref) timer.unref();
+        return () => {};
+    }
+
     // Calls tab: newest first, with a readable name for each chat.
     app.get('/api/calls', requireAuth, (req, res) => {
         const rows = chatStore.listCalls(100).map((c) => {
@@ -1498,8 +1534,11 @@ function attachChatUI(app, deps) {
             }[action];
             global.lastWebChatAction = `${action} @ ${new Date().toISOString()}`;
             try {
+                if (isArchiveAction) watchArchiveReply(sock, action, target, lastMessages?.[0]);
                 await sock.chatModify(modify, target);
+                if (isArchiveAction) console.log(`[archive-debug] ${action}: chatModify resolved (WhatsApp returned a result for the patch)`);
             } catch (err) {
+                if (isArchiveAction) console.log(`[archive-debug] ${action} failed before WhatsApp answered: ${err?.message || err}`);
                 throw err;
             }
 
