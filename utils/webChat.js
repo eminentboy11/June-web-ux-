@@ -596,7 +596,6 @@ function attachChatUI(app, deps) {
                 if (c?.notify) withNotify++;
                 if (c?.lid) withLid++;
             }
-            log(`[webchat] contacts (${source}): ${arr.length} entries, ${withName} with saved name, ${withNotify} with notify, ${withLid} with lid`);
         } catch (_) {}
     }
 
@@ -632,7 +631,6 @@ function attachChatUI(app, deps) {
         try {
             const { chats = [], contacts = [], messages = [] } = payload || {};
             const chatsWithName = (Array.isArray(chats) ? chats : []).filter((c) => c?.name && c?.id && !String(c.id).endsWith('@g.us') && !String(c.id).endsWith('@newsletter')).length;
-            log(`[webchat] history sync: ${chats.length} chats (${chatsWithName} individual chats with saved name), ${contacts.length} contacts, ${messages.length} messages`);
             handleContacts(contacts, 'history');
             for (const c of (Array.isArray(chats) ? chats : [])) {
                 if (!c?.id || !c.name) continue;
@@ -1491,14 +1489,11 @@ function attachChatUI(app, deps) {
                 markUnread: { markRead: false, lastMessages },
             }[action];
             global.lastWebChatAction = `${action} @ ${new Date().toISOString()}`;
-            console.log(`[webchat] chat action ${action}: sending (${lastMessages ? 'with last message' : 'no last message'})`);
             try {
                 await sock.chatModify(modify, canon);
             } catch (err) {
-                console.log(`[webchat] chat action ${action} failed: ${err?.message || err}`);
                 throw err;
             }
-            console.log(`[webchat] chat action ${action}: accepted by WhatsApp`);
 
             // Local state follows only after WhatsApp accepted the change.
             if (action === 'archive' || action === 'unarchive') chatStore.setArchived(canon, action === 'archive');
@@ -1877,8 +1872,6 @@ function attachChatUI(app, deps) {
                 timeout: outgoing ? 'no answer' : 'missed',
                 reject: outgoing ? 'rejected' : 'missed',
             }[call.status];
-            // Counts only (no numbers) so the logs show whether call events reach the bot.
-            console.log(`[webchat] call event: status=${call.status} ${dir} video=${video}`);
             if (finalOutcome) chatStore.recordCall(call.id, callChat, dir, finalOutcome, video, ts, true);
             else if (call.status === 'offer' || call.status === 'ringing') chatStore.recordCall(call.id, callChat, dir, 'ringing', video, ts, false);
             else if (call.status === 'terminate') chatStore.recordCall(call.id, callChat, dir, 'ended', video, ts, false);
@@ -2061,7 +2054,6 @@ function attachChatUI(app, deps) {
             if (ms) secret = typeof ms === 'string' ? ms : Buffer.from(ms).toString('base64');
         }
         if (!secret) {
-            console.log(`[WEBCHAT] edit ${id}: original message secret not found, cannot decrypt`);
             return;
         }
         const editor = [msg?.key?.remoteJid, msg?.key?.remoteJidAlt, msg?.key?.participant]
@@ -2072,7 +2064,6 @@ function attachChatUI(app, deps) {
             modSenders: [...new Set(editor)],
         });
         if (!plain) {
-            console.log(`[WEBCHAT] edit ${id}: could not decrypt`);
             return;
         }
         const text = messageText({ message: waProto.Message.decode(plain) });
